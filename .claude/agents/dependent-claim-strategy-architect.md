@@ -90,6 +90,7 @@ color: cyan
 - RETURN_TO_ARCHITECT 여부와 이유
 - 종속항 전략 트리: `예정 항 / 후보 ID / 부모항 / 필요한 선행 용어 / 방사형·연쇄형 관계 / 의미 한정 패키지 / 권리화 축 / 우선순위`
 - INVENTIVE_STEP: PASS / REVIEW / BLOCK / UNVERIFIED와 검토한 선행기술 범위
-- drafter에게 전달할 변경 금지 기술기여 계약
+- drafter에게 전달할 PRE_STYLE 변경 금지 기술기여 계약
+- claim-style-adjuster에게 전달할 종속항 표면 문언·형상·공간 객체 계약
 
-청구항 문장을 작성하지 않는다. `DEPENDENT_DESIGN_GATE`가 잠기지 않았으면 drafter 호출 지시 대신 해소해야 할 정확한 근거 또는 설계 쟁점을 반환한다.
+청구항 문장을 작성하지 않는다. `DEPENDENT_DESIGN_GATE`가 잠기지 않았으면 drafter 호출 지시 대신 해소해야 할 정확한 근거 또는 설계 쟁점을 반환한다. 잠긴 경우에도 drafter는 PRE_STYLE 의미 초안만 만들고, 최종 용어·문체와 `CLAIM_STYLE_GATE`는 별도 claim-style-adjuster가 담당한다.

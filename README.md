@@ -7,13 +7,14 @@
 - `CLAUDE.md`: 주 오케스트레이터의 우선순위, 활성 순서, 필수 검수 루프
 - `claim-architect`: 주골격·근거·최소충분 한정 설계
 - `dependent-claim-strategy-architect`: 독립항 LOCK 뒤 종속항 후보의 과제–특징–작동원리–효과를 검증하고 단순 도면 묘사를 배제
-- `claim-drafter`: 잠긴 독립항 설계 또는 종속항 기술기여 계약을 보존해 청구항 문언 작성
+- `claim-drafter`: 잠긴 독립항 설계 또는 종속항 기술기여 계약을 보존해 `PRE_STYLE` 의미 초안 작성
+- `claim-style-adjuster`: 의미 초안 뒤 `07_용어표현_출처게이트`와 `04_청구항_스타일가이드`를 적용해 범위 불변인 exact 문언과 `CLAIM_STYLE_GATE` 봉인
 - `syntax-scope-reviewer`: 용어 출처·통사·명제 트리·부모항 체인·권리범위 감사
 - `oa-strategy-reviewer`: 독립항 및 종속항 세트의 분리된 DRAFT·FINAL OA·회피설계 감사
 - `blind-claim-reconstruction-reviewer`: 파일·검색·웹 도구 없이 독립항 또는 부모항 체인을 포함한 개별 종속항 문언만으로 비특허 기술 독자의 관계·형상 snapshot을 봉인하는 독립 감사
 - `picture-claim-reconstruction-reviewer`: 봉인 snapshot을 DESIGN_GATE 또는 목표 `DC-NN`·DEPENDENT_DESIGN_GATE·도면과 비교하는 최종 관계·형상 감사
 
-청구항 작성은 `AUTHORING_DRAFT`, 출원용 최종 검증은 `FINALIZATION`으로 분리한다. 독립항은 같은 candidate revision을 용어·표현 출처 게이트 → syntax → OA → blind → 기준 비교 순서로 검수한다. 유효한 독립항 LOCK 뒤 종속항을 요청하면 별도 `dependent_set_id`에 대해 기술기여 설계 → 문언 작성 → dependent success → syntax → OA → 종속항별 blind → 기준·도면 비교를 수행한다. `DEPENDENT_DESIGN_GATE`가 잠기기 전에는 종속항을 작성하지 않고, `DEPENDENT_RECONSTRUCTION_GATE: PASS` 전에는 종속항 세트 LOCK을 만들지 않는다. PHYSICAL/HYBRID 문언은 일반 기계 개발자의 1회독 도식화와 실제 물체·면/관찰 단면·기준/단면 윤곽/형상 술어 주체의 분리까지 검사한다. 기술기여 후보가 없으면 형상 항으로 수를 채우지 않는다. 잠정·최종 종속항 세트는 각각 `DRAFT_DEPENDENT_SET_LOCK`과 `FINAL_DEPENDENT_SET_LOCK`으로 독립항 LOCK과 분리한다.
+청구항 작성은 `AUTHORING_DRAFT`, 출원용 최종 검증은 `FINALIZATION`으로 분리한다. 독립항은 architect → drafter의 PRE_STYLE 의미 초안 → 별도 style adjuster의 용어·스타일 후처리 → success → syntax → OA → blind → 기준 비교 순서로 검수한다. 유효한 독립항 LOCK 뒤 종속항을 요청하면 별도 `dependent_set_id`에 대해 기술기여 설계 → PRE_STYLE 문언 작성 → 별도 dependent style 조정 → dependent success → syntax → OA → 종속항별 blind → 기준·도면 비교를 수행한다. `CLAIM_STYLE_GATE: PASS` 전에는 PRE_STYLE 초안을 exact revision으로 취급하지 않고, `DEPENDENT_DESIGN_GATE`가 잠기기 전에는 종속항을 작성하지 않으며, `DEPENDENT_RECONSTRUCTION_GATE: PASS` 전에는 종속항 세트 LOCK을 만들지 않는다. PHYSICAL/HYBRID 문언은 일반 기계 개발자의 1회독 도식화와 실제 물체·면/관찰 단면·기준/단면 윤곽/형상 술어 주체의 분리까지 검사한다. 기술기여 후보가 없으면 형상 항으로 수를 채우지 않는다. 잠정·최종 종속항 세트는 각각 `DRAFT_DEPENDENT_SET_LOCK`과 `FINAL_DEPENDENT_SET_LOCK`으로 독립항 LOCK과 분리한다.
 
 ## 웹 단일 에이전트판
 

@@ -52,9 +52,15 @@ try {
 
     $stagedClaude = [System.IO.File]::ReadAllText((Join-Path $stagingDirectory 'CLAUDE.md'))
     $stagedBlindRole = [System.IO.File]::ReadAllText((Join-Path $stagingDirectory '.claude\agents\blind-claim-reconstruction-reviewer.md'))
-    foreach ($requiredToken in @('DEPENDENT_RECONSTRUCTION_GATE', 'NON_PATENT_TECHNICAL_READER_GATE', 'GEOMETRIC_OBJECT_GATE')) {
+    $stagedStyleRole = [System.IO.File]::ReadAllText((Join-Path $stagingDirectory '.claude\agents\claim-style-adjuster.md'))
+    foreach ($requiredToken in @('CLAIM_STYLE_GATE', 'claim-style-adjuster', 'DEPENDENT_RECONSTRUCTION_GATE', 'NON_PATENT_TECHNICAL_READER_GATE', 'GEOMETRIC_OBJECT_GATE')) {
         if (-not $stagedClaude.Contains($requiredToken)) {
             throw "CLAUDE.md is missing required reconstruction token: $requiredToken"
+        }
+    }
+    foreach ($requiredToken in @('PRE_STYLE — NOT_GATE_ELIGIBLE', 'STYLE_ONLY_REVISION', 'CLAIM_STYLE_GATE')) {
+        if (-not $stagedStyleRole.Contains($requiredToken)) {
+            throw "Style adjuster is missing required contract token: $requiredToken"
         }
     }
     foreach ($requiredToken in @('claim_scope: INDEPENDENT | DEPENDENT_SINGLE', 'dependent_blind_snapshot_id')) {
@@ -77,6 +83,7 @@ try {
     try {
         $entryNames = @($probe.Entries | ForEach-Object FullName)
         foreach ($requiredEntry in @(
+            '.claude/agents/claim-style-adjuster.md',
             '.claude/agents/dependent-claim-strategy-architect.md',
             'sources/08_종속항_기술기여_게이트.md',
             'CLAUDE.md'
@@ -101,6 +108,7 @@ try {
     try {
         $finalEntries = @($finalArchive.Entries | ForEach-Object FullName)
         $entryCount = $finalEntries.Count
+        $hasStyleRole = $finalEntries -contains '.claude/agents/claim-style-adjuster.md'
         $hasDependentRole = $finalEntries -contains '.claude/agents/dependent-claim-strategy-architect.md'
         $hasGate08 = $finalEntries -contains 'sources/08_종속항_기술기여_게이트.md'
     }
@@ -112,6 +120,7 @@ try {
         Target = $targetPath
         Backup = if (Test-Path -LiteralPath $backupPath) { $backupPath } else { $null }
         EntryCount = $entryCount
+        HasStyleRole = $hasStyleRole
         HasDependentRole = $hasDependentRole
         HasGate08 = $hasGate08
         TargetSize = (Get-Item -LiteralPath $targetPath).Length

@@ -62,5 +62,6 @@ color: blue
 - 한정별 근거 및 F/E/C/N/I/S
 - 선택적 실시형태·배치 후보 및 회피설계 위험
 - 독립항 최소충분 집합
-- drafter에게 전달할 작성 지시: SOURCE_EXACT_TERM 보존 항목과 TERM_EXPRESSION_GATE에서 표면 용어를 정해야 하는 CONCEPT_LABEL_ONLY 항목을 구분
+- drafter에게 전달할 PRE_STYLE 작성 지시: SOURCE_EXACT_TERM 보존 항목과 개념 ID가 붙은 CONCEPT_LABEL_ONLY 항목을 구분
+- claim-style-adjuster에게 전달할 표면 문언 지시: SOURCE_EXACT_TERM 보존 목록, CONCEPT_LABEL_ONLY 목록 및 형상·공간 객체 계약
 - 근거 미확인 또는 사용자 결정 필요사항

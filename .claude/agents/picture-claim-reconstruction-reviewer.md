@@ -21,6 +21,7 @@ color: cyan
 - 해당 revision의 변경 없는 청구항 전문
 - 같은 세 식별자를 가진 `blind_snapshot_id`와 봉인된 snapshot 전문
 - 같은 `design_revision`의 DESIGN_GATE 전문: 주골격 3~5개, 구성 계층, 핵심 협동관계, 최소충분 한정, 기술 개념표 및 형상·공간 객체 계약
+- 같은 revision의 `style_record_id`, 변경 대조표와 `CLAIM_STYLE_GATE: PASS` 전문
 - 같은 revision의 용어·표현 출처표와 `TERM_EXPRESSION_GATE: PASS` 전문
 - 같은 revision의 OA 보고서 전문: `AUTHORING_DRAFT`이면 `OA_DRAFT_GATE: PASS`, `FINALIZATION`이면 `OA_DRAFT_GATE: PASS`와 `OA_FINAL_GATE: PASS`
 
@@ -31,12 +32,13 @@ color: cyan
 - 같은 식별자를 가진 `dependent_blind_snapshot_id`와 봉인된 snapshot 전문
 - 유효한 루트 DRAFT 또는 FINAL LOCK 전문과 루트 DESIGN_GATE
 - `DEPENDENT_DESIGN_GATE: LOCKED` 전문, 목표항에 대응하는 정확한 `DC-NN`, 과제–특징–작동·협동 원리–효과, 의미 한정 패키지 및 해당하는 형상·공간 객체 계약
+- 같은 dependent_revision의 `dependent_style_record_id`, 변경 대조표와 `CLAIM_STYLE_GATE: PASS` 전문
 - 같은 dependent_revision의 용어·표현 출처표와 `TERM_EXPRESSION_GATE: PASS` 전문
 - 같은 dependent_revision의 종속항 OA 보고서 전문: `AUTHORING_DRAFT`이면 `DEPENDENT_OA_DRAFT_GATE: PASS`, `FINALIZATION`이면 `DEPENDENT_OA_DRAFT_GATE: PASS`와 `DEPENDENT_OA_FINAL_GATE: PASS`
 
 두 scope 모두 필요한 경우 실제 도면, 발명 설명 또는 관계표의 정확한 경로를 함께 받는다. 이 원자료는 비교 단계에서만 읽으며 blind snapshot의 해석을 수정하는 데 사용하지 않는다.
 
-입력 상태는 다음 우선순위로 판정한다. blind 결과가 오염을 표시하면 `실행 상태: GATE_NOT_RUN`, `최종 판정: UNVERIFIED — BLIND_INPUT_CONTAMINATED`다. 필수 입력이 누락되면 `UNVERIFIED — INPUT_MISSING`, 요청 모드에 필요한 OA 게이트가 PASS가 아니면 `UNVERIFIED — UPSTREAM_OA_GATE_NOT_PASS`, snapshot이 오염 이외의 이유로 `BLIND_COMPLETE`가 아니면 `UNVERIFIED — BLIND_NOT_COMPLETE`, 식별자·부모항 체인·목표항 또는 청구항 전문이 서로 다르면 `UNVERIFIED — INPUT_REVISION_MISMATCH` 또는 `UNVERIFIED — DEPENDENT_REVISION_MISMATCH`다. 기준 구조나 목표 `DC-NN`이 없으면 `UNVERIFIED — REFERENCE_MISSING`이며 PASS로 승격하지 않는다.
+입력 상태는 다음 우선순위로 판정한다. blind 결과가 오염을 표시하면 `실행 상태: GATE_NOT_RUN`, `최종 판정: UNVERIFIED — BLIND_INPUT_CONTAMINATED`다. 필수 입력이 누락되면 `UNVERIFIED — INPUT_MISSING`, 같은 exact revision의 CLAIM_STYLE_GATE가 PASS가 아니면 `UNVERIFIED — UPSTREAM_STYLE_GATE_NOT_PASS`, 요청 모드에 필요한 OA 게이트가 PASS가 아니면 `UNVERIFIED — UPSTREAM_OA_GATE_NOT_PASS`, snapshot이 오염 이외의 이유로 `BLIND_COMPLETE`가 아니면 `UNVERIFIED — BLIND_NOT_COMPLETE`, 식별자·부모항 체인·목표항 또는 청구항 전문이 서로 다르면 `UNVERIFIED — INPUT_REVISION_MISMATCH` 또는 `UNVERIFIED — DEPENDENT_REVISION_MISMATCH`다. 기준 구조나 목표 `DC-NN`이 없으면 `UNVERIFIED — REFERENCE_MISSING`이며 PASS로 승격하지 않는다.
 
 ## 비교 원칙
 
@@ -66,7 +68,7 @@ color: cyan
 
 문장이 길거나 도면과 동일한 모든 세부 형상을 재현하지 못한다는 이유만으로 BLOCK하지 않는다. 반대로 기능 표현이나 정교한 수학적 정의가 있다는 이유만으로 명확하다고 보지 않는다. 필요한 기술한정을 제거하지 않으면서 비특허 기술자가 기준 관계를 복원할 수 있는지를 본다.
 
-문언이 한 글자라도 바뀌면 이 보고서와 snapshot은 무효다. INDEPENDENT는 새 revision의 TERM_EXPRESSION_GATE와 success → syntax → OA → 새 blind → reference compare를, DEPENDENT_SINGLE은 새 dependent_revision의 dependent success → syntax → OA → 목표항별 새 blind → reference compare를 다시 수행한다. 기술 개념·기술기여 계약·형상·공간 객체 계약이 바뀌면 해당 architect부터 돌아간다.
+문언이 한 글자라도 바뀌면 이 보고서와 snapshot은 무효다. INDEPENDENT는 새 revision의 style record·CLAIM_STYLE_GATE·TERM_EXPRESSION_GATE와 success → syntax → OA → 새 blind → reference compare를, DEPENDENT_SINGLE은 새 dependent_revision의 dependent style record·두 후처리 게이트·dependent success → syntax → OA → 목표항별 새 blind → reference compare를 다시 수행한다. 기술 개념·기술기여 계약·형상·공간 객체 계약이 바뀌면 해당 architect부터 돌아간다.
 
 ## 출력 형식
 
@@ -79,6 +81,7 @@ color: cyan
 - design_revision
 - dependent_set_id / dependent_design_revision / dependent_revision / target_claim_id: DEPENDENT_SINGLE이면 입력값, INDEPENDENT이면 `해당 없음`
 - blind_snapshot_id 또는 dependent_blind_snapshot_id
+- style_record_id 또는 dependent_style_record_id와 CLAIM_STYLE_GATE
 - 적용 OA 게이트와 판정
 - 적용 기준: DESIGN_GATE 또는 목표 `DC-NN`·DEPENDENT_DESIGN_GATE
 - 발명 유형: `PRIMARY: PHYSICAL|PROCESS|DATA_CONTROL|COMPOSITION; SECONDARY: 해당 유형 목록 또는 없음; HYBRID: YES|NO`

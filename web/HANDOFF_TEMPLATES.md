@@ -1,13 +1,13 @@
-<!-- claim-copa-bundle: 2026.08.27.3 -->
+<!-- claim-copa-bundle: 2026.08.27.4 -->
 
 # Claim Copa Web — 버전·인계 템플릿
 
 ## RUN_HEADER
 
 ```text
-bundle_version: 2026.08.27.3
-protocol_version: 1.2.0
-source_set_id: cc-web-2026.08.27.3
+bundle_version: 2026.08.27.4
+protocol_version: 1.3.0
+source_set_id: cc-web-2026.08.27.4
 source_manifest_digest: <BUNDLE_MANIFEST.md의 값>
 execution_profile: WEB_SINGLE_CHAT | WEB_ISOLATED_CHATS
 run_id: run-YYYYMMDD-NN
@@ -25,10 +25,10 @@ PRIOR_ART_SET: <사용자 식별명 목록> | NONE
 ## 공통 게이트 기록
 
 ```text
-record_type: DESIGN | TERM | SUCCESS | SYNTAX | OA | RECONSTRUCTION | REFERENCE_COMPARE | DEPENDENT_DESIGN | DEPENDENT_SUCCESS | DEPENDENT_SYNTAX | DEPENDENT_OA | DEPENDENT_RECONSTRUCTION | DEPENDENT_REFERENCE_COMPARE
+record_type: DESIGN | MEANING_DRAFT | STYLE | TERM | SUCCESS | SYNTAX | OA | RECONSTRUCTION | REFERENCE_COMPARE | DEPENDENT_DESIGN | DEPENDENT_MEANING_DRAFT | DEPENDENT_STYLE | DEPENDENT_SUCCESS | DEPENDENT_SYNTAX | DEPENDENT_OA | DEPENDENT_RECONSTRUCTION | DEPENDENT_REFERENCE_COMPARE
 record_id: <type>-<candidate_id>-<revision>-NN | <type>-<dependent_set_id>-<dependent_revision>-NN
-bundle_version: 2026.08.27.3
-source_set_id: cc-web-2026.08.27.3
+bundle_version: 2026.08.27.4
+source_set_id: cc-web-2026.08.27.4
 source_manifest_digest: <BUNDLE_MANIFEST.md의 값>
 run_id: <run-id>
 input_revision: iN
@@ -38,6 +38,10 @@ design_revision: dN
 dependent_set_id: <stable-id> | N/A
 dependent_design_revision: ddN | N/A
 dependent_revision: drN | N/A
+meaning_draft_id: <ID> | N/A
+dependent_meaning_draft_id: <ID> | N/A
+style_record_id: <ID> | N/A
+dependent_style_record_id: <ID> | N/A
 review_context: SAME_AGENT_SEQUENTIAL | FRESH_ISOLATED_CHAT
 exact_claim_text: |
   <독립항 전문 또는 부모항 체인을 포함한 종속항 세트 전문>
@@ -52,9 +56,9 @@ decision: PASS | PASS-RANGE | REVIEW | BLOCK | UNVERIFIED
 record_type: DRAFT_CLAIM_LOCK
 lock_id: dcl-<candidate_id>-<revision>-NN
 lock_class: DRAFT-SELF | DRAFT-ISOLATED
-bundle_version: 2026.08.27.3
-protocol_version: 1.2.0
-source_set_id: cc-web-2026.08.27.3
+bundle_version: 2026.08.27.4
+protocol_version: 1.3.0
+source_set_id: cc-web-2026.08.27.4
 source_manifest_digest: <BUNDLE_MANIFEST.md의 값>
 execution_profile: WEB_SINGLE_CHAT | WEB_ISOLATED_CHATS
 run_id: <run-id>
@@ -68,6 +72,11 @@ root_claim_text: |
 invention_sources:
   - <사용자 식별명>
 design_record_id: <ID>
+meaning_draft_id: <ID>
+style_record_id: <ID>
+claim_style_gate: PASS
+style_change_table:
+  - <입력 구절 / 출력 구절 / 적용 규칙 / 범위 영향 / 판정>
 success_record_id: <ID>
 term_expression_gate: PASS
 non_patent_technical_reader_gate: PASS
@@ -95,9 +104,9 @@ status_label: 명세서 뒷받침·실시가능성 미검증 잠정안
 record_type: DRAFT_DEPENDENT_SET_LOCK | FINAL_DEPENDENT_SET_LOCK
 lock_id: ddsl-<dependent_set_id>-<dependent_revision>-NN | fdsl-<dependent_set_id>-<dependent_revision>-NN
 lock_class: DRAFT-SELF | DRAFT-ISOLATED | FINAL-ISOLATED
-bundle_version: 2026.08.27.3
-protocol_version: 1.2.0
-source_set_id: cc-web-2026.08.27.3
+bundle_version: 2026.08.27.4
+protocol_version: 1.3.0
+source_set_id: cc-web-2026.08.27.4
 source_manifest_digest: <BUNDLE_MANIFEST.md의 값>
 execution_profile: WEB_SINGLE_CHAT | WEB_ISOLATED_CHATS
 run_id: <run-id>
@@ -119,6 +128,11 @@ invention_sources:
 PRIOR_ART_SET: <사용자 식별명 목록> | NONE
 dependent_design_record_id: <ID>
 dependent_design_gate: LOCKED
+dependent_meaning_draft_id: <ID>
+dependent_style_record_id: <ID>
+claim_style_gate: PASS
+dependent_style_change_table:
+  - <목표항 / 입력 구절 / 출력 구절 / 적용 규칙 / 범위 영향 / 판정>
 technical_solution_candidates:
   - <DC-NN>
 spatial_object_contracts:
@@ -153,10 +167,10 @@ status_label: 명세서 뒷받침·실시가능성 미검증 잠정안 | 출원�
 ## 격리 syntax/OA 대화 인계 머리말
 
 ```text
-handoff_type: SYNTAX_REVIEW | OA_REVIEW | DEPENDENT_SYNTAX_REVIEW | DEPENDENT_OA_REVIEW | DEPENDENT_BLIND_RECONSTRUCTION | DEPENDENT_REFERENCE_COMPARE
-bundle_version: 2026.08.27.3
-protocol_version: 1.2.0
-source_set_id: cc-web-2026.08.27.3
+handoff_type: STYLE_ADJUSTMENT | SYNTAX_REVIEW | OA_REVIEW | DEPENDENT_STYLE_ADJUSTMENT | DEPENDENT_SYNTAX_REVIEW | DEPENDENT_OA_REVIEW | DEPENDENT_BLIND_RECONSTRUCTION | DEPENDENT_REFERENCE_COMPARE
+bundle_version: 2026.08.27.4
+protocol_version: 1.3.0
+source_set_id: cc-web-2026.08.27.4
 source_manifest_digest: <BUNDLE_MANIFEST.md의 값>
 run_id: <run-id>
 input_revision: iN

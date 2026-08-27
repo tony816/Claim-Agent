@@ -1,4 +1,4 @@
-<!-- claim-copa-bundle: 2026.08.27.3 -->
+<!-- claim-copa-bundle: 2026.08.27.4 -->
 
 # Claim Copa Web 설치·사용법
 
@@ -6,7 +6,7 @@
 
 ## 설치
 
-1. `dist/claim-copa-web-2026.08.27.3.zip`의 압축을 푼다.
+1. `dist/claim-copa-web-2026.08.27.4.zip`의 압축을 푼다.
 2. 웹 프로젝트의 프로젝트 지침에 `PROJECT_INSTRUCTIONS.md` 전문을 넣는다.
 3. 나머지 `VERSION`, `core/`, `roles/`, `sources/`, `HANDOFF_TEMPLATES.md`를 프로젝트 소스로 올린다.
 4. `MANIFEST.sha256`도 함께 올려 현재 묶음의 파일 집합을 식별한다.
@@ -18,7 +18,7 @@
 
 ### WEB_SINGLE_CHAT
 
-한 대화에서 독립항 architect → drafter → success → syntax → OA → self reconstruction → reference compare를 순차 수행한다. 모든 내용 게이트가 통과하면 `DRAFT_CLAIM_LOCK`의 `lock_class`를 `DRAFT-SELF`로 기록한다. 종속항이 요청되면 이어서 dependent strategy → drafter → dependent success → syntax → OA → 목표 종속항별 self reconstruction → reference compare를 별도 식별자로 수행한다. `DEPENDENT_DESIGN_GATE: LOCKED` 전에는 문언을 작성하지 않고 `DEPENDENT_RECONSTRUCTION_GATE: PASS` 전에는 종속항 세트 LOCK을 만들지 않는다.
+한 대화에서 독립항 architect → drafter의 PRE_STYLE 의미 초안 → 별도 style pass → success → syntax → OA → self reconstruction → reference compare를 순차 수행한다. 모든 내용 게이트가 통과하면 `DRAFT_CLAIM_LOCK`의 `lock_class`를 `DRAFT-SELF`로 기록한다. 종속항이 요청되면 이어서 dependent strategy → drafter의 PRE_STYLE 세트 → dependent style pass → dependent success → syntax → OA → 목표 종속항별 self reconstruction → reference compare를 별도 식별자로 수행한다. `CLAIM_STYLE_GATE: PASS` 전에는 PRE_STYLE 초안을 exact revision으로 취급하지 않고, `DEPENDENT_DESIGN_GATE: LOCKED` 전에는 문언을 작성하지 않으며, `DEPENDENT_RECONSTRUCTION_GATE: PASS` 전에는 종속항 세트 LOCK을 만들지 않는다.
 
 이 프로필의 역구성과 종속항 검수는 독립 검수가 아니다. 결과에는 항상 `동일 문맥 자체검수`라고 표시하고, `FINAL_CLAIM_LOCK` 또는 `FINAL_DEPENDENT_SET_LOCK`으로 승격하지 않는다.
 

@@ -111,7 +111,7 @@ Get-ChildItem -LiteralPath (Join-Path $projectRoot 'sources') -Filter '*.md' -Fi
 
 $instructionsPath = Join-Path $bundleDirectory 'PROJECT_INSTRUCTIONS.md'
 $instructions = [System.IO.File]::ReadAllText($instructionsPath)
-foreach ($requiredToken in @($bundleVersion, $sourceSetId, 'WEB_SINGLE_CHAT', 'DRAFT-SELF', 'LOCK_MISSING_OR_STALE', 'DEPENDENT_DESIGN_GATE', 'DEPENDENT_RECONSTRUCTION_GATE', 'DRAFT_DEPENDENT_SET_LOCK')) {
+foreach ($requiredToken in @($bundleVersion, $sourceSetId, 'WEB_SINGLE_CHAT', 'DRAFT-SELF', 'LOCK_MISSING_OR_STALE', 'STYLE_PASS', 'CLAIM_STYLE_GATE', 'DEPENDENT_STYLE_PASS', 'DEPENDENT_DESIGN_GATE', 'DEPENDENT_RECONSTRUCTION_GATE', 'DRAFT_DEPENDENT_SET_LOCK')) {
     if (-not $instructions.Contains($requiredToken)) {
         throw "PROJECT_INSTRUCTIONS is missing required token: $requiredToken"
     }
