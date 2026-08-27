@@ -1,12 +1,12 @@
-<!-- claim-copa-bundle: 2026.08.27.4 -->
+<!-- claim-copa-bundle: 2026.08.27.5 -->
 
 # Claim Copa Web — 프로젝트 지침
 
 ## 0. 실행 계약과 우선순위
 
-- `bundle_version: 2026.08.27.4`
-- `protocol_version: 1.3.0`
-- `source_set_id: cc-web-2026.08.27.4`
+- `bundle_version: 2026.08.27.5`
+- `protocol_version: 1.4.0`
+- `source_set_id: cc-web-2026.08.27.5`
 - 기본 실행 프로필: `WEB_SINGLE_CHAT`
 
 이 문서는 서브에이전트 기능이 없는 웹 환경을 위한 실행 어댑터다. `core/CLAUDE_CORE.md`, `roles/*.md`, `sources/*.md`의 기술 근거·문언·통사·OA 기준은 그대로 적용한다. 다만 그 문서에서 “에이전트를 호출한다”, “독립 에이전트가 수행한다”, `tools`, `maxTurns`라고 한 부분은 웹에서 아래 순차 패스와 격리 대화 계약으로 대체한다.
@@ -18,9 +18,9 @@
 청구항 작업을 시작하기 전에 다음 `RUN_HEADER`를 먼저 기록한다.
 
 ```text
-bundle_version: 2026.08.27.4
-protocol_version: 1.3.0
-source_set_id: cc-web-2026.08.27.4
+bundle_version: 2026.08.27.5
+protocol_version: 1.4.0
+source_set_id: cc-web-2026.08.27.5
 source_manifest_digest: BUNDLE_MANIFEST.md의 값
 execution_profile: WEB_SINGLE_CHAT | WEB_ISOLATED_CHATS
 run_id: run-YYYYMMDD-NN
@@ -52,22 +52,22 @@ PRIOR_ART_SET: 사용자 식별명 목록 | NONE
 
 1. `ARCHITECT_PASS`: `roles/claim-architect.md`를 적용해 `DESIGN_GATE`와 `design_revision`을 만든다.
 2. `DRAFTER_PASS`: DESIGN_GATE가 LOCKED이면 `roles/claim-drafter.md`를 적용해 `meaning_draft_id`, `revision_status: PRE_STYLE — NOT_GATE_ELIGIBLE`, 독립항 의미 초안과 `DRAFTER_GATE`를 만든다. 이 패스에서는 스타일가이드와 TERM_EXPRESSION_GATE를 적용하지 않는다.
-3. `STYLE_PASS`: DRAFTER_GATE가 PASS이면 `roles/claim-style-adjuster.md`를 별도 순차 패스로 적용해 `style_record_id`, exact revision, 용어·표현 출처표, `CLAIM_STYLE_GATE`, `TERM_EXPRESSION_GATE`, `NON_PATENT_TECHNICAL_READER_GATE` 및 해당하는 `GEOMETRIC_OBJECT_GATE`를 만든다. 같은 에이전트가 수행한 순차 패스임을 숨기지 않는다.
-4. `SUCCESS_PASS`: 같은 exact revision에 대해 성공조건 1·4·2·3·9·8, CLAIM_STYLE_GATE, TERM_EXPRESSION_GATE, 두 독자·기하 게이트 및 범위 불변을 재검사하고 `success_record_id`를 만든다.
+3. `STYLE_PASS`: DRAFTER_GATE가 PASS이면 `roles/claim-style-adjuster.md`를 별도 순차 패스로 적용해 `style_record_id`, exact revision, 용어·표현 출처표, `CLAIM_STYLE_GATE`, `TERM_EXPRESSION_GATE`, `NON_PATENT_TECHNICAL_READER_GATE` 및 해당하는 `GEOMETRIC_OBJECT_GATE`를 만든다. 조건부 검색이 필요할 때에만 정확한 라우팅 인덱스 전문과 역사 코퍼스의 정확한 조각·최소 문맥을 읽고 사용 기록을 남긴다. 같은 에이전트가 수행한 순차 패스임을 숨기지 않는다.
+4. `SUCCESS_PASS`: `roles/claim-success-reviewer.md`를 `success_scope: INDEPENDENT`로 적용해 `sources/README.md`, 최신 성공조건, 두 후처리 문서와 실제 원자료를 읽고 같은 exact revision의 조건 1·4·2·3·9·8, 두 후처리 게이트, 독자·기하 게이트 및 범위 불변을 재검사하여 `success_record_id`를 만든다. 웹에서는 같은 에이전트의 별도 순차 패스임을 `review_context: SAME_AGENT_SEQUENTIAL`로 기록한다.
 5. `SYNTAX_PASS`: `roles/syntax-scope-reviewer.md`를 적용한다. 동일 에이전트가 수행했음을 숨기지 말고 `review_context: SAME_AGENT_SEQUENTIAL`로 기록한다.
 6. `OA_PASS`: syntax PASS인 변경 없는 문언에 `roles/oa-strategy-reviewer.md`를 적용한다. `OA_DRAFT_GATE`와 `OA_FINAL_GATE`를 합치지 않는다.
 7. `RECONSTRUCTION_PASS`: 아래 실행 프로필별 계약을 적용한다.
 8. `REFERENCE_COMPARE_PASS`: 봉인 snapshot을 바꾸지 않고 `roles/picture-claim-reconstruction-reviewer.md`의 기준으로 DESIGN_GATE와 비교한다.
-9. `LOCK_PASS`: 같은 버전·입력·style record·문언에 대한 모든 필수 게이트가 통과하면 해당 lock class의 `DRAFT_CLAIM_LOCK`을 만든다.
+9. `LOCK_PASS`: 같은 버전·입력·style record·success record·문언에 대한 모든 필수 게이트가 통과하면 해당 lock class의 `DRAFT_CLAIM_LOCK`을 만든다.
 10. `DEPENDENT_STRATEGY_PASS`: 사용자가 종속항을 요청했으면 AUTHORING_DRAFT에서는 유효한 DRAFT 또는 FINAL 독립항 LOCK, FINALIZATION에서는 유효한 FINAL 독립항 LOCK을 사용해 `roles/dependent-claim-strategy-architect.md`와 `sources/08_종속항_기술기여_게이트.md`를 순차 적용한다. 후보별 세 필수 기술기여 게이트 PASS 뒤 `sources/05_종속항_전개패턴_가이드.md`로 부모항·권리화 축·트리를 확정하고, `dependent_set_id`와 `dependent_design_revision`에 함께 잠근다.
 11. `DEPENDENT_DRAFTER_PASS`: 전략 상태가 PASS이고 `DEPENDENT_DESIGN_GATE: LOCKED`일 때만 `roles/claim-drafter.md`를 `draft_scope: DEPENDENT_SET`으로 적용해 `dependent_meaning_draft_id`와 `dependent_revision_status: PRE_STYLE — NOT_GATE_ELIGIBLE`인 의미 초안 세트를 만든다. `DRAWING_ONLY`나 잠기지 않은 후보를 추가하지 않는다.
 12. `DEPENDENT_STYLE_PASS`: DRAFTER_GATE가 PASS이면 `roles/claim-style-adjuster.md`를 `style_scope: DEPENDENT_SET`으로 별도 적용해 `dependent_style_record_id`, exact dependent_revision, 두 후처리 게이트와 최종 독자·기하 게이트를 봉인한다.
-13. `DEPENDENT_SUCCESS_PASS`: 같은 exact dependent_revision에서 루트 LOCK 유효성, `DC-NN` 대응, 세 필수 기술기여 게이트, CLAIM_STYLE_GATE, TERM_EXPRESSION_GATE, NON_PATENT_TECHNICAL_READER_GATE, 해당하는 GEOMETRIC_OBJECT_GATE, 부모항·선행기재·카테고리·USER_LOCK 및 제외 후보 비재유입을 검사하고 `dependent_success_record_id`를 만든다.
-14. `DEPENDENT_SYNTAX_PASS`: dependent success가 PASS인 동일 문언에 `roles/syntax-scope-reviewer.md`를 `review_scope: DEPENDENT_SET`으로 적용한다. 같은 대화이면 `review_context: SAME_AGENT_SEQUENTIAL`을 숨기지 않는다.
+13. `DEPENDENT_SUCCESS_PASS`: `roles/claim-success-reviewer.md`를 `success_scope: DEPENDENT_SET`으로 적용해 같은 exact dependent_revision에서 `sources/README.md`, 최신 성공조건, 08과 05, 루트 LOCK 유효성, `DC-NN` 대응, 세 필수 기술기여 게이트, 두 후처리 게이트, 독자·기하 게이트, 부모항·선행기재·카테고리·USER_LOCK 및 제외 후보 비재유입을 검사하고 `dependent_success_record_id`를 만든다.
+14. `DEPENDENT_SYNTAX_PASS`: dependent success가 PASS인 동일 문언에 `roles/syntax-scope-reviewer.md`를 `review_scope: DEPENDENT_SET`으로 적용하고 `sources/05_종속항_전개패턴_가이드.md`도 읽는다. 같은 대화이면 `review_context: SAME_AGENT_SEQUENTIAL`을 숨기지 않는다.
 15. `DEPENDENT_OA_PASS`: dependent syntax PASS인 변경 없는 문언에 `roles/oa-strategy-reviewer.md`를 `review_scope: DEPENDENT_SET`으로 적용하고 `DEPENDENT_OA_DRAFT_GATE`와 `DEPENDENT_OA_FINAL_GATE`를 분리한다.
 16. `DEPENDENT_RECONSTRUCTION_PASS`: 요청 모드의 종속항 OA 게이트가 PASS인 변경 없는 dependent_revision에서 각 목표 종속항을 정확한 부모항 체인과 함께 개별 snapshot으로 복원한다. WEB_SINGLE_CHAT이면 목표항별 `DEPENDENT_SELF_RECONSTRUCTION_SNAPSHOT`, WEB_ISOLATED_CHATS이면 목표항마다 별도 빈 대화의 `DEPENDENT_BLIND_SNAPSHOT`을 만든다. 형제항·설계 정답·도면·DC 설명을 snapshot 입력에 섞지 않는다.
 17. `DEPENDENT_REFERENCE_COMPARE_PASS`: 각 봉인 snapshot을 해당 `DC-NN`, DEPENDENT_DESIGN_GATE 및 허용 원자료와 비교한다. 모든 목표항이 PASS 또는 PASS-RANGE이고 `NON_PATENT_TECHNICAL_READER_GATE`와 해당하는 `GEOMETRIC_OBJECT_GATE`가 PASS이면 `DEPENDENT_RECONSTRUCTION_GATE: PASS`다. 형상·공간 표현이 없는 목표항의 마지막 게이트는 `NOT_APPLICABLE`일 수 있다.
-18. `DEPENDENT_LOCK_PASS`: 같은 버전·입력·루트 LOCK·dependent design·dependent style record·문언의 모든 필수 게이트와 `DEPENDENT_RECONSTRUCTION_GATE`가 통과하면 `DRAFT_DEPENDENT_SET_LOCK` 또는 `FINAL_DEPENDENT_SET_LOCK`을 만든다.
+18. `DEPENDENT_LOCK_PASS`: 같은 버전·입력·루트 LOCK·dependent design·dependent style record·dependent success record·문언의 모든 필수 게이트와 `DEPENDENT_RECONSTRUCTION_GATE`가 통과하면 `DRAFT_DEPENDENT_SET_LOCK` 또는 `FINAL_DEPENDENT_SET_LOCK`을 만든다.
 
 독립항의 봉인된 문언이 한 글자라도 바뀌면 `revision`을 올리고 style record → CLAIM_STYLE_GATE → TERM_EXPRESSION_GATE → success → syntax → OA → reconstruction → reference compare를 새로 수행한다. 조사·띄어쓰기·문장부호·범위 불변 표면 용어만 바뀌면 STYLE_PASS의 `STYLE_ONLY_REVISION` 경로를 사용할 수 있고, 절 결속이나 기술관계 문언이 바뀌면 DRAFTER_PASS부터 돌아간다. 기술 개념·계층·협동관계·최소충분 한정·USER_LOCK 또는 원자료 집합이 바뀌면 `design_revision`과 `input_revision`을 필요한 만큼 올리고 architect부터 다시 수행한다. 종속항 문언이 바뀌면 `dependent_revision`을 올리고 dependent style record와 두 후처리 게이트 → dependent success → syntax → OA → 목표항별 reconstruction → reference compare를 다시 수행하며, 의미 한정 문언이 바뀌면 DEPENDENT_DRAFTER_PASS부터 돌아간다. 후보 집합, 과제–특징–원리–효과, 의미 한정 패키지, 형상·공간 객체 계약, 부모항 전략, 원자료 또는 선행기술 집합이 바뀌면 `dependent_design_revision`을 올리고 DEPENDENT_STRATEGY_PASS부터 다시 수행한다. 루트 LOCK이 바뀌면 모든 종속항 기록과 LOCK은 stale이다.
 

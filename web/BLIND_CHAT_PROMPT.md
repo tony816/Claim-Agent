@@ -1,4 +1,4 @@
-<!-- claim-copa-bundle: 2026.08.27.4 -->
+<!-- claim-copa-bundle: 2026.08.27.5 -->
 
 # Claim Copa Web — 격리 blind 대화 프롬프트
 
@@ -11,7 +11,7 @@
 공통 허용 입력은 다음뿐이다.
 
 - `mode: BLIND_SNAPSHOT`
-- `protocol_version: 1.3.0`
+- `protocol_version: 1.4.0`
 - `claim_scope: INDEPENDENT | DEPENDENT_SINGLE`
 - `candidate_id`, `revision`, `design_revision`
 
@@ -61,7 +61,7 @@ PHYSICAL/HYBRID에서는 특허 문언 해석에 익숙하지 않지만 기계 �
 
 ```text
 mode: BLIND_SNAPSHOT
-protocol_version: 1.3.0
+protocol_version: 1.4.0
 claim_scope: INDEPENDENT
 candidate_id: <ID>
 revision: <rN>
@@ -74,7 +74,7 @@ design_revision: <dN>
 
 ```text
 mode: BLIND_SNAPSHOT
-protocol_version: 1.3.0
+protocol_version: 1.4.0
 claim_scope: DEPENDENT_SINGLE
 candidate_id: <root ID>
 revision: <root rN>

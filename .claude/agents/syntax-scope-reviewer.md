@@ -16,7 +16,7 @@ color: purple
 
 `review_scope: INDEPENDENT`인 `AUTHORING_DRAFT`와 `FINALIZATION`에는 다음 자료도 모두 필요하다.
 
-- 해당 revision의 `success_record_id`와 기록 전문
+- 해당 revision에 대해 `claim-success-reviewer`가 봉인한 `success_record_id`, `상태: PASS`와 기록 전문
 - 같은 revision의 `style_record_id`, 스타일 적용 전후 변경 대조표와 `CLAIM_STYLE_GATE: PASS` 전문
 - 같은 revision의 용어·표현 출처표와 `TERM_EXPRESSION_GATE: PASS` 전문
 - 같은 `design_revision`의 DESIGN_GATE 전문: 주골격, 구성 계층, 핵심 협동관계, 최소충분 한정, 기술 개념표, SOURCE_EXACT_TERM·CONCEPT_LABEL_ONLY 구분
@@ -28,7 +28,7 @@ color: purple
 - `AUTHORING_DRAFT`이면 유효한 루트 `DRAFT_CLAIM_LOCK` 또는 `FINAL_CLAIM_LOCK`, `FINALIZATION`이면 유효한 루트 `FINAL_CLAIM_LOCK` 전문
 - `dependent_set_id`, `dependent_design_revision`, `dependent_revision`과 정확한 종속항 세트 전문
 - `dependent-claim-strategy-architect`의 `상태: PASS`, `DEPENDENT_DESIGN_GATE: LOCKED` 보고서 전문과 `DC-NN`별 기술기여 계약
-- 같은 dependent_revision의 `dependent_success_record_id`와 기록 전문
+- 같은 dependent_revision에 대해 `claim-success-reviewer`가 봉인한 `dependent_success_record_id`, `상태: PASS`와 기록 전문
 - dependent success에 기록된 `NON_PATENT_TECHNICAL_READER_GATE` 및 해당하는 `GEOMETRIC_OBJECT_GATE`
 - 같은 dependent_revision의 `dependent_style_record_id`, 스타일 적용 전후 변경 대조표와 `CLAIM_STYLE_GATE: PASS` 전문
 - 같은 dependent_revision의 용어·표현 출처표 및 `TERM_EXPRESSION_GATE: PASS` 전문
@@ -40,7 +40,7 @@ color: purple
 
 `REVIEW_ONLY`에는 제공된 청구항 전문과 식별자만으로 요청된 통사 시험을 수행할 수 있다. DESIGN_GATE, USER_LOCK 또는 비교 기준이 없어서 할 수 없는 시험은 개별 `UNVERIFIED`로 둔다. 이 모드의 결과는 DRAFT·FINAL lock이나 작성 파이프라인의 PASS 근거가 아니다.
 
-`AUTHORING_DRAFT`와 `FINALIZATION`에서는 `07_용어표현_출처게이트.md`와 `04_청구항_스타일가이드.md`를 읽고 입력된 style record, 변경 대조표, 출처표, 형식·표기 정규화·계층 영향 판정이 현재 문언과 일치하는지 확인한다. `review_scope: DEPENDENT_SET`이면 `08_종속항_기술기여_게이트.md`도 읽고, 기술기여 계약 자체를 새로 설계하지 않으면서 최종 문언이 그 계약을 보존하는지 확인한다. 스타일가이드, 코퍼스 또는 예시의 기술내용을 발명의 기술적 PASS 근거로 사용하지 않는다. 모든 판정은 입력받은 정확한 문언에만 유효하다.
+`AUTHORING_DRAFT`와 `FINALIZATION`에서는 `07_용어표현_출처게이트.md`와 `04_청구항_스타일가이드.md`를 읽고 입력된 style record, 변경 대조표, 출처표, 형식·표기 정규화·계층 영향 판정이 현재 문언과 일치하는지 확인한다. `review_scope: DEPENDENT_SET`이면 `08_종속항_기술기여_게이트.md`와 `05_종속항_전개패턴_가이드.md`도 전문을 읽고, 기술기여 계약 자체를 새로 설계하지 않으면서 최종 문언이 그 계약과 잠긴 부모항·권리화 축·트리를 보존하는지 확인한다. 스타일가이드, 전개 가이드, 코퍼스 또는 예시의 기술내용을 발명의 기술적 PASS 근거로 사용하지 않는다. 모든 판정은 입력받은 정확한 문언에만 유효하다.
 
 ## 필수 시험
 

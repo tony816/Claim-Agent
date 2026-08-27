@@ -111,10 +111,45 @@ Get-ChildItem -LiteralPath (Join-Path $projectRoot 'sources') -Filter '*.md' -Fi
 
 $instructionsPath = Join-Path $bundleDirectory 'PROJECT_INSTRUCTIONS.md'
 $instructions = [System.IO.File]::ReadAllText($instructionsPath)
-foreach ($requiredToken in @($bundleVersion, $sourceSetId, 'WEB_SINGLE_CHAT', 'DRAFT-SELF', 'LOCK_MISSING_OR_STALE', 'STYLE_PASS', 'CLAIM_STYLE_GATE', 'DEPENDENT_STYLE_PASS', 'DEPENDENT_DESIGN_GATE', 'DEPENDENT_RECONSTRUCTION_GATE', 'DRAFT_DEPENDENT_SET_LOCK')) {
+foreach ($requiredToken in @($bundleVersion, $sourceSetId, 'WEB_SINGLE_CHAT', 'DRAFT-SELF', 'LOCK_MISSING_OR_STALE', 'STYLE_PASS', 'CLAIM_STYLE_GATE', 'SUCCESS_PASS', 'claim-success-reviewer', 'DEPENDENT_STYLE_PASS', 'DEPENDENT_SUCCESS_PASS', 'DEPENDENT_DESIGN_GATE', 'DEPENDENT_RECONSTRUCTION_GATE', 'DRAFT_DEPENDENT_SET_LOCK')) {
     if (-not $instructions.Contains($requiredToken)) {
         throw "PROJECT_INSTRUCTIONS is missing required token: $requiredToken"
     }
+}
+
+foreach ($requiredRelativePath in @(
+    'roles/claim-style-adjuster.md',
+    'roles/claim-success-reviewer.md',
+    'roles/syntax-scope-reviewer.md',
+    'sources/README.md',
+    'sources/독립항_작성_성공조건.md',
+    'sources/05_종속항_전개패턴_가이드.md',
+    'sources/청구항_예시검색_라우팅인덱스.md',
+    'sources/청구항_문체학습용_분야별검색최적화본.md'
+)) {
+    $requiredPath = Join-Path $bundleDirectory $requiredRelativePath
+    if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+        throw "Bundle is missing required source-consumer contract file: $requiredRelativePath"
+    }
+}
+
+$styleContract = [System.IO.File]::ReadAllText((Join-Path $rolesDirectory 'claim-style-adjuster.md'))
+foreach ($requiredToken in @('sources/README.md', 'sources/청구항_예시검색_라우팅인덱스.md', 'sources/청구항_문체학습용_분야별검색최적화본.md', '조건부 보조 소스: NOT_ACTIVATED')) {
+    if (-not $styleContract.Contains($requiredToken)) {
+        throw "Bundled style adjuster is missing required source token: $requiredToken"
+    }
+}
+
+$successContract = [System.IO.File]::ReadAllText((Join-Path $rolesDirectory 'claim-success-reviewer.md'))
+foreach ($requiredToken in @('success_scope: INDEPENDENT | DEPENDENT_SET', 'sources/README.md', 'sources/독립항_작성_성공조건.md', 'sources/05_종속항_전개패턴_가이드.md', 'success_record_id', 'dependent_success_record_id')) {
+    if (-not $successContract.Contains($requiredToken)) {
+        throw "Bundled success reviewer is missing required contract token: $requiredToken"
+    }
+}
+
+$syntaxContract = [System.IO.File]::ReadAllText((Join-Path $rolesDirectory 'syntax-scope-reviewer.md'))
+if (-not $syntaxContract.Contains('05_종속항_전개패턴_가이드.md')) {
+    throw 'Bundled syntax reviewer is missing the dependent source 05 contract.'
 }
 
 $fileCountBeforeManifests = (Get-ChildItem -LiteralPath $bundleDirectory -Recurse -File).Count

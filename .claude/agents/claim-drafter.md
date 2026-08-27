@@ -20,7 +20,7 @@ color: green
 
 - 변경 없는 루트 독립항 전문과 현재 기술 원자료
 - `AUTHORING_DRAFT`이면 유효한 `DRAFT_CLAIM_LOCK` 또는 `FINAL_CLAIM_LOCK`, `FINALIZATION`이면 유효한 `FINAL_CLAIM_LOCK` 전문
-- LOCK에 봉인된 candidate_id, revision, design_revision, success_record_id, blind_snapshot_id, `style_record_id`, 용어·표현 출처표, `CLAIM_STYLE_GATE: PASS`, `TERM_EXPRESSION_GATE: PASS` 및 syntax·OA·역구성 판정
+- LOCK에 봉인된 candidate_id, revision, design_revision, `claim-success-reviewer`의 success_record_id, blind_snapshot_id, `style_record_id`, 용어·표현 출처표, `CLAIM_STYLE_GATE: PASS`, `TERM_EXPRESSION_GATE: PASS` 및 syntax·OA·역구성 판정
 - `AUTHORING_DRAFT`이면 `OA_DRAFT_GATE: PASS`, `FINALIZATION`이면 `OA_FINAL_GATE: PASS`
 - 오케스트레이터가 지정한 `dependent_set_id`, `dependent_design_revision` 및 목표 `dependent_revision`
 - `dependent-claim-strategy-architect`의 `상태: PASS`, `DEPENDENT_DESIGN_GATE: LOCKED` 보고서 전문

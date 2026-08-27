@@ -14,14 +14,14 @@ color: yellow
 
 모든 호출에는 `request_mode`, `review_scope: INDEPENDENT | DEPENDENT_SET`, 안정적인 루트 `candidate_id`, `revision`, `design_revision` 및 해당 revision의 독립항 전문이 필수다. `REVIEW_ONLY`에서 설계 계약이 없을 때만 `design_revision: N/A`를 사용한다.
 
-`review_scope: INDEPENDENT`인 `AUTHORING_DRAFT`와 `FINALIZATION`에는 그 정확한 revision의 `style_record_id`와 `CLAIM_STYLE_GATE: PASS` 전문, `success_record_id`와 기록 전문, 용어·표현 출처표 및 `TERM_EXPRESSION_GATE: PASS` 전문, `syntax-scope-reviewer`의 `PASS` 보고서 전문, 조건 4에서 허용한 현재 기술 원자료 목록이 추가로 필요하다.
+`review_scope: INDEPENDENT`인 `AUTHORING_DRAFT`와 `FINALIZATION`에는 그 정확한 revision의 `style_record_id`와 `CLAIM_STYLE_GATE: PASS` 전문, `claim-success-reviewer`가 봉인한 `success_record_id`와 `상태: PASS` 기록 전문, 용어·표현 출처표 및 `TERM_EXPRESSION_GATE: PASS` 전문, `syntax-scope-reviewer`의 `PASS` 보고서 전문, 조건 4에서 허용한 현재 기술 원자료 목록이 추가로 필요하다.
 
 `review_scope: DEPENDENT_SET`인 `AUTHORING_DRAFT`와 `FINALIZATION`에는 다음 자료가 모두 필요하다.
 
 - `AUTHORING_DRAFT`이면 유효한 루트 `DRAFT_CLAIM_LOCK` 또는 `FINAL_CLAIM_LOCK`, `FINALIZATION`이면 유효한 루트 `FINAL_CLAIM_LOCK` 전문
 - `dependent_set_id`, `dependent_design_revision`, `dependent_revision`과 정확한 종속항 세트 전문
 - `dependent-claim-strategy-architect`의 `상태: PASS`, `DEPENDENT_DESIGN_GATE: LOCKED` 보고서 전문과 후보별 과제–특징–원리–효과·의미 한정 패키지
-- 같은 dependent_revision의 `dependent_success_record_id`와 기록 전문 및 그 기록의 `NON_PATENT_TECHNICAL_READER_GATE`·해당하는 `GEOMETRIC_OBJECT_GATE`
+- 같은 dependent_revision에 대해 `claim-success-reviewer`가 봉인한 `dependent_success_record_id`와 `상태: PASS` 기록 전문 및 그 기록의 `NON_PATENT_TECHNICAL_READER_GATE`·해당하는 `GEOMETRIC_OBJECT_GATE`
 - 같은 dependent_revision의 `dependent_style_record_id`, 변경 대조표 및 `CLAIM_STYLE_GATE: PASS` 전문
 - 같은 dependent_revision의 용어·표현 출처표 및 `TERM_EXPRESSION_GATE: PASS` 전문
 - `syntax-scope-reviewer`의 `review_scope: DEPENDENT_SET`, `PASS` 보고서 전문

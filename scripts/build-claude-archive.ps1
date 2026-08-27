@@ -53,14 +53,20 @@ try {
     $stagedClaude = [System.IO.File]::ReadAllText((Join-Path $stagingDirectory 'CLAUDE.md'))
     $stagedBlindRole = [System.IO.File]::ReadAllText((Join-Path $stagingDirectory '.claude\agents\blind-claim-reconstruction-reviewer.md'))
     $stagedStyleRole = [System.IO.File]::ReadAllText((Join-Path $stagingDirectory '.claude\agents\claim-style-adjuster.md'))
-    foreach ($requiredToken in @('CLAIM_STYLE_GATE', 'claim-style-adjuster', 'DEPENDENT_RECONSTRUCTION_GATE', 'NON_PATENT_TECHNICAL_READER_GATE', 'GEOMETRIC_OBJECT_GATE')) {
+    $stagedSuccessRole = [System.IO.File]::ReadAllText((Join-Path $stagingDirectory '.claude\agents\claim-success-reviewer.md'))
+    foreach ($requiredToken in @('CLAIM_STYLE_GATE', 'claim-style-adjuster', 'claim-success-reviewer', 'success_record_id', 'DEPENDENT_RECONSTRUCTION_GATE', 'NON_PATENT_TECHNICAL_READER_GATE', 'GEOMETRIC_OBJECT_GATE')) {
         if (-not $stagedClaude.Contains($requiredToken)) {
             throw "CLAUDE.md is missing required reconstruction token: $requiredToken"
         }
     }
-    foreach ($requiredToken in @('PRE_STYLE — NOT_GATE_ELIGIBLE', 'STYLE_ONLY_REVISION', 'CLAIM_STYLE_GATE')) {
+    foreach ($requiredToken in @('PRE_STYLE — NOT_GATE_ELIGIBLE', 'STYLE_ONLY_REVISION', 'CLAIM_STYLE_GATE', 'sources/README.md', 'sources/청구항_예시검색_라우팅인덱스.md', 'sources/청구항_문체학습용_분야별검색최적화본.md', '조건부 보조 소스: NOT_ACTIVATED')) {
         if (-not $stagedStyleRole.Contains($requiredToken)) {
             throw "Style adjuster is missing required contract token: $requiredToken"
+        }
+    }
+    foreach ($requiredToken in @('success_scope: INDEPENDENT | DEPENDENT_SET', 'sources/README.md', 'sources/독립항_작성_성공조건.md', 'sources/05_종속항_전개패턴_가이드.md', 'success_record_id', 'dependent_success_record_id', 'syntax 진행 가능')) {
+        if (-not $stagedSuccessRole.Contains($requiredToken)) {
+            throw "Success reviewer is missing required contract token: $requiredToken"
         }
     }
     foreach ($requiredToken in @('claim_scope: INDEPENDENT | DEPENDENT_SINGLE', 'dependent_blind_snapshot_id')) {
@@ -84,7 +90,13 @@ try {
         $entryNames = @($probe.Entries | ForEach-Object FullName)
         foreach ($requiredEntry in @(
             '.claude/agents/claim-style-adjuster.md',
+            '.claude/agents/claim-success-reviewer.md',
             '.claude/agents/dependent-claim-strategy-architect.md',
+            'sources/README.md',
+            'sources/독립항_작성_성공조건.md',
+            'sources/05_종속항_전개패턴_가이드.md',
+            'sources/청구항_예시검색_라우팅인덱스.md',
+            'sources/청구항_문체학습용_분야별검색최적화본.md',
             'sources/08_종속항_기술기여_게이트.md',
             'CLAUDE.md'
         )) {
@@ -109,6 +121,7 @@ try {
         $finalEntries = @($finalArchive.Entries | ForEach-Object FullName)
         $entryCount = $finalEntries.Count
         $hasStyleRole = $finalEntries -contains '.claude/agents/claim-style-adjuster.md'
+        $hasSuccessRole = $finalEntries -contains '.claude/agents/claim-success-reviewer.md'
         $hasDependentRole = $finalEntries -contains '.claude/agents/dependent-claim-strategy-architect.md'
         $hasGate08 = $finalEntries -contains 'sources/08_종속항_기술기여_게이트.md'
     }
@@ -121,6 +134,7 @@ try {
         Backup = if (Test-Path -LiteralPath $backupPath) { $backupPath } else { $null }
         EntryCount = $entryCount
         HasStyleRole = $hasStyleRole
+        HasSuccessRole = $hasSuccessRole
         HasDependentRole = $hasDependentRole
         HasGate08 = $hasGate08
         TargetSize = (Get-Item -LiteralPath $targetPath).Length
