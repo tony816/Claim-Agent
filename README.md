@@ -1,0 +1,27 @@
+# Claim Copa for Claude Code
+
+한국어 특허 청구항을 위한 프로젝트 전용 다중 에이전트 구성이다. `sources/`의 파일이 승인되었다는 사실만으로 현재 발명의 기술적 원자료 또는 검증된 긍정 예시가 되는 것은 아니며, 역할과 활성 시점은 `sources/README.md`에서 구분한다.
+
+## 구성
+
+- `CLAUDE.md`: 주 오케스트레이터의 우선순위, 활성 순서, 필수 검수 루프
+- `claim-architect`: 주골격·근거·최소충분 한정 설계
+- `dependent-claim-strategy-architect`: 독립항 LOCK 뒤 종속항 후보의 과제–특징–작동원리–효과를 검증하고 단순 도면 묘사를 배제
+- `claim-drafter`: 잠긴 독립항 설계 또는 종속항 기술기여 계약을 보존해 청구항 문언 작성
+- `syntax-scope-reviewer`: 용어 출처·통사·명제 트리·부모항 체인·권리범위 감사
+- `oa-strategy-reviewer`: 독립항 및 종속항 세트의 분리된 DRAFT·FINAL OA·회피설계 감사
+- `blind-claim-reconstruction-reviewer`: 파일·검색·웹 도구 없이 독립항 또는 부모항 체인을 포함한 개별 종속항 문언만으로 비특허 기술 독자의 관계·형상 snapshot을 봉인하는 독립 감사
+- `picture-claim-reconstruction-reviewer`: 봉인 snapshot을 DESIGN_GATE 또는 목표 `DC-NN`·DEPENDENT_DESIGN_GATE·도면과 비교하는 최종 관계·형상 감사
+
+청구항 작성은 `AUTHORING_DRAFT`, 출원용 최종 검증은 `FINALIZATION`으로 분리한다. 독립항은 같은 candidate revision을 용어·표현 출처 게이트 → syntax → OA → blind → 기준 비교 순서로 검수한다. 유효한 독립항 LOCK 뒤 종속항을 요청하면 별도 `dependent_set_id`에 대해 기술기여 설계 → 문언 작성 → dependent success → syntax → OA → 종속항별 blind → 기준·도면 비교를 수행한다. `DEPENDENT_DESIGN_GATE`가 잠기기 전에는 종속항을 작성하지 않고, `DEPENDENT_RECONSTRUCTION_GATE: PASS` 전에는 종속항 세트 LOCK을 만들지 않는다. PHYSICAL/HYBRID 문언은 일반 기계 개발자의 1회독 도식화와 실제 물체·면/관찰 단면·기준/단면 윤곽/형상 술어 주체의 분리까지 검사한다. 기술기여 후보가 없으면 형상 항으로 수를 채우지 않는다. 잠정·최종 종속항 세트는 각각 `DRAFT_DEPENDENT_SET_LOCK`과 `FINAL_DEPENDENT_SET_LOCK`으로 독립항 LOCK과 분리한다.
+
+## 웹 단일 에이전트판
+
+서브에이전트를 사용할 수 없는 웹 프로젝트에서는 [`web/PROJECT_INSTRUCTIONS.md`](web/PROJECT_INSTRUCTIONS.md)를 프로젝트 지침으로 사용한다. 이 어댑터는 기존 기술·통사·OA 기준을 유지하면서 역할을 한 에이전트가 순차 패스로 수행하게 한다.
+
+- 한 대화 안에서 끝내는 `WEB_SINGLE_CHAT`은 `DRAFT-SELF` 독립항 LOCK 뒤 동일 문맥 순차 패스로 종속항 기술기여 게이트, 목표항별 self reconstruction·기준 비교 및 별도 DRAFT 종속항 세트 LOCK까지 만들 수 있다. 독립 검수로 표시하거나 FINAL LOCK으로 승격하지 않는다.
+- 별도의 빈 대화에서 격리된 blind snapshot을 받는 `WEB_ISOLATED_CHATS`은 `DRAFT-ISOLATED` 잠금을 만들 수 있다.
+- 서브에이전트 부재 자체는 `LOCK_MISSING_OR_STALE` 사유가 아니다. 실제 입력·문언·근거·게이트 결함만 중단 사유가 된다.
+- 모든 기록은 `bundle_version`, `source_set_id`, `input_revision`, `design_revision`, `candidate_id`, `revision`으로 버전 고정된다.
+
+웹 업로드용 묶음은 `scripts/build-web-bundle.ps1`로 생성한다. 결과물은 `dist/claim-copa-web-<버전>/`과 같은 이름의 ZIP 파일이다.

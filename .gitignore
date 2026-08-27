@@ -1,0 +1,10 @@
+# Generated release bundles and local archive snapshots
+/dist/
+/.claude*.zip
+
+# Local editor and operating-system metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.tmp
