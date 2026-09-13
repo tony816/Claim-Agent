@@ -1,5 +1,7 @@
 # Claim Copa Python + Gemini 런타임
 
+> 처음 쓰는 분을 위한 안내는 [`../사용법.md`](../사용법.md)에 있다. 이 문서는 설정과 내부 구조를 다룬다.
+
 `claim_copa/`는 `CLAUDE.md`의 19단계 다중 에이전트 절차를 Claude Code 없이 실행하는 독립 프로그램이다. 역할 프롬프트는 계속 `.claude/agents/*.md`가 단일 출처이며(frontmatter만 제거해 system instruction으로 사용), 소스 권한은 `sources/README.md`를 그대로 따른다. 실행 프로필은 `PY_GEMINI_MULTI_CALL`이고 LOCK의 `lock_class`는 `DRAFT-ISOLATED-PY`다.
 
 핵심 차이는 **부기(簿記)를 LLM이 아니라 Python이 한다**는 점이다.

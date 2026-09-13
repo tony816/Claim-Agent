@@ -19,6 +19,8 @@
 
 ## Python + Gemini 런타임
 
+**처음 쓰는 분은 [`사용법.md`](사용법.md)부터 보면 된다.** 설치·실행·결과 읽기·멈췄을 때 대처를 복사해 쓸 수 있는 명령으로 정리했다.
+
 Claude Code 없이 같은 절차를 실행하는 독립 프로그램은 [`docs/python_runtime.md`](docs/python_runtime.md)를 따른다. `.claude/agents/*.md`를 그대로 system instruction으로 쓰고, 게이트 전제조건·record_id·revision 무효화·블라인드 격리·LOCK 조립을 Python이 결정론적으로 수행하며, Gemini API(기본 `gemini-3.8-flash`, `claim-copa.yaml`에서 변경)로 각 역할을 호출한다.
 
 ```bash
