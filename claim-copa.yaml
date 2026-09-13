@@ -1,0 +1,44 @@
+# Claim Copa Python runtime configuration.
+# Override any key with an experiment variant (experiments/*.yaml) or CLI flags.
+
+model:
+  default: gemini-3.8-flash        # verify with `claim-copa models`
+  api_key_env: GEMINI_API_KEY
+  max_output_tokens: 32768
+
+roles:
+  claim-architect:                       {thinking_level: HIGH,   temperature: 0.2}
+  claim-drafter:                         {thinking_level: HIGH,   temperature: 0.3}
+  claim-style-adjuster:                  {thinking_level: MEDIUM, temperature: 0.2, aux_mode: two_phase}
+  claim-success-reviewer:                {thinking_level: HIGH,   temperature: 0.1}
+  syntax-scope-reviewer:                 {thinking_level: HIGH,   temperature: 0.1}
+  oa-strategy-reviewer:                  {thinking_level: HIGH,   temperature: 0.1}
+  blind-claim-reconstruction-reviewer:   {thinking_level: MEDIUM, temperature: 0.7, cache: false, tools: false}
+  picture-claim-reconstruction-reviewer: {thinking_level: HIGH,   temperature: 0.1}
+  dependent-claim-strategy-architect:    {thinking_level: HIGH,   temperature: 0.2}
+
+cache:
+  enabled: true
+  ttl: "3600s"
+  min_expected_reuse: 2
+
+pipeline:
+  max_return_loops: {STYLE_ONLY: 2, DRAFTER: 2, ARCHITECT: 1, DEPENDENT_ARCHITECT: 1}
+  max_concurrency: 3
+  expand_multi_dependent: false
+  retry: {max_attempts: 3, backoff_s: [2, 8, 20]}
+
+paths:
+  roles_dir: .claude/agents
+  sources_dir: sources
+  runs_dir: runs
+  lessons_dir: lessons
+  eval_dir: eval
+  experiments_dir: experiments
+
+lessons:
+  inject: approved_only   # approved_only | none
+
+telemetry:
+  enabled: true
+  pricing: {}             # e.g. {gemini-3.8-flash: {input_per_m: 0.3, cached_per_m: 0.03, output_per_m: 2.5}}

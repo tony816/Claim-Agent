@@ -1,0 +1,33 @@
+{
+  "key": "4447738b898e3645e782a789c160df5049680fec05bf496c0785ee988ad369d2",
+  "meta": {
+    "role": "claim-style-adjuster",
+    "scope": "INDEPENDENT",
+    "model": "gemini-3.8-flash",
+    "phase": "tool_phase",
+    "stage": "STYLE",
+    "record_id": null,
+    "target_claim_id": null,
+    "system_sha": "d136afbf3c743cedba0e74c19f72abbad8f6d642f4156e52f6a50bade5beecd3",
+    "sources_sha": "e29ac2ecd765299d02accf38d0847d0c11524dbac9e3046b6a29a14816374237",
+    "packet_sha": "9d8b5300dfd15b2b495955c7c00586dc5f33a57d8dd213757485535749ebefa4",
+    "gen": {
+      "temperature": 0.2,
+      "thinking_level": "MEDIUM",
+      "max_output_tokens": 32768
+    }
+  },
+  "request_preview": "## RUN_HEADER\nexecution_profile: PY_GEMINI_MULTI_CALL\nprotocol_version: 1.4.0\nsource_set_id: cc-py-0f5b6704-d171d9ad-none-a1\nrun_id: fixture-gen\nrequest_mode: AUTHORING_DRAFT\ninput_revision: i-c96ce98a\ncandidate_id: clip-holder\nrevision: r1\ndesign_revision: d1\ndependent_set_id: N/A\ndependent_design_revision: N/A\ndependent_revision: N/A\ntarget_claim_id: N/A\nrecord_id (오케스트레이터 지정, PASS 시 발급): sty-clip-holder-r1-01\nPRIOR_ART_SET: NONE\n정식 명세서 상태: MISSING\nstyle_scope: INDEPENDENT\nstyle_change_mode: INITIAL_FROM_DRAFTER\nstyle_record_id: sty-clip-holder-r1-01\n목표 revision: r1\n\n### USER_LOCK 원문\n\n없음\n\n### 현재 발명 원자료 (전문)\n\n<<<MATERIAL [invention] invention.md (sha256=327b690a66f8)>>>\n# 발명 설명 — 케이블 클립 홀더 (합성 테스트용 원자료)\n\n본 자료는 Claim Copa 런타임의 오프라인 테스트를 위해 만든 합성 발명 설명이다. 실제 출원 자료가 아니다.\n\n## 기술 분야\n\n책상 가장자리에 고정되어 복수의 케이블을 각각 분리 보관하는 케이블 클립 홀더.\n\n## 구성\n\n- 베이스: 책상 가장자리에 걸리는 ㄷ자 형태의 클램프부를 갖는다. 클램프부는 상판과 하판, 상판과 하판을 잇는 연결판으로 이루어진다.\n- 조임 나사: 하판을 관통하여 상판 쪽으로 진행하며, 끝단이 책상 하면을 눌러 베이스를 책상에 고정한다.\n- 홀더 본체: 상판의 상면에 결합되고, 상면에 복수의 슬롯이 폭 방향으로 나란히 형성된다.\n- 슬롯: 각 슬롯은 위쪽으로 개방된 U자 형상의 홈이며, 입구 폭이 바닥 폭보다 좁아 케이블이 위에서 눌러 넣어지면 입구가 탄성 변형된 뒤 복원되어 케이블을 붙잡는다.\n- 탄성 리브: 홀더 본체의 각 슬롯 입구 양측에 형성되고, 슬롯 내측으로 돌출한다.\n\n## 작용·효과\n\n- 조임 나사가 책상 하면을 누르면 상판이 책상 상면에 밀착되어 홀더 본체가 흔들리지 않는다.\n- 슬롯 입구가 바닥보다 좁고 탄성 리브가 있으므로 케이블을 힘 주어 눌러 넣으면 리브가 벌어졌다가 복원되어 케이블이 빠지지 않는다.\n- 슬롯이 폭 방향으로 나란히 있으므로 케이블이 서로 엉키지 않는다.\n\n## 도면 설명\n\n- 도 1: 홀더 본체와 베이스의 사시도. 슬롯 4개가 폭 방향으로 나란히 보인다.\n- 도 2: 슬롯의 폭 방향 단면. 입구 폭 w1이 바닥 폭 w2보다 좁고, 입구 양측에 탄성 리브가 슬롯 내측으로 돌출한 윤곽이 보인다.\n<<<END MATERIAL>>>\n\n### DESIGN_GATE: LOCKED 전문 (dg-clip-holder-d1-01)\n\n- DESIGN_GATE: LOCKED\n- 상태: PASS\n- 주골격 3~5개: 베이스/조임 나사/홀더 본체/슬롯 입구 폭\n- 검수 대상 exact 청구항 전문: (생략 없이 아래)\n- 소스 로딩 기록: 사전 로딩 블록\n- 문언 직접 수정 여부: 없음\n\n역할 보고서 본문 역할 보고서 본문 역할 보고서 본문 역할 보고서 본문 역할 보고서 본문\n\n### claim-drafter PRE_STYLE 의미 초안 보고서 전문 (revision_status: PRE_STYLE — NOT_GATE_ELIGIBLE) (md-clip-holder-r1-01)\n\n- DRAFTER_GATE: PASS\n- PRE_STYLE_NON_PATENT_TECHNICAL_READER_CHECK: PASS\n- PRE_STYLE_GEOMETRIC_OBJECT_CHECK: PASS\n- 상태: PASS\n- claim-",
+  "response": {
+    "text": "SEARCH_DONE",
+    "parsed": null,
+    "usage": {},
+    "latency_ms": 0,
+    "cache_hit": false,
+    "cache_name": null,
+    "function_calls": [],
+    "finish_reason": "STOP",
+    "model": "gemini-3.8-flash",
+    "provider": "scripted"
+  }
+}

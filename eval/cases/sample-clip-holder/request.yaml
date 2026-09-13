@@ -1,0 +1,11 @@
+request_mode: AUTHORING_DRAFT
+candidate_id: clip-holder
+request_text: |
+  케이블 클립 홀더의 독립항 1항 잠정안을 작성하고, 잠정 종속항 세트를 이어서 작성한다.
+  정식 명세서는 아직 없다. 선행기술은 제공하지 않는다.
+invention_sources:
+  - sources/invention.md
+prior_art: []
+dependent: true
+dependent_target: "2~4"
+dependent_set_id: clip-holder-dep

@@ -1,0 +1,76 @@
+{
+  "key": "b1bed476b39223b4368b8c73f3205f9b7a8d68d6835f82daf4be5684718d1ff2",
+  "meta": {
+    "role": "picture-claim-reconstruction-reviewer",
+    "scope": "DEPENDENT_SINGLE",
+    "model": "gemini-3.8-flash",
+    "phase": "main",
+    "stage": "DEP_RECON",
+    "record_id": "drc-clip-holder-dep-dr1-2-01",
+    "target_claim_id": "2",
+    "system_sha": "b641c1bfabd700040ebe0b8ed0cadf7cdcb070543e78a2ab2e6fd102cec6eca6",
+    "sources_sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "packet_sha": "14ea0817e07b6f0de2dc594d4e27f425fca8dd45c3618daee5ba231a74d05bc0",
+    "gen": {
+      "temperature": 0.1,
+      "thinking_level": "HIGH",
+      "max_output_tokens": 32768
+    }
+  },
+  "request_preview": "## RUN_HEADER\nexecution_profile: PY_GEMINI_MULTI_CALL\nprotocol_version: 1.4.0\nsource_set_id: cc-py-0f5b6704-d171d9ad-none-a1\nrun_id: fixture-gen\nrequest_mode: AUTHORING_DRAFT\ninput_revision: i-c96ce98a\ncandidate_id: clip-holder\nrevision: r1\ndesign_revision: d1\ndependent_set_id: clip-holder-dep\ndependent_design_revision: dd1\ndependent_revision: dr1\ntarget_claim_id: 2\nrecord_id (오케스트레이터 지정, PASS 시 발급): drc-clip-holder-dep-dr1-2-01\nPRIOR_ART_SET: NONE\n정식 명세서 상태: MISSING\nmode: REFERENCE_COMPARE\nclaim_scope: DEPENDENT_SINGLE\ndependent_blind_snapshot_id: dbs-clip-holder-dep-dr1-2-01\n목표 DC: DC-01\n\n### 부모항 체인 전문 (blind 입력과 동일)\n\n【청구항 1】\n책상 가장자리에 걸리는 클램프부를 갖는 베이스;\n상기 클램프부의 하판을 관통하여 끝단이 책상 하면을 누르는 조임 나사; 및\n상기 클램프부의 상판의 상면에 결합되고, 위쪽으로 개방된 복수의 슬롯이 폭 방향으로 나란히 형성된 홀더 본체를 포함하고,\n상기 복수의 슬롯 각각은 입구 폭이 바닥 폭보다 좁게 형성되는 케이블 클립 홀더.\n\n### 목표 종속항 전문 (blind 입력과 동일)\n\n【청구항 2】\n제1항에 있어서,\n상기 홀더 본체는 상기 복수의 슬롯 각각의 입구 양측에 형성되어 상기 슬롯의 내측으로 돌출하는 탄성 리브를 더 포함하는 케이블 클립 홀더.\n\n### 봉인된 dependent blind snapshot 전문 (dbs-clip-holder-dep-dr1-2-01)\n\n- 상태: PASS\n- 실행 상태: BLIND_COMPLETE\n- 1회독 도식화 가능성: YES\n- 검수 대상 exact 청구항 전문: (생략 없이 아래)\n- 소스 로딩 기록: 사전 로딩 블록\n- 문언 직접 수정 여부: 없음\n\n역할 보고서 본문 역할 보고서 본문 역할 보고서 본문 역할 보고서 본문 역할 보고서 본문\n\n### 루트 독립항 LOCK 전문 (dcl-clip-holder-r1-01)\n\n# DRAFT_CLAIM_LOCK dcl-clip-holder-r1-01\n\n```text\nrecord_type: DRAFT_CLAIM_LOCK\nlock_id: dcl-clip-holder-r1-01\nlock_class: DRAFT-ISOLATED-PY\nexecution_profile: PY_GEMINI_MULTI_CALL\nprotocol_version: 1.4.0\nsource_set_id: cc-py-0f5b6704-d171d9ad-none-a1\nrun_id: fixture-gen\ninput_revision: i-c96ce98a\ncandidate_id: clip-holder\nrevision: r1\ndesign_revision: d1\nUSER_LOCK: 없음\nroot_claim_text: |\n  【청구항 1】\n  책상 가장자리에 걸리는 클램프부를 갖는 베이스;\n  상기 클램프부의 하판을 관통하여 끝단이 책상 하면을 누르는 조임 나사; 및\n  상기 클램프부의 상판의 상면에 결합되고, 위쪽으로 개방된 복수의 슬롯이 폭 방향으로 나란히 형성된 홀더 본체를 포함하고,\n  상기 복수의 슬롯 각각은 입구 폭이 바닥 폭보다 좁게 형성되는 케이블 클립 홀더.\nroot_text_sha256: eca059f307ce64fc08713794347f1cdef8496e603f153d921fdd6cd3c7f929b9\ninvention_sources:\n  - invention.md\ndesign_record_id: dg-clip-holder-d1-01\nmeaning_draft",
+  "response": {
+    "text": "{\"identifiers\": {\"candidate_id\": \"clip-holder\", \"revision\": \"r1\", \"design_revision\": \"d1\", \"dependent_set_id\": \"clip-holder-dep\", \"dependent_design_revision\": \"dd1\", \"dependent_revision\": \"dr1\", \"target_claim_id\": \"2\", \"record_id\": \"drc-clip-holder-dep-dr1-2-01\"}, \"execution_status\": \"RUN\", \"status\": \"PASS\", \"reason_code\": null, \"gates\": {\"NON_PATENT_TECHNICAL_READER_GATE\": \"PASS\", \"GEOMETRIC_OBJECT_GATE\": \"PASS\"}, \"gate_reasons\": [], \"checks\": [], \"next_step\": \"PROCEED\", \"handoff_ready\": true, \"finalized_status\": null, \"exact_claim_text\": null, \"claims\": [], \"per_claim_gates\": [], \"invention_type\": {\"primary\": \"PHYSICAL\", \"secondary\": [], \"hybrid\": false}, \"candidates\": [], \"sketchability\": null, \"open_issues\": [], \"sources_read\": [], \"aux_source_usage\": null, \"report_markdown\": \"- NON_PATENT_TECHNICAL_READER_GATE: PASS\\n- GEOMETRIC_OBJECT_GATE: PASS\\n- 상태: PASS\\n- 최종 판정: PASS\\n- 검수 대상 exact 청구항 전문: (생략 없이 아래)\\n- 소스 로딩 기록: 사전 로딩 블록\\n- 문언 직접 수정 여부: 없음\\n\\n역할 보고서 본문 역할 보고서 본문 역할 보고서 본문 역할 보고서 본문 역할 보고서 본문 \"}",
+    "parsed": {
+      "identifiers": {
+        "candidate_id": "clip-holder",
+        "revision": "r1",
+        "design_revision": "d1",
+        "dependent_set_id": "clip-holder-dep",
+        "dependent_design_revision": "dd1",
+        "dependent_revision": "dr1",
+        "target_claim_id": "2",
+        "record_id": "drc-clip-holder-dep-dr1-2-01"
+      },
+      "execution_status": "RUN",
+      "status": "PASS",
+      "reason_code": null,
+      "gates": {
+        "NON_PATENT_TECHNICAL_READER_GATE": "PASS",
+        "GEOMETRIC_OBJECT_GATE": "PASS"
+      },
+      "gate_reasons": [],
+      "checks": [],
+      "next_step": "PROCEED",
+      "handoff_ready": true,
+      "finalized_status": null,
+      "exact_claim_text": null,
+      "claims": [],
+      "per_claim_gates": [],
+      "invention_type": {
+        "primary": "PHYSICAL",
+        "secondary": [],
+        "hybrid": false
+      },
+      "candidates": [],
+      "sketchability": null,
+      "open_issues": [],
+      "sources_read": [],
+      "aux_source_usage": null,
+      "report_markdown": "- NON_PATENT_TECHNICAL_READER_GATE: PASS\n- GEOMETRIC_OBJECT_GATE: PASS\n- 상태: PASS\n- 최종 판정: PASS\n- 검수 대상 exact 청구항 전문: (생략 없이 아래)\n- 소스 로딩 기록: 사전 로딩 블록\n- 문언 직접 수정 여부: 없음\n\n역할 보고서 본문 역할 보고서 본문 역할 보고서 본문 역할 보고서 본문 역할 보고서 본문 "
+    },
+    "usage": {
+      "prompt_tokens": 1000,
+      "cached_tokens": 0,
+      "thoughts_tokens": 100,
+      "output_tokens": 500,
+      "total_tokens": 1600
+    },
+    "latency_ms": 1,
+    "cache_hit": false,
+    "cache_name": null,
+    "function_calls": [],
+    "finish_reason": "STOP",
+    "model": "gemini-3.8-flash",
+    "provider": "scripted"
+  }
+}

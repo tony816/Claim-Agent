@@ -1,0 +1,73 @@
+{
+  "key": "53080fd926a9499e561de1213954a0b9dd3d9679020207c1eb6c81167c5cf0e4",
+  "meta": {
+    "role": "blind-claim-reconstruction-reviewer",
+    "scope": "DEPENDENT_SINGLE",
+    "model": "gemini-3.8-flash",
+    "phase": "main",
+    "stage": "DEP_RECON",
+    "record_id": "dbs-clip-holder-dep-dr1-2-01",
+    "target_claim_id": "2",
+    "system_sha": "b144a70f9b60e68bb2d4af747ee34afe24b39212fdbc5b288d4c79a9dfca0880",
+    "sources_sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "packet_sha": "6172ff391b1ce5f0003e50abae2fd1280104f01cfdf7c620833d651e3b89aa62",
+    "gen": {
+      "temperature": 0.7,
+      "thinking_level": "MEDIUM",
+      "max_output_tokens": 32768
+    }
+  },
+  "request_preview": "mode: BLIND_SNAPSHOT\nprotocol_version: 1.4.0\nclaim_scope: DEPENDENT_SINGLE\ncandidate_id: clip-holder\nrevision: r1\ndesign_revision: d1\nrecord_id: dbs-clip-holder-dep-dr1-2-01\ndependent_set_id: clip-holder-dep\ndependent_design_revision: dd1\ndependent_revision: dr1\ntarget_claim_id: 2\nparent_chain_text:\n【청구항 1】\n책상 가장자리에 걸리는 클램프부를 갖는 베이스;\n상기 클램프부의 하판을 관통하여 끝단이 책상 하면을 누르는 조임 나사; 및\n상기 클램프부의 상판의 상면에 결합되고, 위쪽으로 개방된 복수의 슬롯이 폭 방향으로 나란히 형성된 홀더 본체를 포함하고,\n상기 복수의 슬롯 각각은 입구 폭이 바닥 폭보다 좁게 형성되는 케이블 클립 홀더.\ntarget_claim_text:\n【청구항 2】\n제1항에 있어서,\n상기 홀더 본체는 상기 복수의 슬롯 각각의 입구 양측에 형성되어 상기 슬롯의 내측으로 돌출하는 탄성 리브를 더 포함하는 케이블 클립 홀더.\n",
+  "response": {
+    "text": "{\"identifiers\": {\"candidate_id\": \"clip-holder\", \"revision\": \"r1\", \"design_revision\": \"d1\", \"dependent_set_id\": \"clip-holder-dep\", \"dependent_design_revision\": \"dd1\", \"dependent_revision\": \"dr1\", \"target_claim_id\": \"2\", \"record_id\": \"dbs-clip-holder-dep-dr1-2-01\"}, \"execution_status\": \"BLIND_COMPLETE\", \"status\": \"PASS\", \"reason_code\": null, \"gates\": {}, \"gate_reasons\": [], \"checks\": [], \"next_step\": \"PROCEED\", \"handoff_ready\": true, \"finalized_status\": null, \"exact_claim_text\": null, \"claims\": [], \"per_claim_gates\": [], \"invention_type\": {\"primary\": \"PHYSICAL\", \"secondary\": [], \"hybrid\": false}, \"candidates\": [], \"sketchability\": \"YES\", \"open_issues\": [], \"sources_read\": [], \"aux_source_usage\": null, \"report_markdown\": \"- 상태: PASS\\n- 실행 상태: BLIND_COMPLETE\\n- 1회독 도식화 가능성: YES\\n- 검수 대상 exact 청구항 전문: (생략 없이 아래)\\n- 소스 로딩 기록: 사전 로딩 블록\\n- 문언 직접 수정 여부: 없음\\n\\n역할 보고서 본문 역할 보고서 본문 역할 보고서 본문 역할 보고서 본문 역할 보고서 본문 \"}",
+    "parsed": {
+      "identifiers": {
+        "candidate_id": "clip-holder",
+        "revision": "r1",
+        "design_revision": "d1",
+        "dependent_set_id": "clip-holder-dep",
+        "dependent_design_revision": "dd1",
+        "dependent_revision": "dr1",
+        "target_claim_id": "2",
+        "record_id": "dbs-clip-holder-dep-dr1-2-01"
+      },
+      "execution_status": "BLIND_COMPLETE",
+      "status": "PASS",
+      "reason_code": null,
+      "gates": {},
+      "gate_reasons": [],
+      "checks": [],
+      "next_step": "PROCEED",
+      "handoff_ready": true,
+      "finalized_status": null,
+      "exact_claim_text": null,
+      "claims": [],
+      "per_claim_gates": [],
+      "invention_type": {
+        "primary": "PHYSICAL",
+        "secondary": [],
+        "hybrid": false
+      },
+      "candidates": [],
+      "sketchability": "YES",
+      "open_issues": [],
+      "sources_read": [],
+      "aux_source_usage": null,
+      "report_markdown": "- 상태: PASS\n- 실행 상태: BLIND_COMPLETE\n- 1회독 도식화 가능성: YES\n- 검수 대상 exact 청구항 전문: (생략 없이 아래)\n- 소스 로딩 기록: 사전 로딩 블록\n- 문언 직접 수정 여부: 없음\n\n역할 보고서 본문 역할 보고서 본문 역할 보고서 본문 역할 보고서 본문 역할 보고서 본문 "
+    },
+    "usage": {
+      "prompt_tokens": 1000,
+      "cached_tokens": 0,
+      "thoughts_tokens": 100,
+      "output_tokens": 500,
+      "total_tokens": 1600
+    },
+    "latency_ms": 1,
+    "cache_hit": false,
+    "cache_name": null,
+    "function_calls": [],
+    "finish_reason": "STOP",
+    "model": "gemini-3.8-flash",
+    "provider": "scripted"
+  }
+}

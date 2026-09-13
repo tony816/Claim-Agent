@@ -1,0 +1,12 @@
+# Example experiment variant. Run with:
+#   claim-copa eval run --case sample-clip-holder --variant experiments/example-medium-thinking.yaml --baseline
+#   claim-copa run ... --shadow experiments/example-medium-thinking.yaml
+name: medium-thinking
+description: 검수 역할의 thinking_level을 MEDIUM으로 낮춰 비용·지연 대비 게이트 결과 변화를 본다.
+overrides:
+  roles.claim-success-reviewer.thinking_level: MEDIUM
+  roles.syntax-scope-reviewer.thinking_level: MEDIUM
+  roles.oa-strategy-reviewer.thinking_level: MEDIUM
+prompt_suffix: {}        # role -> path to a markdown file appended to that role's system instruction
+lessons:
+  inject: approved_only  # approved_only | none, or include: [L-0001, ...]

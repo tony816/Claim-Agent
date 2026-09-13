@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claim-copa"
+version = "0.1.0"
+description = "Claim Copa: Python + Gemini runtime for the Korean patent-claim multi-agent pipeline"
+requires-python = ">=3.11"
+dependencies = [
+    "google-genai>=2.23.0",
+    "pydantic>=2.6",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+claim-copa = "claim_copa.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["claim_copa*"]
+
+[tool.setuptools.package-data]
+"claim_copa.roles" = ["*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["live: requires GEMINI_API_KEY and network"]

@@ -17,6 +17,16 @@
 
 청구항 작성은 `AUTHORING_DRAFT`, 출원용 최종 검증은 `FINALIZATION`으로 분리한다. 독립항은 architect → drafter의 PRE_STYLE 의미 초안 → 별도 style adjuster의 용어·스타일 후처리 → 별도 success reviewer → syntax → OA → blind → 기준 비교 순서로 검수한다. 유효한 독립항 LOCK 뒤 종속항을 요청하면 별도 `dependent_set_id`에 대해 기술기여 설계 → PRE_STYLE 문언 작성 → 별도 dependent style 조정 → 별도 dependent success reviewer → syntax → OA → 종속항별 blind → 기준·도면 비교를 수행한다. `CLAIM_STYLE_GATE: PASS` 전에는 PRE_STYLE 초안을 exact revision으로 취급하지 않고, 유효한 success record 전에는 syntax로 진행하지 않으며, `DEPENDENT_DESIGN_GATE`가 잠기기 전에는 종속항을 작성하지 않고 `DEPENDENT_RECONSTRUCTION_GATE: PASS` 전에는 종속항 세트 LOCK을 만들지 않는다. PHYSICAL/HYBRID 문언은 일반 기계 개발자의 1회독 도식화와 실제 물체·면/관찰 단면·기준/단면 윤곽/형상 술어 주체의 분리까지 검사한다. 기술기여 후보가 없으면 형상 항으로 수를 채우지 않는다. 잠정·최종 종속항 세트는 각각 `DRAFT_DEPENDENT_SET_LOCK`과 `FINAL_DEPENDENT_SET_LOCK`으로 독립항 LOCK과 분리한다.
 
+## Python + Gemini 런타임
+
+Claude Code 없이 같은 절차를 실행하는 독립 프로그램은 [`docs/python_runtime.md`](docs/python_runtime.md)를 따른다. `.claude/agents/*.md`를 그대로 system instruction으로 쓰고, 게이트 전제조건·record_id·revision 무효화·블라인드 격리·LOCK 조립을 Python이 결정론적으로 수행하며, Gemini API(기본 `gemini-3.8-flash`, `claim-copa.yaml`에서 변경)로 각 역할을 호출한다.
+
+```bash
+pip install -e . && claim-copa doctor --contracts
+claim-copa run --request-yaml eval/cases/sample-clip-holder/request.yaml --replay eval/cases/sample-clip-holder/fixtures   # 오프라인 데모
+claim-copa feedback · claim-copa eval run --case … --variant … --shadow · claim-copa lessons approve L-0001            # 개선 루프
+```
+
 ## 웹 단일 에이전트판
 
 서브에이전트를 사용할 수 없는 웹 프로젝트에서는 [`web/PROJECT_INSTRUCTIONS.md`](web/PROJECT_INSTRUCTIONS.md)를 프로젝트 지침으로 사용한다. 이 어댑터는 기존 기술·통사·OA 기준을 유지하면서 역할을 한 에이전트가 순차 패스로 수행하게 한다.

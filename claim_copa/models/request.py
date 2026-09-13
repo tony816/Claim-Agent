@@ -1,0 +1,133 @@
+"""Run request and raw-material bundle."""
+from __future__ import annotations
+
+import base64
+import hashlib
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import yaml
+from pydantic import BaseModel, Field
+
+from .enums import RequestMode
+
+IMAGE_EXT = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
+TEXT_EXT = {".md", ".txt", ".yaml", ".yml", ".json", ".csv"}
+
+
+class RunRequest(BaseModel):
+    request_mode: RequestMode = RequestMode.AUTHORING_DRAFT
+    request_text: str
+    candidate_id: str = "cand-01"
+    user_lock: str | None = None
+    invention_sources: list[str] = Field(default_factory=list)
+    spec_path: str | None = None            # 정식 명세서 (FINALIZATION)
+    drawings: list[str] = Field(default_factory=list)
+    prior_art: list[str] = Field(default_factory=list)   # empty -> PRIOR_ART_SET: NONE
+    dependent: bool = False
+    dependent_target: str | None = None    # e.g. "2~10"
+    dependent_set_id: str | None = None
+    claim_file: str | None = None          # REVIEW_ONLY / FINALIZATION input claims
+    reviewers: list[str] = Field(default_factory=list)   # REVIEW_ONLY
+    review_scope: str = "INDEPENDENT"
+
+    @classmethod
+    def from_yaml(cls, path: Path) -> "RunRequest":
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        base = path.parent
+        for key in ("invention_sources", "drawings", "prior_art"):
+            data[key] = [str((base / p).resolve()) if not Path(p).is_absolute() else p for p in data.get(key, []) or []]
+        for key in ("spec_path", "claim_file", "user_lock_file"):
+            v = data.get(key)
+            if v and not Path(v).is_absolute():
+                data[key] = str((base / v).resolve())
+        ulf = data.pop("user_lock_file", None)
+        if ulf and not data.get("user_lock"):
+            data["user_lock"] = Path(ulf).read_text(encoding="utf-8").strip()
+        rf = data.pop("request_file", None)
+        if rf and not data.get("request_text"):
+            p = Path(rf) if Path(rf).is_absolute() else base / rf
+            data["request_text"] = p.read_text(encoding="utf-8")
+        return cls.model_validate(data)
+
+
+@dataclass
+class MaterialItem:
+    path: str
+    name: str
+    kind: str                 # text | image
+    sha256: str
+    text: str | None = None
+    mime_type: str | None = None
+    data: bytes | None = None
+    category: str = "invention"   # invention | spec | drawing | prior_art | claim_file
+
+    def as_meta(self) -> dict:
+        return {"path": self.path, "name": self.name, "kind": self.kind, "sha256": self.sha256, "category": self.category}
+
+
+@dataclass
+class MaterialBundle:
+    items: list[MaterialItem] = field(default_factory=list)
+    user_lock: str | None = None
+
+    @classmethod
+    def load(cls, req: RunRequest) -> "MaterialBundle":
+        items: list[MaterialItem] = []
+        for cat, paths in (
+            ("invention", req.invention_sources),
+            ("drawing", req.drawings),
+            ("prior_art", req.prior_art),
+            ("spec", [req.spec_path] if req.spec_path else []),
+            ("claim_file", [req.claim_file] if req.claim_file else []),
+        ):
+            for p in paths:
+                items.extend(_load_path(Path(p), cat))
+        return cls(items, req.user_lock)
+
+    def by_category(self, *cats: str) -> list[MaterialItem]:
+        return [i for i in self.items if i.category in cats]
+
+    def digest(self) -> str:
+        h = hashlib.sha256()
+        for i in sorted(self.items, key=lambda x: (x.category, x.name)):
+            h.update(f"{i.category}:{i.name}:{i.sha256}\n".encode())
+        h.update(("USER_LOCK:" + (self.user_lock or "")).encode())
+        return h.hexdigest()
+
+    @property
+    def spec_present(self) -> bool:
+        return any(i.category == "spec" for i in self.items)
+
+    @property
+    def prior_art_present(self) -> bool:
+        return any(i.category == "prior_art" for i in self.items)
+
+    def claim_file_text(self) -> str | None:
+        for i in self.items:
+            if i.category == "claim_file" and i.text:
+                return i.text
+        return None
+
+
+def _load_path(p: Path, category: str) -> list[MaterialItem]:
+    if p.is_dir():
+        out: list[MaterialItem] = []
+        for child in sorted(p.iterdir()):
+            if child.is_file():
+                out.extend(_load_path(child, category))
+        return out
+    if not p.exists():
+        raise FileNotFoundError(f"material not found: {p}")
+    raw = p.read_bytes()
+    sha = hashlib.sha256(raw).hexdigest()
+    ext = p.suffix.lower()
+    if ext in IMAGE_EXT:
+        return [MaterialItem(str(p), p.name, "image", sha, None, IMAGE_EXT[ext], raw, category)]
+    if ext in TEXT_EXT or ext == "":
+        return [MaterialItem(str(p), p.name, "text", sha, raw.decode("utf-8", errors="replace"), None, None, category)]
+    raise ValueError(f"unsupported material type {ext}: {p} (use md/txt or png/jpg)")
+
+
+def encode_image(item: MaterialItem) -> str:
+    return base64.b64encode(item.data or b"").decode()
