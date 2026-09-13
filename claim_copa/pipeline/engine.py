@@ -254,9 +254,7 @@ class PipelineEngine:
                 use_cache=rc.cache and self.cfg.cache.enabled, phase="tool_phase", stage=stage.value, run_id=state.run_id, seq=seq,
             )
             res_a = self.provider.generate(phase_a)
-            for fc in res_a.function_calls:
-                if "name" in fc and not any(c.get("name") == fc["name"] and c.get("query") == fc.get("args", {}).get("query") for c in tool_log.calls):
-                    pass  # python tools already logged themselves
+            self._telemetry_tool(state, phase_a, res_a, ids, rid, tool_log)
             packet_text += "\n### 보조 소스 사용 기록 (오케스트레이터 도구 로그; 이 내용을 그대로 반영)\n\n" + tool_log.render() + "\n"
             self._tool_logs[rid] = tool_log
         spec = CallSpec(
@@ -288,7 +286,8 @@ class PipelineEngine:
         record_payload = {
             "record_id": rid, "kind": kind, "role": role, "scope": scope.value, "stage": stage.value, "ids": ids.as_dict(),
             "status": env.status.value, "execution_status": env.execution_status.value, "gates": env.gates.present(),
-            "gate_reasons": [g.model_dump() for g in env.gate_reasons], "issued": issued, "exact_claim_text": env.exact_claim_text,
+            "gate_reasons": [g.model_dump() for g in env.gate_reasons], "checks": [c.model_dump() for c in env.checks],
+            "issued": issued, "exact_claim_text": env.exact_claim_text,
             "claims": [c.model_dump() for c in env.claims], "candidates": [c.model_dump() for c in env.candidates],
             "per_claim_gates": [g.model_dump() for g in env.per_claim_gates], "open_issues": [o.model_dump() for o in env.open_issues],
             "source_set_id": state.source_set_id, "call_file": ref.call_file, "aux_source_usage": env.aux_source_usage,
@@ -362,8 +361,58 @@ class PipelineEngine:
             non_pass_checks=env.non_pass_checks(), next_step=env.next_step.value, handoff_ready=env.handoff_ready,
             invention_primary=env.invention_type.primary.value if env.invention_type else None,
             cost_estimate=estimate_cost(spec.model, usage, self.cfg.telemetry.pricing), phase=spec.phase,
+            record_id=(spec.meta or {}).get("record_id"),
         )
         TelemetryWriter(self.store.telemetry_path(state.run_id), self.cfg.telemetry.enabled).write(row)
+
+    def _telemetry_tool(self, state: RunState, spec: CallSpec, result: CallResult, ids: Identifiers, record_id: str, tool_log: ToolLog) -> None:
+        """One row for the tool-phase call itself, then one row per restricted corpus tool call.
+
+        Query text is never written: only its length, so the feedback pipeline can see
+        tool misuse (refusals, empty results) without storing invention wording.
+        """
+        writer = TelemetryWriter(self.store.telemetry_path(state.run_id), self.cfg.telemetry.enabled)
+        usage = result.usage
+
+        def base(phase: str, tool: dict[str, Any] | None = None, **over: Any) -> TelemetryRow:
+            kw: dict[str, Any] = dict(
+                ts=now(), run_id=state.run_id, seq=spec.seq, stage=spec.stage, role=spec.role, scope=spec.scope,
+                request_mode=state.request_mode.value, model=spec.model, provider=result.provider, variant_id=state.variant_id,
+                source_set_id=state.source_set_id, lessons_hash=state.lessons_hash, candidate_id=ids.candidate_id,
+                revision=ids.revision, design_revision=ids.design_revision, dependent_set_id=ids.dependent_set_id,
+                dependent_revision=ids.dependent_revision, target_claim_id=ids.target_claim_id, loop_index=0, retry_count=0,
+                prompt_tokens=0, cached_tokens=0, thoughts_tokens=0, output_tokens=0, latency_ms=0, cache_hit=False,
+                parse_ok=True, repair_used=False, execution_status="RUN", status="PASS", reason_code=None,
+                phase=phase, record_id=record_id, tool=tool or {},
+            )
+            kw.update(over)
+            return TelemetryRow(**kw)
+
+        writer.write(
+            base(
+                "tool_phase",
+                prompt_tokens=usage.get("prompt_tokens", 0), cached_tokens=usage.get("cached_tokens", 0),
+                thoughts_tokens=usage.get("thoughts_tokens", 0), output_tokens=usage.get("output_tokens", 0),
+                latency_ms=result.latency_ms, cache_hit=result.cache_hit,
+                cost_estimate=estimate_cost(spec.model, usage, self.cfg.telemetry.pricing),
+                tool={"calls": len(tool_log.calls), "activated": tool_log.used},
+            )
+        )
+        for call in tool_log.calls:
+            results = call.get("results") or []
+            writer.write(
+                base(
+                    "tool",
+                    tool={
+                        "name": call.get("name", ""),
+                        "mode": call.get("mode"),
+                        "query_len": len(call.get("query") or ""),
+                        "results": len(results),
+                        "refused": bool(call.get("refused")),
+                        "flagged_review": any(r.get("flagged_review") for r in results),
+                    },
+                )
+            )
 
     # ================================================================== transitions
     def _feedback(self, env: RoleEnvelope, rid: str) -> str:

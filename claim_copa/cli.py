@@ -11,7 +11,8 @@ from . import __version__
 from .improve.evalharness import EvalCase, EvalResult, evaluate, summarize, write_results
 from .improve.experiments import Variant
 from .improve.feedback import build_feedback
-from .improve.lessons import propose_from_run
+from .improve.lessons import extract_llm_materials, propose_from_feedback, propose_from_run, propose_with_llm
+from .improve.rca import build_rca
 from .models.enums import RequestMode
 from .models.request import RunRequest
 from .pipeline.engine import Decision
@@ -152,6 +153,14 @@ def cmd_runs(args) -> int:
     elif args.sub == "report":
         st = rt.store.load_state(args.run_id)
         print(render_report(st, claims_only=args.claims_only))
+    elif args.sub == "rca":
+        rep = build_rca(rt.store, args.run_id)
+        md = rep.render_md()
+        out = Path(args.out) if args.out else rt.store.run_dir(args.run_id) / "rca.md"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(md, encoding="utf-8")
+        print(md)
+        print(f"written: {out}")
     return 0
 
 
@@ -214,7 +223,7 @@ def cmd_cache(args) -> int:
 
 def cmd_feedback(args) -> int:
     rt = _rt(args)
-    rep = build_feedback(rt.cfg.path("runs_dir"), args.since)
+    rep = build_feedback(rt.cfg.path("runs_dir"), args.since, args.window, args.threshold)
     out = Path(args.out) if args.out else rt.cfg.project_root / "reports" / f"feedback-{time.strftime('%Y%m%d')}.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(rep.render_md(), encoding="utf-8")
@@ -289,13 +298,40 @@ def cmd_lessons(args) -> int:
         if args.text:
             l = ls.propose(args.text, args.roles.split(",") if args.roles else [], args.rationale or "", [])
             print(f"proposed {l.id} (pending)")
-        else:
-            st = rt.store.load_state(args.from_run)
-            out = propose_from_run(rt.cfg.path("runs_dir"), st.model_dump(mode="json"), ls)
+        elif args.from_feedback:
+            rep = build_feedback(rt.cfg.path("runs_dir"), args.since)
+            out = propose_from_feedback(rep, ls, args.min_count)
             for l in out:
-                print(f"proposed {l.id}: {l.text_ko[:100]}")
+                print(f"proposed {l.id} ({len(l.evidence)} runs): {l.text_ko[:110]}")
             if not out:
-                print("no open issues to propose from")
+                print(f"no pattern repeated at least {args.min_count} times — nothing to backpropagate")
+        elif args.from_run:
+            st = rt.store.load_state(args.from_run)
+            data = st.model_dump(mode="json")
+            halt = data.get("halt") or {}
+            if args.llm:
+                if not halt:
+                    print("run did not halt; nothing to draft from")
+                    return 0
+                record = rt.store.read_record(args.from_run, halt.get("record_id")) if halt.get("record_id") else {}
+                materials = extract_llm_materials(record, halt)
+                provider = _provider(rt, args)
+                key = f"{halt.get('role')}|{halt.get('stage')}|{halt.get('reason_code') or halt.get('kind')}"
+                l = propose_with_llm(provider, rt.cfg.model.default, materials, ls, halt.get("role", ""), [f"{args.from_run}:{halt.get('record_id')}"], key)
+                if l is None:
+                    print("model produced no usable draft (근거 부족)")
+                else:
+                    print(f"proposed {l.id} (pending, llm_drafted): {l.text_ko[:110]}")
+                    print("보낸 입력에는 청구항 문언·원자료가 포함되지 않았다. 승인 전에는 주입되지 않는다.")
+            else:
+                out = propose_from_run(rt.cfg.path("runs_dir"), data, ls)
+                for l in out:
+                    print(f"proposed {l.id}: {l.text_ko[:100]}")
+                if not out:
+                    print("no open issues to propose from")
+        else:
+            print("--from-run, --from-feedback 또는 --text 중 하나가 필요하다")
+            return 1
     return 0
 
 
@@ -391,6 +427,9 @@ def build_parser() -> argparse.ArgumentParser:
     rp = rus.add_parser("report")
     rp.add_argument("run_id")
     rp.add_argument("--claims-only", action="store_true")
+    rr = rus.add_parser("rca", help="root cause analysis of one run: trace, fault, pattern, impact")
+    rr.add_argument("run_id")
+    rr.add_argument("--out")
     ru.set_defaults(func=cmd_runs)
 
     d = sub.add_parser("doctor", help="check environment, sources, roles, schema; --live probes the API")
@@ -410,9 +449,11 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("sub", choices=["list", "purge"])
     c.set_defaults(func=cmd_cache)
 
-    f = sub.add_parser("feedback", help="aggregate telemetry into a failure-pattern report")
+    f = sub.add_parser("feedback", help="aggregate telemetry into a failure-pattern and proactive-alert report")
     f.add_argument("--since")
     f.add_argument("--out")
+    f.add_argument("--window", type=int, default=10, help="최근 N run을 이전 구간과 비교 (선제 경고)")
+    f.add_argument("--threshold", type=float, default=0.15, help="비-PASS·복구 비율 상승폭 임계")
     f.set_defaults(func=cmd_feedback)
 
     e = sub.add_parser("eval", help="run eval cases (baseline vs variant, shadow, record/replay)")
@@ -444,6 +485,15 @@ def build_parser() -> argparse.ArgumentParser:
     lr.add_argument("--note")
     lp = lss.add_parser("propose")
     lp.add_argument("--from-run")
+    lp.add_argument("--from-feedback", action="store_true", help="반복 패턴을 역할별 교훈 초안으로 역전파")
+    lp.add_argument("--min-count", type=int, default=2)
+    lp.add_argument("--since")
+    lp.add_argument("--llm", action="store_true", help="--from-run과 함께: 모델이 초안을 작성 (승인 전 주입 없음)")
+    lp.add_argument("--model")
+    lp.add_argument("--replay")
+    lp.add_argument("--strict-replay", action="store_true")
+    lp.add_argument("--record")
+    lp.add_argument("--no-cache", action="store_true")
     lp.add_argument("--text")
     lp.add_argument("--roles")
     lp.add_argument("--rationale")

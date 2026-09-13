@@ -6,9 +6,11 @@ source_set_id so every record is traceable to the lesson set it ran under.
 """
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -29,6 +31,7 @@ class Lesson:
     rationale: str = ""
     evidence: list[str] = field(default_factory=list)
     eval_evidence: list[str] = field(default_factory=list)
+    key: str = ""            # stable dedupe signature, e.g. "claim-style-adjuster|CLAIM_STYLE_GATE|RETURN_TO_DRAFTER"
     created_at: str = ""
     approved_by: str | None = None
     approved_at: str | None = None
@@ -82,9 +85,23 @@ class LessonStore:
         p.write_text(lesson.to_yaml(), encoding="utf-8")
         return p
 
-    def propose(self, text_ko: str, target_roles: list[str], rationale: str, evidence: list[str], llm_drafted: bool = False) -> Lesson:
-        lesson = Lesson(id=self.next_id(), text_ko=text_ko, target_roles=target_roles, rationale=rationale, evidence=evidence, created_at=time.strftime("%Y-%m-%dT%H:%M:%S"), llm_drafted=llm_drafted)
+    def propose(self, text_ko: str, target_roles: list[str], rationale: str, evidence: list[str], llm_drafted: bool = False, key: str = "") -> Lesson:
+        lesson = Lesson(id=self.next_id(), text_ko=text_ko, target_roles=target_roles, rationale=rationale, evidence=evidence, key=key, created_at=time.strftime("%Y-%m-%dT%H:%M:%S"), llm_drafted=llm_drafted)
         self.save(lesson)
+        return lesson
+
+    def find_by_key(self, key: str) -> Lesson | None:
+        """Any lesson (pending/approved/rejected) already covering this failure signature."""
+        if not key:
+            return None
+        return next((l for l in self.list() if l.key == key), None)
+
+    def add_evidence(self, lesson: Lesson, evidence: list[str]) -> Lesson:
+        """Reinforce an existing proposal instead of creating a duplicate."""
+        added = [e for e in evidence if e not in lesson.evidence]
+        if added:
+            lesson.evidence = lesson.evidence + added
+            self.save(lesson)
         return lesson
 
     def approve(self, lesson_id: str, by: str = "user", note: str | None = None) -> Lesson:
@@ -139,15 +156,142 @@ def propose_from_run(store_dir: Path, run_state: dict, lessons: LessonStore) -> 
     out: list[Lesson] = []
     halt = run_state.get("halt") or {}
     role = halt.get("role", "")
+    run_id = run_state.get("run_id")
     for issue in halt.get("open_issues", []):
         text = issue.get("text", "").strip()
         if not text:
             continue
-        lesson = lessons.propose(
-            text_ko=f"[{halt.get('stage')}] {issue.get('code','')} — 다음 상황을 미리 점검한다: {text}",
-            target_roles=[role] if role and role != "engine" else [],
-            rationale=f"run {run_state.get('run_id')} 중지 사유({halt.get('kind')})에서 자동 제안; 사람 승인 전에는 주입되지 않음",
-            evidence=[f"{run_state.get('run_id')}:{halt.get('record_id')}"],
+        key = f"{role}|{halt.get('stage')}|{issue.get('code') or text[:40]}"
+        evidence = [f"{run_id}:{halt.get('record_id')}"]
+        existing = lessons.find_by_key(key)
+        if existing is not None:
+            out.append(lessons.add_evidence(existing, evidence))
+            continue
+        out.append(
+            lessons.propose(
+                text_ko=f"[{halt.get('stage')}] {issue.get('code','')} — 다음 상황을 미리 점검한다: {text}",
+                target_roles=[role] if role and role != "engine" else [],
+                rationale=f"run {run_id} 중지 사유({halt.get('kind')})에서 자동 제안; 사람 승인 전에는 주입되지 않음",
+                evidence=evidence,
+                key=key,
+            )
         )
-        out.append(lesson)
     return out
+
+
+# ---------------------------------------------------------------------------
+# 역전파: 텍스트 피드백 → 절차·표현 교훈 초안
+# ---------------------------------------------------------------------------
+
+def propose_from_feedback(report: Any, lessons: LessonStore, min_count: int = 2) -> list[Lesson]:
+    """반복 패턴을 역할별 교훈 초안으로 되돌린다(규칙 기반, LLM 없음).
+
+    같은 (역할, 게이트, 사유) 조합이 이미 제안되어 있으면 새 교훈을 만들지 않고
+    근거 run만 덧붙인다. 모든 결과는 pending이며 승인 전에는 주입되지 않는다.
+    """
+    out: list[Lesson] = []
+    for card in getattr(report, "pattern_cards", []):
+        if card["count"] < min_count:
+            continue
+        role, gate, reason = card["role"], card["gate"], card["reason"]
+        key = f"{role}|{gate}|{reason}"
+        evidence = list(card["runs"])
+        existing = lessons.find_by_key(key)
+        if existing is not None:
+            out.append(lessons.add_evidence(existing, evidence))
+            continue
+        checks = card.get("checks") or []
+        detail = f" 특히 다음 시험에서 반복 실패했다: {', '.join(checks[:3])}." if checks else ""
+        text = (
+            f"{gate}를 판정하기 전에 {reason} 조건을 먼저 점검한다. "
+            f"같은 사유로 {card['count']}회 비-PASS가 났으므로, 해당 항목의 근거와 표현을 보고서에 명시적으로 남긴다.{detail}"
+        )
+        out.append(
+            lessons.propose(
+                text_ko=text,
+                target_roles=[role] if role and role != "engine" else [],
+                rationale=f"피드백 리포트의 패턴 카드({card['invention_type']} / {role} / {gate} / {reason}, {card['count']}회)에서 역전파; 사람 승인 전에는 주입되지 않음",
+                evidence=evidence,
+                key=key,
+            )
+        )
+    return out
+
+
+LLM_DRAFT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "text_ko": {"type": "string", "description": "역할 프롬프트에 덧붙일 한 문단의 절차·표현 주의사항. 청구항 문언·발명 내용을 인용하지 않는다."},
+        "target_roles": {"type": "array", "items": {"type": "string"}},
+        "rationale": {"type": "string"},
+    },
+    "required": ["text_ko", "rationale"],
+}
+
+_OUTPUT_HINT = "\n\n위 정보만으로 JSON 하나를 출력한다.\n"
+
+_LLM_INSTRUCTION = """당신은 한국어 특허 청구항 작성 파이프라인의 회고 분석가다.
+
+아래는 한 실행이 중지된 지점의 게이트 판정, 실패한 세부 시험, 미해결 쟁점, 최소 수정 방향이다. 이 정보에서 **다음 실행에 도움이 될 절차·표현 주의사항 한 가지**를 한국어 한 문단으로 뽑아라.
+
+규칙:
+- 발명의 기술내용, 청구항 문언, 부품 이름, 수치를 인용하거나 일반화하지 않는다. 기술내용 근거가 아니라 절차와 표현에 관한 주의사항만 쓴다.
+- 특정 사건이 아니라 같은 역할이 다음에도 확인해야 할 점검 항목으로 쓴다.
+- 역할 파일과 CLAUDE.md의 규칙을 바꾸거나 완화하는 내용을 쓰지 않는다.
+- 근거가 약하면 text_ko를 비워 둔다."""
+
+
+def extract_llm_materials(record: dict[str, Any], halt: dict[str, Any]) -> str:
+    """Build the LLM input: gates, failed checks, open issues and the fix direction only.
+
+    The full report_markdown is deliberately not sent: it carries the claim text.
+    """
+    lines = [f"역할: {halt.get('role')}", f"단계: {halt.get('stage')}", f"중지 종류: {halt.get('kind')} {halt.get('reason_code') or ''}"]
+    gates = {k: v for k, v in (record.get("gates") or {}).items() if v not in ("PASS", "PASS-RANGE", "NOT_APPLICABLE", "LOCKED")}
+    if gates:
+        lines.append("비-PASS 게이트: " + ", ".join(f"{k}: {v}" for k, v in gates.items()))
+    for gr in record.get("gate_reasons") or []:
+        lines.append(f"게이트 사유: {gr.get('gate')} — {gr.get('reason_code')}")
+    failed = [c for c in (record.get("checks") or []) if c.get("status") not in ("PASS", "PASS-RANGE", "NOT_APPLICABLE")]
+    for c in failed[:10]:
+        lines.append(f"실패 시험: [{c.get('status')}] {c.get('name')}" + (f" — {c.get('note')}" if c.get("note") else ""))
+    for i in (halt.get("open_issues") or record.get("open_issues") or [])[:10]:
+        lines.append(f"미해결 쟁점: [{i.get('kind')}] {i.get('code','')} {i.get('text','')}")
+    report = record.get("report_markdown") or ""
+    for header in ("최소 수정 방향", "최소 수정 목표", "돌아갈 단계"):
+        m = re.search(rf"^.*{re.escape(header)}.*$", report, re.MULTILINE)
+        if m:
+            lines.append(m.group(0).strip()[:300])
+    return "\n".join(lines)
+
+
+def propose_with_llm(provider: Any, model: str, materials: str, lessons: LessonStore, role: str, evidence: list[str], key: str, max_output_tokens: int = 2048) -> Lesson | None:
+    """Opt-in (`--llm`): let the model draft one lesson from the failure summary.
+
+    The result is always pending and marked llm_drafted; nothing is injected
+    before a human approves it.
+    """
+    from ..provider.base import CallSpec, GenParams, parse_json_text
+
+    spec = CallSpec(
+        role="lesson-drafter", scope="META", model=model, system_instruction=_LLM_INSTRUCTION,
+        packet_text=materials + _OUTPUT_HINT, sources_block="",
+        json_schema=LLM_DRAFT_SCHEMA, gen=GenParams(0.3, "LOW", max_output_tokens), use_cache=False, phase="main", stage="LESSON_DRAFT",
+    )
+    result = provider.generate(spec)
+    data = result.parsed or parse_json_text(result.text) or {}
+    text = (data.get("text_ko") or "").strip()
+    if not text:
+        return None
+    existing = lessons.find_by_key(key)
+    if existing is not None:
+        return lessons.add_evidence(existing, evidence)
+    roles = [r for r in (data.get("target_roles") or [role]) if r and r != "engine"]
+    return lessons.propose(
+        text_ko=text,
+        target_roles=roles,
+        rationale=(data.get("rationale") or "LLM 초안") + " (LLM 작성 초안; 사람 승인 전에는 주입되지 않음)",
+        evidence=evidence,
+        llm_drafted=True,
+        key=key,
+    )

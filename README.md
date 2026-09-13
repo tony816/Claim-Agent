@@ -24,7 +24,7 @@ Claude Code 없이 같은 절차를 실행하는 독립 프로그램은 [`docs/p
 ```bash
 pip install -e . && claim-copa doctor --contracts
 claim-copa run --request-yaml eval/cases/sample-clip-holder/request.yaml --replay eval/cases/sample-clip-holder/fixtures   # 오프라인 데모
-claim-copa feedback · claim-copa eval run --case … --variant … --shadow · claim-copa lessons approve L-0001            # 개선 루프
+claim-copa feedback · claim-copa runs rca <run_id> · claim-copa eval run --case … --shadow · claim-copa lessons propose --from-feedback   # 개선 루프
 ```
 
 ## 웹 단일 에이전트판

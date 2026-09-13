@@ -47,7 +47,9 @@ class TelemetryRow:
     handoff_ready: bool = False
     invention_primary: str | None = None
     cost_estimate: float | None = None
-    phase: str = "main"
+    phase: str = "main"          # main | repair | tool_phase | tool | shadow
+    record_id: str | None = None
+    tool: dict[str, Any] = field(default_factory=dict)   # phase="tool" rows only; never carries query text
 
 
 def estimate_cost(model: str, usage: dict[str, int], pricing: dict[str, dict[str, float]]) -> float | None:
