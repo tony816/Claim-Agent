@@ -3,13 +3,16 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "claim-copa"
+name = "claim-agent"
 version = "0.1.0"
-description = "Claim Copa: Python + Gemini runtime for the Korean patent-claim multi-agent pipeline"
+description = "Claim-Agent: Python + Gemini runtime for the Korean patent-claim multi-agent pipeline"
 requires-python = ">=3.11"
 dependencies = [
     "google-genai>=2.23.0",
     "pydantic>=2.6",
+    "python-dotenv>=1.0",
+    "textual>=1.0,<2",
+    "truststore>=0.10; sys_platform == 'win32'",
     "pyyaml>=6.0",
 ]
 
@@ -17,13 +20,20 @@ dependencies = [
 dev = ["pytest>=8"]
 
 [project.scripts]
-claim-copa = "claim_copa.cli:main"
+claim-agent = "claim_agent.cli:main"
+claim-agent-tui = "claim_agent.tui:main"
+claim-agent-web = "claim_agent.web:main"
+# Compatibility for saved commands and reports created before the rename.
+claim-copa = "claim_agent.cli:main"
+claim-copa-tui = "claim_agent.tui:main"
+claim-copa-web = "claim_agent.web:main"
 
 [tool.setuptools.packages.find]
-include = ["claim_copa*"]
+include = ["claim_agent*", "claim_copa*"]
 
 [tool.setuptools.package-data]
 "claim_copa.roles" = ["*.md"]
+"claim_copa" = ["web_assets/*.html", "web_assets/*.css", "web_assets/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

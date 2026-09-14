@@ -130,6 +130,7 @@ class Halt(BaseModel):
     open_issues: list[dict[str, Any]] = Field(default_factory=list)
     return_to: str | None = None
     record_id: str | None = None
+    report_markdown: str | None = None  # actual stopping role's analysis, not a generated summary
 
 
 class RunState(BaseModel):
@@ -154,6 +155,7 @@ class RunState(BaseModel):
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
     notes: list[str] = Field(default_factory=list)
+    review_reports: dict[str, str] = Field(default_factory=dict)
 
     def record(self, record_id: str | None) -> RecordRef | None:
         return self.records.get(record_id) if record_id else None

@@ -66,10 +66,12 @@ def make_provider(rt: Runtime, mode: str = "gemini", fixtures: Path | None = Non
             raise ValueError("--replay requires a fixtures directory")
         return ReplayProvider(fixtures, strict=strict_replay)
     from .provider.gemini import GeminiProvider, make_client
+    from .live_events import EventWriter
 
     client = make_client(rt.cfg.model.api_key_env, api_key)
     cache = CacheManager(client, rt.cfg.path("runs_dir") / ".cache-registry.json", rt.cfg.cache.ttl, rt.cfg.cache.enabled)
-    gp = GeminiProvider(client, cache, rt.cfg.pipeline.retry.max_attempts, rt.cfg.pipeline.retry.backoff_s)
+    gp = GeminiProvider(client, cache, rt.cfg.pipeline.retry.max_attempts, rt.cfg.pipeline.retry.backoff_s,
+                        events=EventWriter.from_env(rt.cfg.model.api_key_env))
     if mode == "record":
         if fixtures is None:
             raise ValueError("--record requires a fixtures directory")

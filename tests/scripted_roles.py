@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from typing import Any, Callable
 
-from claim_copa.provider.base import CallSpec
+from claim_agent.provider.base import CallSpec
 
 ROOT_CLAIM = """【청구항 1】
 책상 가장자리에 걸리는 클램프부를 갖는 베이스;

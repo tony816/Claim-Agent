@@ -99,7 +99,7 @@ class FeedbackReport:
     halts: list[dict[str, Any]] = field(default_factory=list)
 
     def render_md(self) -> str:
-        out = ["# Claim Copa 피드백 리포트", ""]
+        out = ["# Claim-Agent 피드백 리포트", ""]
         out.append(f"- 집계 run 수: {self.runs} / 호출 수: {self.calls}" + (f" / since {self.since}" if self.since else ""))
         out.append(f"- 캐시 적중: {self.cache_hits} / 복구 호출: {self.parse_repairs} / 루프 한도 도달: {self.loop_limit_hits}")
         out.append(f"- 보조 소스 도구: {self.tool_calls}회 (거부 {self.tool_refused} / 무결과 {self.tool_empty} / 재검토 대상 조각 {self.tool_flagged})")
@@ -162,7 +162,7 @@ class FeedbackReport:
         for h in self.halts[:30]:
             out.append(f"- {h['run_id']}: {h['kind']} @ {h['stage']} ({h['role']}) {h.get('reason_code') or ''} — {str(h.get('message',''))[:120]}")
         out.append("")
-        out.append("다음 단계: 반복 패턴은 `claim-copa lessons propose --from-feedback`으로 교훈 초안을 만들고, 사람이 승인한 뒤에만 주입된다. 개별 실패의 원인은 `claim-copa runs rca <run_id>`, 변형 프롬프트 비교는 `claim-copa eval run --variant`.")
+        out.append("다음 단계: 반복 패턴은 `claim-agent lessons propose --from-feedback`으로 교훈 초안을 만들고, 사람이 승인한 뒤에만 주입된다. 개별 실패의 원인은 `claim-agent runs rca <run_id>`, 변형 프롬프트 비교는 `claim-agent eval run --variant`.")
         return "\n".join(out) + "\n"
 
 

@@ -1,4 +1,4 @@
-"""`claim-copa doctor`: environment, sources, roles, schema and (optionally) live API probes."""
+"""`claim-agent doctor`: environment, sources, roles, schema and (optionally) live API probes."""
 from __future__ import annotations
 
 import os
@@ -86,7 +86,7 @@ def _probe_cache(client: Any, model: str, ttl: str) -> list[tuple[str, str, str]
 
     try:
         filler = ("청구항 스타일 캐시 프로브. " * 400)
-        c = client.caches.create(model=model, config=types.CreateCachedContentConfig(contents=[filler], ttl="120s", display_name="claim-copa-doctor"))
+        c = client.caches.create(model=model, config=types.CreateCachedContentConfig(contents=[filler], ttl="120s", display_name="claim-agent-doctor"))
         try:
             client.caches.delete(name=c.name)
         except Exception:  # noqa: BLE001

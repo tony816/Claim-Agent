@@ -1,8 +1,8 @@
 """Generate offline replay fixtures for eval/cases/sample-clip-holder from the scripted roles.
 
 Usage: python scripts/make_sample_fixtures.py
-The fixtures let `claim-copa eval run --case sample-clip-holder` and
-`claim-copa run --replay eval/cases/sample-clip-holder/fixtures ...` work without an API key.
+The fixtures let `claim-agent eval run --case sample-clip-holder` and
+`claim-agent run --replay eval/cases/sample-clip-holder/fixtures ...` work without an API key.
 Replace them with real recordings via `--record` once a GEMINI_API_KEY is available.
 """
 from __future__ import annotations
@@ -16,10 +16,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from claim_copa.models.request import RunRequest  # noqa: E402
-from claim_copa.provider.replay import RecordingProvider  # noqa: E402
-from claim_copa.provider.scripted import ScriptedProvider  # noqa: E402
-from claim_copa.runtime import build_runtime  # noqa: E402
+from claim_agent.models.request import RunRequest  # noqa: E402
+from claim_agent.provider.replay import RecordingProvider  # noqa: E402
+from claim_agent.provider.scripted import ScriptedProvider  # noqa: E402
+from claim_agent.runtime import build_runtime  # noqa: E402
 import scripted_roles as R  # noqa: E402
 
 

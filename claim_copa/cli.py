@@ -1,4 +1,4 @@
-"""claim-copa command line interface."""
+"""claim-agent command line interface."""
 from __future__ import annotations
 
 import argparse
@@ -349,11 +349,22 @@ def cmd_fixtures(args) -> int:
 
 # ----------------------------------------------------------------------------- parser
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="claim-copa", description="Claim Copa Python + Gemini runtime")
+    p = argparse.ArgumentParser(prog="claim-agent", description="Claim-Agent Python + Gemini runtime")
     p.add_argument("--version", action="version", version=__version__)
     p.add_argument("--project-root", default=".")
     p.add_argument("--config", default=None)
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    tui = sub.add_parser("tui", help="open the mouse-friendly terminal workspace")
+    tui.add_argument("files", nargs="*")
+
+    def open_tui(args):
+        from .tui import ClaimAgentApp
+
+        ClaimAgentApp(Path(args.project_root), args.files, Path(args.config) if args.config else None).run()
+        return 0
+
+    tui.set_defaults(func=open_tui)
 
     def common_provider(sp):
         sp.add_argument("--model")

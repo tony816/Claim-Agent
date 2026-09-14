@@ -2,11 +2,29 @@
 from __future__ import annotations
 
 import json
+import ssl
+import sys
 from types import SimpleNamespace
 
-from claim_copa.provider.base import CallSpec, GenParams
-from claim_copa.provider.cache import CacheManager
-from claim_copa.provider.gemini import GeminiProvider
+import pytest
+
+from claim_agent.provider.base import CallSpec, GenParams
+from claim_agent.provider.cache import CacheManager
+from claim_agent.provider.gemini import GeminiProvider
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows certificate store")
+def test_make_client_uses_verified_windows_trust_store(monkeypatch):
+    from google import genai
+    from claim_agent.provider.gemini import make_client
+
+    captured = {}
+    monkeypatch.setattr(genai, "Client", lambda **kwargs: captured.update(kwargs))
+    make_client(api_key="test-key")
+    context = captured["http_options"]["client_args"]["verify"]
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+    assert captured["api_key"] == "test-key"
 
 
 class FakeModels:

@@ -21,6 +21,8 @@ from .claimtext import flatten
 class Packet:
     text: str
     images: list[ImagePart] = field(default_factory=list)
+    cache_text: str = ""
+    cache_images: bool = False
 
 
 def _hdr(state: RunState, ids: Identifiers, record_id: str, extra: dict[str, str] | None = None) -> str:
@@ -83,6 +85,8 @@ def _output_contract(extra: str = "") -> str:
         "### 출력 계약\n\n"
         "제공된 JSON 스키마를 따르는 JSON 객체 하나만 반환한다. `report_markdown`에는 역할 파일의 출력 형식 전문을 담고, "
         "`status`·`gates`·`next_step`·`handoff_ready`·`exact_claim_text`는 보고서와 글자 단위로 일치시킨다. "
+        "입력으로 받은 다른 역할의 보고서·원자료 전문을 출력 보고서에 통째로 재첨부하지 않는다. "
+        "상위 기록은 record_id와 검증 위치로 참조하고, 이번 역할의 필수 출력 형식·exact 문언·근거표·판정 이유는 빠짐없이 작성한다. "
         + extra
         + "\n"
     )
@@ -93,6 +97,8 @@ def architect(state: RunState, bundle: MaterialBundle, ids: Identifiers, record_
     mats, imgs = _materials(bundle, ("invention", "drawing", "spec", "prior_art"))
     txt = _hdr(state, ids, record_id)
     txt += _section("현재 요청", request_text)
+    if bundle.claim_file_text():
+        txt += _section("기존 청구항 — 편집 대상 (새 기술내용의 근거가 아님)", bundle.claim_file_text())
     if redesign_goal:
         txt += _section("설계 변경 목표 (새 design_revision)", redesign_goal)
     txt += _user_lock(bundle) + mats
@@ -295,14 +301,16 @@ def picture_dependent(state: RunState, store, bundle: MaterialBundle, ids: Ident
     txt += _section("부모항 체인 전문 (blind 입력과 동일)", parent_chain_text)
     txt += _section("목표 종속항 전문 (blind 입력과 동일)", target_claim_text)
     txt += _report(state, store, blind_record_id, "봉인된 dependent blind snapshot 전문")
+    shared_start = len(txt)
     txt += _report(state, store, root_lock_id, "루트 독립항 LOCK 전문")
     txt += _report(state, store, root_design_record_id, "루트 DESIGN_GATE 전문")
     txt += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE 전문 (목표 DC-NN 포함)")
     txt += _report(state, store, dep_style_record_id, "dependent style record 전문")
     txt += _report(state, store, dep_oa_record_id, "종속항 OA 보고서 전문")
     txt += mats
+    shared = txt[shared_start:]
     txt += _output_contract("`status`는 목표항의 최종 판정이다.")
-    return Packet(txt, imgs)
+    return Packet(txt, imgs, cache_text=shared, cache_images=True)
 
 
 # --------------------------------------------------------------------------- review only
@@ -311,9 +319,9 @@ def review_only(state: RunState, bundle: MaterialBundle, ids: Identifiers, recor
     key = {"syntax-scope-reviewer": "review_scope", "oa-strategy-reviewer": "review_scope", "claim-success-reviewer": "success_scope"}.get(role, "scope")
     txt = _hdr(state, ids, record_id, {key: scope.value, "design_revision": "N/A"})
     txt += _section("검토 요청", request_text)
-    txt += _section("제공된 청구항 전문", claim_text)
+    txt += _section("제공된 청구항 전문", claim_text or "미제공 — 일반 의견 요청이다. 개별 청구항을 만들거나 검증했다고 하지 않는다.")
     txt += _section("평문(줄바꿈·번호 제거)", flatten(claim_text))
     txt += _user_lock(bundle) + mats
-    txt += _section("REVIEW_ONLY 규칙", "제공되지 않은 설계·원자료·비교 기준이 필요한 시험은 개별 UNVERIFIED로 두고, 이 결과는 DRAFT·FINAL LOCK의 PASS 근거가 아니다.")
+    txt += _section("REVIEW_ONLY 규칙", "요청된 의견/검토 결과를 report_markdown에 답한다. 어떤 방법을 택할지 묻는 요청에는 먼저 기능을 가능하게 하는 관계, 선택지별 근거·불확실성, 현재 자료상 권장 방향과 이유를 설명한다. 선택에 필요한 분석을 하지 않은 채 사용자에게 선택을 되묻지 않는다. 첨부의 다른 미결정 메모나 명칭 문제는 현재 요청과 직접 관련이 있을 때만 다루며 검토를 중지시키지 않는다. 수정 문언을 새로 작성하지 않는다. 제공되지 않은 청구항·설계·원자료·비교 기준·법률 근거가 필요한 시험은 개별 UNVERIFIED로 두고, 이 결과는 DRAFT·FINAL LOCK의 PASS 근거가 아니다.")
     txt += _output_contract()
     return Packet(txt, imgs)

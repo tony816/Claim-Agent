@@ -1,0 +1,70 @@
+/* Run against tests/web_browser_server.py with Playwright on NODE_PATH. */
+const {chromium}=require('playwright');
+const fs=require('fs');
+const path=require('path');
+const assert=require('assert/strict');
+(async()=>{
+  const info=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+  const browser=await chromium.launch({channel:'msedge',headless:true});
+  const page=await browser.newPage({viewport:{width:1440,height:980}});
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(info.origin+'/?token='+info.token);
+  await page.locator('#sessions button').first().waitFor();
+  const out=path.dirname(process.argv[2]);
+  await page.screenshot({path:path.join(out,'welcome.png'),fullPage:true});
+  const prompt=page.locator('#prompt');
+  await prompt.fill('한영 전환 후 한글 질문입니다.');
+  await prompt.evaluate(node=>{
+    node.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true,data:'다'}));
+    node.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,key:'Enter',isComposing:true,keyCode:229}));
+  });
+  await page.waitForTimeout(800);
+  assert.equal(await page.locator('.message.user').count(),0,'Composition Enter must not submit');
+  await prompt.evaluate(node=>node.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'다'})));
+  await prompt.press('Shift+Enter');
+  assert.match(await prompt.inputValue(),/\n$/);
+  await page.locator('#file-picker').setInputFiles({name:'한글 원자료.txt',mimeType:'text/plain',buffer:Buffer.from('발명 설명 원문')});
+  await page.locator('.attachment').waitFor();
+  await prompt.press('Enter');
+  await page.locator('.logs[open]').waitFor();
+  await page.waitForFunction(()=>document.querySelector('.assistant .body').textContent.includes('한글을 정상적으로'));
+  assert.equal(await page.locator('#stop').isVisible(),true);
+  await page.waitForFunction(()=>document.querySelector('.assistant .body').textContent.includes('함께 수정하기'));
+  await page.waitForFunction(()=>!document.querySelector('.logs').open);
+  await page.locator('.logs summary').click();
+  await page.waitForFunction(()=>document.querySelector('.logs pre').textContent.includes('한영 전환'));
+  await page.locator('.logs summary').click();
+  await prompt.fill('이전 답변을 더 짧게 수정해 줘.');
+  await prompt.press('Enter');
+  await page.waitForFunction(()=>document.querySelectorAll('.assistant .body h2').length===2);
+  assert.equal(await page.locator('.message.user').count(),2);
+  assert.equal(await prompt.inputValue(),'');
+  assert.equal(await page.locator('.attachment').count(),0);
+  await page.reload();
+  await page.waitForFunction(()=>document.querySelectorAll('.message.user').length===2);
+  await page.screenshot({path:path.join(out,'conversation.png'),fullPage:true});
+  const count=await page.locator('#sessions button').count();
+  await page.locator('#new-chat').click();
+  await page.waitForFunction(()=>!document.querySelector('#welcome').hidden);
+  assert.equal(await page.locator('#sessions button').count(),count+1);
+  // Browser-native paste and file drag/drop use the same upload route.
+  await prompt.evaluate(node=>{
+    const dt=new DataTransfer();dt.items.add(new File(['image-bytes'],'붙여넣기.png',{type:'image/png'}));
+    node.dispatchEvent(new ClipboardEvent('paste',{bubbles:true,clipboardData:dt}));
+  });
+  await page.locator('.attachment').waitFor();
+  await page.locator('.attachment button').click();
+  await page.evaluate(()=>{
+    const dt=new DataTransfer();dt.items.add(new File(['원자료'],'드래그.txt',{type:'text/plain'}));
+    document.dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:dt}));
+  });
+  await page.locator('.attachment').waitFor();
+  assert.match(await page.locator('.attachment').textContent(),/드래그/);
+  await page.setViewportSize({width:390,height:844});
+  await page.screenshot({path:path.join(out,'mobile.png'),fullPage:true});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  const bounds=await page.locator('#composer').boundingBox();assert.ok(bounds.y+bounds.height<=844);
+  assert.deepEqual(errors,[]);
+  await browser.close();
+  console.log('Browser checks passed: Korean composition, newline, streaming, fold/reopen logs, follow-up, reload, new chat, file upload/drop/paste, mobile layout.');
+})().catch(e=>{console.error(e);process.exit(1)});

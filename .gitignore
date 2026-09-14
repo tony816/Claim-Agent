@@ -3,7 +3,11 @@
 /.claude*.zip
 
 # Python runtime outputs
+.env
+.env.*
+!.env.example
 /runs/
+/.tui/
 /eval/results/
 /reports/
 /fixtures/live/

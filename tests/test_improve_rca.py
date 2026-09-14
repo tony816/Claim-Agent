@@ -4,12 +4,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from claim_copa.improve.feedback import build_feedback, detect_alerts
-from claim_copa.improve.lessons import LessonStore, propose_from_feedback, propose_with_llm
-from claim_copa.improve.rca import build_rca
-from claim_copa.provider.base import CallResult
-from claim_copa.provider.scripted import ScriptedProvider
-from claim_copa.store.telemetry import read_telemetry
+from claim_agent.improve.feedback import build_feedback, detect_alerts
+from claim_agent.improve.lessons import LessonStore, propose_from_feedback, propose_with_llm
+from claim_agent.improve.rca import build_rca
+from claim_agent.provider.base import CallResult
+from claim_agent.provider.scripted import ScriptedProvider
+from claim_agent.store.telemetry import read_telemetry
 
 from . import scripted_roles as R
 

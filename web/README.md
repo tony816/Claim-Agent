@@ -1,18 +1,18 @@
-<!-- claim-copa-bundle: 2026.08.27.5 -->
+<!-- claim-agent-bundle: 2026.08.27.5 -->
 
-# Claim Copa Web 설치·사용법
+# Claim-Agent Web 설치·사용법
 
-이 묶음은 서브에이전트 기능이 없는 웹 프로젝트에서 Claim Copa를 실행하기 위한 단일 에이전트 어댑터다. 기존 다중 에이전트판의 기술적 근거 기준과 청구항 게이트를 낮추지 않고, 호출 단계를 한 에이전트의 명시적 순차 패스로 바꾼다.
+이 묶음은 서브에이전트 기능이 없는 웹 프로젝트에서 Claim-Agent를 실행하기 위한 단일 에이전트 어댑터다. 기존 다중 에이전트판의 기술적 근거 기준과 청구항 게이트를 낮추지 않고, 호출 단계를 한 에이전트의 명시적 순차 패스로 바꾼다.
 
 ## 설치
 
-1. `dist/claim-copa-web-2026.08.27.5.zip`의 압축을 푼다.
+1. `dist/claim-agent-web-2026.08.27.5.zip`의 압축을 푼다.
 2. 웹 프로젝트의 프로젝트 지침에 `PROJECT_INSTRUCTIONS.md` 전문을 넣는다.
 3. 나머지 `VERSION`, `core/`, `roles/`, `sources/`, `HANDOFF_TEMPLATES.md`를 프로젝트 소스로 올린다.
 4. `MANIFEST.sha256`도 함께 올려 현재 묶음의 파일 집합을 식별한다.
 5. 구버전 파일과 신버전 파일을 한 프로젝트에 섞지 않는다.
 
-프로젝트가 파일별 해시를 직접 계산하지 못해도 각 Markdown 파일 첫 줄의 `claim-copa-bundle` 표지와 `VERSION`의 `source_set_id`가 모두 일치하는지 확인할 수 있다. 빌드가 실제 포함 파일에서 계산한 `BUNDLE_MANIFEST.md`의 `source_manifest_digest`는 모든 RUN_HEADER와 LOCK에 함께 기록한다. 버전이 섞였으면 청구항 작업을 시작하지 말고 한 버전의 파일로 다시 올린다.
+프로젝트가 파일별 해시를 직접 계산하지 못해도 각 Markdown 파일 첫 줄의 `claim-agent-bundle` 표지와 `VERSION`의 `source_set_id`가 모두 일치하는지 확인할 수 있다. 빌드가 실제 포함 파일에서 계산한 `BUNDLE_MANIFEST.md`의 `source_manifest_digest`는 모든 RUN_HEADER와 LOCK에 함께 기록한다. 버전이 섞였으면 청구항 작업을 시작하지 말고 한 버전의 파일로 다시 올린다.
 
 ## 실행 프로필
 

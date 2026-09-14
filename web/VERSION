@@ -1,5 +1,5 @@
-bundle_name=claim-copa-web
+bundle_name=claim-agent-web
 bundle_version=2026.08.27.5
 protocol_version=1.4.0
 source_set_id=cc-web-2026.08.27.5
-core_profile=claim-copa-multi-agent-2026.08.27.5
+core_profile=claim-agent-multi-agent-2026.08.27.5

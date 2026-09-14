@@ -1,6 +1,6 @@
-<!-- claim-copa-bundle: 2026.08.27.5 -->
+<!-- claim-agent-bundle: 2026.08.27.5 -->
 
-# Claim Copa Web — 버전·인계 템플릿
+# Claim-Agent Web — 버전·인계 템플릿
 
 ## RUN_HEADER
 

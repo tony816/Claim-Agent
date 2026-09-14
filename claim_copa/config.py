@@ -1,4 +1,4 @@
-"""Configuration loading (claim-copa.yaml) with dotted-key overrides."""
+"""Configuration loading (claim-agent.yaml) with dotted-key overrides."""
 from __future__ import annotations
 
 import copy
@@ -6,9 +6,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-DEFAULT_CONFIG_NAME = "claim-copa.yaml"
+DEFAULT_CONFIG_NAME = "claim-agent.yaml"
 
 
 class ModelConfig(BaseModel):
@@ -105,6 +106,8 @@ def apply_overrides(raw: dict[str, Any], overrides: dict[str, Any] | None) -> di
 
 def load_raw_config(path: Path | None, project_root: Path) -> dict[str, Any]:
     cfg_path = path or (project_root / DEFAULT_CONFIG_NAME)
+    if path is None and not cfg_path.exists():
+        cfg_path = project_root / "claim-copa.yaml"  # Existing installations.
     if cfg_path.exists():
         with open(cfg_path, encoding="utf-8") as fh:
             return yaml.safe_load(fh) or {}
@@ -117,6 +120,9 @@ def load_config(
     overrides: dict[str, Any] | None = None,
 ) -> AppConfig:
     root = (project_root or Path.cwd()).resolve()
+    # Load only this project's file, preserving explicitly set environment values.
+    # utf-8-sig also supports .env files saved with a BOM by Windows editors.
+    load_dotenv(root / ".env", override=False, encoding="utf-8-sig")
     raw = apply_overrides(load_raw_config(path, root), overrides)
     cfg = AppConfig.model_validate(raw)
     cfg.project_root = root

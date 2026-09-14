@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import os
+import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,6 +48,8 @@ class CacheManager:
         self.ttl = ttl
         self.enabled = enabled and client is not None
         self.uncacheable_models: set[str] = set()
+        self._lock = threading.RLock()
+        self._rejected_keys: set[str] = set()
         self._entries: dict[str, CacheEntry] = {}
         self._load()
 
@@ -53,20 +59,23 @@ class CacheManager:
                 data = json.loads(self.registry_path.read_text(encoding="utf-8"))
                 for k, v in data.get("entries", {}).items():
                     self._entries[k] = CacheEntry(**v)
-                self.uncacheable_models = set(data.get("uncacheable_models", []))
+                # Old registries blacklisted whole models after any 400. Retry
+                # those models; only a particular content key may be rejected.
+                self.uncacheable_models = set()
             except (json.JSONDecodeError, TypeError):
                 self._entries = {}
 
     def _save(self) -> None:
         self.registry_path.parent.mkdir(parents=True, exist_ok=True)
-        self.registry_path.write_text(
-            json.dumps(
-                {"entries": {k: v.as_dict() for k, v in self._entries.items()}, "uncacheable_models": sorted(self.uncacheable_models)},
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
+        data = json.dumps({"entries": {k: v.as_dict() for k, v in self._entries.items()}}, ensure_ascii=False, indent=2)
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.registry_path.parent, delete=False) as fh:
+            temporary = fh.name
+            fh.write(data)
+        try:
+            os.replace(temporary, self.registry_path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
 
     def list(self) -> list[CacheEntry]:
         return list(self._entries.values())
@@ -84,11 +93,21 @@ class CacheManager:
         self._save()
         return n
 
-    def get_or_create(self, model: str, role: str, scope: str, system_instruction: str, sources_block: str) -> CacheEntry | None:
+    def get_or_create(self, model: str, role: str, scope: str, system_instruction: str, sources_block: str, *, images=(), identity: str = "") -> CacheEntry | None:
+        # Parallel per-claim comparisons must create just one shared cache.
+        with self._lock:
+            return self._get_or_create(model, role, scope, system_instruction, sources_block, images, identity)
+
+    def _get_or_create(self, model, role, scope, system_instruction, sources_block, images, identity):
         """Return a live cache entry or None when caching is disabled/unsupported."""
         if not self.enabled or not sources_block or model in self.uncacheable_models:
             return None
-        key = cache_key(model, role, scope, sha256_text(system_instruction), sha256_text(sources_block))
+        fingerprint = sources_block
+        if images or identity:
+            fingerprint += "\n" + json.dumps([identity, [(i.mime_type, i.label, hashlib.sha256(i.data).hexdigest()) for i in images]], ensure_ascii=False)
+        key = cache_key(model, role, scope, sha256_text(system_instruction), sha256_text(fingerprint))
+        if key in self._rejected_keys:
+            return None
         entry = self._entries.get(key)
         now = time.time()
         if entry and entry.expires_at - 60 > now:
@@ -96,20 +115,23 @@ class CacheManager:
         try:
             from google.genai import types  # local import: optional dependency at import time
 
+            parts = [types.Part.from_text(text=sources_block)]
+            for img in images:
+                parts.append(types.Part.from_text(text=img.label))
+                parts.append(types.Part.from_bytes(data=img.data, mime_type=img.mime_type))
             created = self.client.caches.create(
                 model=model,
                 config=types.CreateCachedContentConfig(
                     system_instruction=system_instruction,
-                    contents=[sources_block],
+                    contents=[types.Content(role="user", parts=parts)],
                     ttl=self.ttl,
-                    display_name=f"claim-copa:{role}:{scope}:{key[:12]}",
+                    display_name=f"claim-agent:{role}:{scope}:{key[:12]}",
                 ),
             )
         except Exception as exc:  # noqa: BLE001
             msg = str(exc).lower()
             if "too small" in msg or "minimum" in msg or "not supported" in msg or "400" in msg:
-                self.uncacheable_models.add(model)
-                self._save()
+                self._rejected_keys.add(key)
             return None
         token_count = 0
         usage = getattr(created, "usage_metadata", None)
@@ -121,6 +143,10 @@ class CacheManager:
         return entry
 
     def invalidate(self, name: str) -> None:
+        with self._lock:
+            self._invalidate(name)
+
+    def _invalidate(self, name: str) -> None:
         for k, v in list(self._entries.items()):
             if v.name == name:
                 del self._entries[k]

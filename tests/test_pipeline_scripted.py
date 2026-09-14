@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from claim_copa.models.enums import RequestMode
-from claim_copa.pipeline.engine import Decision
-from claim_copa.provider.scripted import ScriptedProvider
-from claim_copa.store.telemetry import read_telemetry
+from claim_agent.models.enums import RequestMode
+from claim_agent.pipeline.engine import Decision
+from claim_agent.provider.scripted import ScriptedProvider
+from claim_agent.store.telemetry import read_telemetry
 
 from . import scripted_roles as R
 
@@ -211,7 +211,7 @@ def test_finalization_without_final_gate_keeps_draft_lock_and_blocks_dependents(
 
 
 def test_review_only_runs_requested_reviewer_without_locks(rt, project_root):
-    from claim_copa.models.request import RunRequest
+    from claim_agent.models.request import RunRequest
 
     req = RunRequest.from_yaml(project_root / "eval" / "cases" / "reagent-tube-review-only" / "request.yaml")
     engine = _engine(rt, {"syntax-scope-reviewer": [R.syntax()]})

@@ -1,8 +1,8 @@
-# Claim Copa Python runtime configuration.
+# Claim-Agent Python runtime configuration.
 # Override any key with an experiment variant (experiments/*.yaml) or CLI flags.
 
 model:
-  default: gemini-3.8-flash        # verify with `claim-copa models`
+  default: gemini-3.8-flash        # verify with `claim-agent models`
   api_key_env: GEMINI_API_KEY
   max_output_tokens: 32768
 
