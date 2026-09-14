@@ -5,19 +5,19 @@ from pathlib import Path
 
 import pytest
 
-from claim_copa.improve.feedback import build_feedback
-from claim_copa.improve.lessons import LessonStore
-from claim_copa.models.contracts import contract_for
-from claim_copa.models.enums import RequestMode, Scope
-from claim_copa.models.envelope import ENVELOPE_JSON_SCHEMA, RoleEnvelope, schema_depth
-from claim_copa.models.ids import Identifiers, bump_revision, record_id
-from claim_copa.pipeline.blind_guard import BlindContamination, BlindPacket, assert_isolated
-from claim_copa.pipeline.claimtext import MultiDependentChain, exact_sha256, flatten, parent_chain, parent_chain_text, parse_claim_set, validate_parent_refs
-from claim_copa.pipeline.transitions import decide
-from claim_copa.pipeline.verify import cross_check
-from claim_copa.provider.base import CallSpec
-from claim_copa.roles.whitelist import SOURCE_WHITELIST, sources_for
-from claim_copa.sources.corpus import CorpusIndex, is_forbidden_query
+from claim_agent.improve.feedback import build_feedback
+from claim_agent.improve.lessons import LessonStore
+from claim_agent.models.contracts import contract_for
+from claim_agent.models.enums import RequestMode, Scope
+from claim_agent.models.envelope import ENVELOPE_JSON_SCHEMA, RoleEnvelope, schema_depth
+from claim_agent.models.ids import Identifiers, bump_revision, record_id
+from claim_agent.pipeline.blind_guard import BlindContamination, BlindPacket, assert_isolated
+from claim_agent.pipeline.claimtext import MultiDependentChain, exact_sha256, flatten, parent_chain, parent_chain_text, parse_claim_set, validate_parent_refs
+from claim_agent.pipeline.transitions import decide
+from claim_agent.pipeline.verify import cross_check
+from claim_agent.provider.base import CallSpec
+from claim_agent.roles.whitelist import SOURCE_WHITELIST, sources_for
+from claim_agent.sources.corpus import CorpusIndex, is_forbidden_query
 
 from . import scripted_roles as R
 
@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # ----------------------------------------------------------------------------- claim text
 def test_parse_real_claim_set_and_chains():
-    text = (ROOT / "claim_copa_updated_claims_2026-08-27.md").read_text(encoding="utf-8")
+    text = (ROOT / "claim_agent_updated_claims_2026-08-27.md").read_text(encoding="utf-8")
     claims = parse_claim_set(text)
     assert [c.claim_no for c in claims] == [1, 2, 3, 4, 5]
     assert claims[0].is_independent and claims[3].parent_no == 3 and claims[4].parent_no == 3
@@ -154,7 +154,7 @@ def test_lessons_store_and_digest(tmp_path):
 
 
 def test_feedback_report_from_runs(rt, request_indep):
-    from claim_copa.provider.scripted import ScriptedProvider
+    from claim_agent.provider.scripted import ScriptedProvider
 
     script = R.happy_script(dependent=False)
     script["claim-style-adjuster"] = [R.style(return_to="RETURN_TO_DRAFTER"), R.style()]

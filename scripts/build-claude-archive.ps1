@@ -16,7 +16,7 @@ if ([System.IO.Path]::GetFileName($BackupName) -ne $BackupName) {
 }
 
 $backupPath = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $BackupName))
-$stagingDirectory = [System.IO.Path]::GetFullPath((Join-Path $projectRoot ('.tmp-claim-copa-archive-' + [guid]::NewGuid().ToString('N'))))
+$stagingDirectory = [System.IO.Path]::GetFullPath((Join-Path $projectRoot ('.tmp-claim-agent-archive-' + [guid]::NewGuid().ToString('N'))))
 $newArchivePath = Join-Path $stagingDirectory '.claude.new.zip'
 
 function Assert-WithinProject([string]$Path) {
@@ -144,7 +144,7 @@ finally {
     $stagingLeaf = [System.IO.Path]::GetFileName($stagingDirectory)
     if ((Test-Path -LiteralPath $stagingDirectory) -and
         $stagingDirectory.StartsWith($projectPrefix, [System.StringComparison]::OrdinalIgnoreCase) -and
-        $stagingLeaf.StartsWith('.tmp-claim-copa-archive-', [System.StringComparison]::Ordinal)) {
+        $stagingLeaf.StartsWith('.tmp-claim-agent-archive-', [System.StringComparison]::Ordinal)) {
         Remove-Item -LiteralPath $stagingDirectory -Recurse -Force
     }
 }

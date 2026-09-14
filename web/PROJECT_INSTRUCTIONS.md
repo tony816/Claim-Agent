@@ -1,6 +1,6 @@
-<!-- claim-copa-bundle: 2026.08.27.5 -->
+<!-- claim-agent-bundle: 2026.08.27.5 -->
 
-# Claim Copa Web — 프로젝트 지침
+# Claim-Agent Web — 프로젝트 지침
 
 ## 0. 실행 계약과 우선순위
 
@@ -37,7 +37,7 @@ PRIOR_ART_SET: 사용자 식별명 목록 | NONE
 
 `execution_profile`이 없으면 `AUTHORING_DRAFT`는 `WEB_SINGLE_CHAT`으로 진행한다. 사용자가 출원용 최종 확정을 요구했는데 격리 대화를 제공하지 않으면 초안·검수는 계속 수행하되 최종 잠금만 제한한다.
 
-업로드된 `VERSION` 및 각 Markdown 첫 줄의 `claim-copa-bundle`이 이 지침과 다르거나, 같은 역할의 파일이 둘 이상의 버전으로 존재하면 `BLOCK — CONFIG_VERSION_MISMATCH`로 중지한다. `BUNDLE_MANIFEST.md`의 `source_manifest_digest`도 RUN_HEADER와 LOCK에 기록한다. 같은 표시 버전이라도 digest가 다르면 기존 기록은 stale이다. 사용자가 현재 발명의 원자료를 추가·삭제·교체하거나 USER_LOCK의 범위·문언을 바꾸면 `input_revision`을 올린다.
+업로드된 `VERSION` 및 각 Markdown 첫 줄의 `claim-agent-bundle`이 이 지침과 다르거나, 같은 역할의 파일이 둘 이상의 버전으로 존재하면 `BLOCK — CONFIG_VERSION_MISMATCH`로 중지한다. `BUNDLE_MANIFEST.md`의 `source_manifest_digest`도 RUN_HEADER와 LOCK에 기록한다. 같은 표시 버전이라도 digest가 다르면 기존 기록은 stale이다. 사용자가 현재 발명의 원자료를 추가·삭제·교체하거나 USER_LOCK의 범위·문언을 바꾸면 `input_revision`을 올린다.
 
 ## 2. 소스 권한
 

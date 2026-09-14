@@ -1,6 +1,6 @@
 # Example experiment variant. Run with:
-#   claim-copa eval run --case sample-clip-holder --variant experiments/example-medium-thinking.yaml --baseline
-#   claim-copa run ... --shadow experiments/example-medium-thinking.yaml
+#   claim-agent eval run --case sample-clip-holder --variant experiments/example-medium-thinking.yaml --baseline
+#   claim-agent run ... --shadow experiments/example-medium-thinking.yaml
 name: medium-thinking
 description: 검수 역할의 thinking_level을 MEDIUM으로 낮춰 비용·지연 대비 게이트 결과 변화를 본다.
 overrides:

@@ -24,6 +24,7 @@ from ..models.state import (
     Stage,
     TargetRecon,
 )
+from ..claim_scope import parse_target
 from ..provider.base import CallResult, CallSpec, GenParams, LLMProvider, ProviderError
 from ..roles.prompt import PromptAssembler
 from ..roles.registry import RoleRegistry
@@ -72,6 +73,7 @@ class Decision:
     action: str = "none"      # none | style_fix | meaning_fix | redesign | add_source | accept_unverified | restart
     add_sources: list[str] | None = None
     restart_from: str | None = None
+    request_update: RunRequest | None = None  # conversational scope/source update; always redesign
 
 
 class PipelineEngine:
@@ -151,12 +153,31 @@ class PipelineEngine:
     def resume(self, run_id: str, decision: Decision) -> RunState:
         state = self.store.load_state(run_id)
         req = RunRequest.model_validate(state.request)
-        if state.source_set_id != self.source_set_id and not decision.restart_from:
+        if decision.request_update is not None:
+            updated = decision.request_update
+            if decision.restart_from != "ARCHITECT" or updated.request_mode != req.request_mode:
+                raise ProviderError("요청/자료 변경은 같은 모드의 ARCHITECT 재설계로만 재개할 수 있습니다.")
+            if updated.candidate_id != req.candidate_id or updated.user_lock != req.user_lock:
+                raise ProviderError("요청 갱신으로 candidate_id 또는 USER_LOCK을 변경할 수 없습니다.")
+            req = updated
+            state.request = req.model_dump(mode="json")
+            bundle = MaterialBundle.load(req)
+            self.store.save_materials(run_id, bundle)
+            state.input_revision = input_revision_id(bundle.digest())
+            state.material_meta = [i.as_meta() for i in bundle.items]
+            state.spec_present = bundle.spec_present
+            state.prior_art_present = bundle.prior_art_present
+        if state.source_set_id != self.source_set_id:
             state.mark_all_stale()
-            self.store.save_state(state)
-            raise ProviderError(
-                f"source_set_id changed ({state.source_set_id} -> {self.source_set_id}); records are STALE. Use --restart-from ARCHITECT to redo."
-            )
+            if decision.restart_from != "ARCHITECT":
+                self.store.save_state(state)
+                raise ProviderError(
+                    f"source_set_id changed ({state.source_set_id} -> {self.source_set_id}); records are STALE. Use --restart-from ARCHITECT to redo."
+                )
+            state.notes.append(f"역할·소스 계약 갱신: {state.source_set_id} → {self.source_set_id}; 이전 기록 STALE, 설계부터 재검증")
+            state.source_set_id = self.source_set_id
+            state.variant_id = self.variant_id
+            state.lessons_hash = self.lessons_hash
         if decision.add_sources:
             req.invention_sources = list(req.invention_sources) + list(decision.add_sources)
             state.request = req.model_dump(mode="json")
@@ -262,6 +283,7 @@ class PipelineEngine:
             packet_text=packet_text, sources_block=prompt.sources_block, images=list(packet.images), json_schema=ENVELOPE_JSON_SCHEMA,
             tools=None, gen=self._gen(role), use_cache=(rc.cache and self.cfg.cache.enabled and not blind), phase="main",
             stage=stage.value, run_id=state.run_id, seq=seq, meta={"record_id": rid, "kind": kind, "target_claim_id": ids.target_claim_id},
+            cache_packet_text=packet.cache_text if not blind else "", cache_images=packet.cache_images and not blind,
         )
         env, result, repair_used, problems = self._generate_validated(spec, contract, ids, rid, expected_exact, prompt.source_paths, blind)
         if tool_log.calls:
@@ -269,7 +291,30 @@ class PipelineEngine:
         elif use_tools:
             env.aux_source_usage = env.aux_source_usage or "NOT_ACTIVATED"
 
+        scope_problem = None
+        requested = parse_target(state.request.get("dependent_target")) if scope == Scope.DEPENDENT_SET else None
+        if requested and env.status in (Status.PASS, Status.PASS_RANGE):
+            actual = None
+            if stage == Stage.DEP_ARCHITECT:
+                planned = [x.planned_claim_no for x in env.candidates if x.classification.value == "TECHNICAL_SOLUTION_CANDIDATE"]
+                actual = set(planned)
+                if len(planned) != len(actual):
+                    scope_problem = "종속항 설계 번호가 중복되었습니다."
+            elif stage in (Stage.DEP_DRAFT, Stage.DEP_STYLE):
+                actual = {x.claim_no for x in env.claims}
+                if len(actual) != len(env.claims):
+                    scope_problem = "종속항 산출 번호가 중복되었습니다."
+                try:
+                    parsed_numbers = {x.claim_no for x in parse_claim_set(env.exact_claim_text or "")}
+                except ClaimParseError:
+                    parsed_numbers = set()
+                if parsed_numbers != actual:
+                    scope_problem = "종속항 구조화 목록과 exact 문언의 항 번호가 다릅니다."
+            if actual is not None and actual != requested:
+                scope_problem = f"요청한 종속항 {sorted(requested)}와 산출 항 번호 {sorted(str(x) for x in actual)}가 다릅니다. 임의 범위 확대/누락을 허용하지 않습니다."
         issued = contract.passes(env, state.request_mode) if role in REVIEWER_ROLES or role == "blind-claim-reconstruction-reviewer" else env.status in (Status.PASS, Status.PASS_RANGE)
+        if scope_problem:
+            issued = False
         text_for_hash = env.exact_claim_text if env.exact_claim_text else expected_exact
         ref = RecordRef(
             record_id=rid, kind=kind, role=role, scope=scope.value, stage=stage.value, status=env.status.value,
@@ -278,6 +323,8 @@ class PipelineEngine:
         )
         call_payload = {
             "seq": seq, "role": role, "scope": scope.value, "stage": stage.value, "record_id": rid, "model": spec.model,
+            "context_transport": {"shared_chars": len(spec.cache_packet_text), "packet_chars": len(spec.packet_text), "shared_images": len(spec.images) if spec.cache_images else 0},
+            "scope_problem": scope_problem,
             "system_sha": spec.system_sha, "sources_sha": spec.sources_sha, "packet_sha": spec.packet_sha, "packet_text": packet_text,
             "preloaded_sources": prompt.source_paths, "tool_log": tool_log.calls, "response": result.as_dict(), "repair_used": repair_used,
             "cross_check_problems": problems, "envelope": env.model_dump(mode="json"),
@@ -303,6 +350,8 @@ class PipelineEngine:
                 except Exception as exc:  # noqa: BLE001 - shadow never affects the run
                     state.notes.append(f"shadow 실패 ({role}): {exc}")
             self.store.save_state(state)
+        if scope_problem:
+            raise PipelineHalt(Halt(stage=stage.value, role=role, kind="REVIEW", reason_code="OTHER", message="REQUEST_SCOPE_MISMATCH: " + scope_problem, record_id=rid))
         return env, ref
 
     def _generate_validated(self, spec: CallSpec, contract, ids: Identifiers, rid: str, expected_exact: str | None, preloaded: list[str], blind: bool):
@@ -328,6 +377,7 @@ class PipelineEngine:
                 packet_text=spec.packet_text + f"\n### 복구 지시\n\n이전 출력 문제: {reason}.{trunc} 같은 판정을 유지하되 스키마를 정확히 따르고 `gates`·`status`·`exact_claim_text`를 보고서와 일치시켜 JSON 하나만 다시 출력한다.\n",
                 sources_block=spec.sources_block, images=spec.images, json_schema=spec.json_schema, tools=None, gen=spec.gen,
                 use_cache=spec.use_cache, phase="repair", stage=spec.stage, run_id=spec.run_id, seq=spec.seq, meta=spec.meta,
+                cache_packet_text=spec.cache_packet_text, cache_images=spec.cache_images,
             )
             result = self.provider.generate(repair_spec)
             env = self._parse(result)
@@ -425,6 +475,7 @@ class PipelineEngine:
             Halt(
                 stage=stage.value, role=role, kind=tr.halt_kind or "REVIEW", reason_code=env.reason_code, message=tr.reason,
                 open_issues=[o.model_dump() for o in env.open_issues], return_to=tr.return_to.value if tr.return_to else None, record_id=rid,
+                report_markdown=env.report_markdown,
             )
         )
 
@@ -937,20 +988,21 @@ class PipelineEngine:
     # ------------------------------------------------------------------ review only
     def _run_review_only(self, state: RunState, bundle: MaterialBundle) -> None:
         req = RunRequest.model_validate(state.request)
-        claim_text = bundle.claim_file_text() or req.request_text
+        claim_text = bundle.claim_file_text() or ""
         scope = Scope(req.review_scope)
         ids = Identifiers(state.candidate.candidate_id, "r1", "N/A", input_revision=state.input_revision)
-        state.candidate.current = RevisionState(revision="r1", design_revision="N/A", exact_text=claim_text, exact_sha256=exact_sha256(claim_text))
+        state.candidate.design_revision = "N/A"
+        state.candidate.current = RevisionState(revision="r1", design_revision="N/A", exact_text=claim_text or None, exact_sha256=exact_sha256(claim_text) if claim_text else None)
         kinds = {"syntax-scope-reviewer": "syntax", "oa-strategy-reviewer": "oa", "claim-success-reviewer": "success"}
         for role in req.reviewers or ["syntax-scope-reviewer"]:
             kind = kinds.get(role)
             if kind is None:
-                state.notes.append(f"REVIEW_ONLY에서 지원하지 않는 역할: {role}")
-                continue
+                raise ProviderError(f"REVIEW_ONLY에서 지원하지 않는 역할: {role}")
             rid = record_id(kind, ids)
             pk = packets.review_only(state, bundle, ids, rid, role, scope, claim_text, req.request_text)
             env, ref = self._call(state, role, scope if scope != Scope.DEPENDENT_SINGLE else Scope.INDEPENDENT, Stage.REVIEW_ONLY, kind, pk, ids, rid, expected_exact=claim_text)
             state.candidate.current.records[kind] = rid
+            state.review_reports[role] = env.report_markdown
         state.stage = Stage.DONE
         state.outcome = "REVIEW_ONLY_DONE"
         state.notes.append("REVIEW_ONLY 결과는 DRAFT·FINAL LOCK의 PASS 근거가 아니다")

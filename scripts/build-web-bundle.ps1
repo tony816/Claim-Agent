@@ -51,9 +51,9 @@ function Write-Utf8NoBom([string]$Path, [string]$Content) {
 
 function Copy-VersionedMarkdown([string]$SourcePath, [string]$DestinationPath, [string]$CanonicalPath) {
     $content = [System.IO.File]::ReadAllText($SourcePath)
-    $header = "<!-- claim-copa-bundle: $bundleVersion; canonical-path: $CanonicalPath -->"
-    if ($content -match '^<!-- claim-copa-bundle:') {
-        $content = [System.Text.RegularExpressions.Regex]::Replace($content, '^<!-- claim-copa-bundle:[^\r\n]*-->\r?\n*', '')
+    $header = "<!-- claim-agent-bundle: $bundleVersion; canonical-path: $CanonicalPath -->"
+    if ($content -match '^<!-- claim-agent-bundle:') {
+        $content = [System.Text.RegularExpressions.Regex]::Replace($content, '^<!-- claim-agent-bundle:[^\r\n]*-->\r?\n*', '')
     }
     Write-Utf8NoBom -Path $DestinationPath -Content "$header`r`n`r`n$content"
 }
@@ -161,7 +161,7 @@ Get-ChildItem -LiteralPath $bundleDirectory -Recurse -File | Sort-Object FullNam
 }
 $sourceManifestDigest = Get-Sha256Text (($contentFingerprintLines -join "`n") + "`n")
 $manifestSummary = @"
-<!-- claim-copa-bundle: $bundleVersion -->
+<!-- claim-agent-bundle: $bundleVersion -->
 
 # Bundle manifest
 

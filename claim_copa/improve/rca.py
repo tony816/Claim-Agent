@@ -293,7 +293,7 @@ def build_rca(store: RunStore, run_id: str, feedback: FeedbackReport | None = No
         else:
             rep.next_actions.append("사용자 판단 필요: report.md의 쟁점을 확인하고 `resume --decide`로 결정을 전달한다.")
         if rep.pattern_kind == "반복 추세":
-            rep.next_actions.append(f"반복 {rep.pattern_count}회: `claim-copa lessons propose --from-feedback`으로 교훈 초안을 만들고 승인 여부를 판단한다.")
+            rep.next_actions.append(f"반복 {rep.pattern_count}회: `claim-agent lessons propose --from-feedback`으로 교훈 초안을 만들고 승인 여부를 판단한다.")
         if rep.loop_waste_tokens > 0:
             rep.next_actions.append(f"재작업 비용 {rep.loop_waste_tokens:,} 토큰({rep.loop_waste_calls}회)이 이미 버려졌다. 같은 패턴이 또 보이면 루프 한도를 낮추는 편이 싸다.")
     else:

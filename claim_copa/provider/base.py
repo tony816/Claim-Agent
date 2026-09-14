@@ -40,6 +40,8 @@ class CallSpec:
     run_id: str = ""
     seq: int = 0
     meta: dict[str, Any] = field(default_factory=dict)
+    cache_packet_text: str = ""             # exact shared substring; full packet remains auditable
+    cache_images: bool = False
 
     @property
     def system_sha(self) -> str:

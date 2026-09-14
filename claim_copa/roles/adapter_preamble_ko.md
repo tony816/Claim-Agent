@@ -1,5 +1,5 @@
 <!-- adapter_version: 1 -->
-# 런타임 어댑터 (Claim Copa Python + Gemini 실행 프로필)
+# 런타임 어댑터 (Claim-Agent Python + Gemini 실행 프로필)
 
 이 호출은 Claude Code 서브에이전트가 아니라 Python 오케스트레이터가 Gemini API로 실행하는 단일 역할 호출이다. 아래 규칙은 뒤따르는 역할 파일의 실행 계약을 대체하지 않고, 도구·소스 접근 방식과 출력 형식만 이 환경에 맞게 바꾼다.
 

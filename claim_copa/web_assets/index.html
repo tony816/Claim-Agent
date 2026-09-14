@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Claim-Agent</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<aside id="sidebar">
+  <a class="brand" href="/" aria-label="Claim-Agent 홈"><span class="mark">C</span> Claim-Agent</a>
+  <button id="new-chat" class="new-chat">＋ 새 대화</button>
+  <p class="side-label">내 대화</p><nav id="sessions" aria-label="대화 목록"></nav>
+  <div class="side-bottom"><span class="local-dot"></span> 이 컴퓨터에 저장됨<button id="shutdown">프로그램 종료</button></div>
+</aside>
+<main>
+  <header><div class="header-left"><button id="menu" aria-label="대화 목록 열기">☰</button><strong>Claim-Agent</strong><span id="model">Gemini</span></div><span class="header-note">대화에서 초안까지</span></header>
+  <div id="conversation" tabindex="-1">
+    <section id="welcome"><div class="welcome-mark">C</div><h1>무엇을 도와드릴까요?</h1><p>편하게 질문하고, 자료를 첨부하고, 함께 수정해 보세요.</p><div class="suggestions"><button data-prompt="안녕! 어떤 도움을 줄 수 있어?">자유롭게 대화하기 <span>↗</span></button><button data-prompt="첨부한 자료의 핵심 내용을 정리해 줘.">자료 정리하기 <span>↗</span></button><button data-prompt="발명에 관해 설명할게. 청구항 작성을 도와줘.">발명 이야기하기 <span>↗</span></button></div></section>
+    <div id="messages" aria-label="대화 내용"></div>
+  </div>
+  <footer>
+    <div id="error" role="alert" hidden></div>
+    <form id="composer">
+      <div id="attachments" aria-label="보낼 첨부 파일"></div>
+      <textarea id="prompt" rows="1" placeholder="무엇이든 물어보세요" aria-label="메시지 입력" autofocus></textarea>
+      <div class="composer-tools"><div class="tools-left"><button type="button" id="attach" title="파일 첨부" aria-label="파일 첨부">＋</button><select id="mode" aria-label="대화 모드"><option value="CHAT">자동 분류 · 대화</option><option value="AUTHORING_DRAFT">청구항 작성·수정</option></select><details id="options" hidden><summary>작성 옵션</summary><div class="options-panel"><label><input type="checkbox" id="dependent"> 종속항도 작성</label><label>범위 <input id="target" value="2~8" aria-label="종속항 범위"></label></div></details></div><button type="submit" id="send" title="보내기" aria-label="보내기">↑</button><button type="button" id="stop" title="응답 중지" aria-label="응답 중지" hidden>■</button></div>
+    </form>
+    <p id="hint">Enter로 보내기 · Shift+Enter로 줄바꿈 · 파일을 끌어 놓거나 이미지를 붙여넣으세요</p>
+    <input id="file-picker" type="file" accept=".txt,.md,.json,.yaml,.yml,.csv,.png,.jpg,.jpeg,.webp" multiple hidden>
+  </footer>
+</main>
+<div id="drop-overlay" hidden>파일을 놓아서 대화에 첨부하세요</div>
+</body></html>

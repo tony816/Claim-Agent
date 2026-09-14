@@ -1,4 +1,6 @@
-# Claim Copa for Claude Code
+# Claim-Agent for Claude Code
+
+화면과 실행기의 제품명은 `Claim-Agent`, 실행 명령은 `claim-agent`, Python 진입점은 `claim_agent`로 통일한다. 진행 중인 작업과 기존 명령의 호환성을 위해 이전 내부 구현 경로와 실행 별칭은 유지한다.
 
 한국어 특허 청구항을 위한 프로젝트 전용 다중 에이전트 구성이다. `sources/`의 파일이 승인되었다는 사실만으로 현재 발명의 기술적 원자료 또는 검증된 긍정 예시가 되는 것은 아니며, 역할과 활성 시점은 `sources/README.md`에서 구분한다.
 
@@ -21,12 +23,12 @@
 
 **처음 쓰는 분은 [`사용법.md`](사용법.md)부터 보면 된다.** 설치·실행·결과 읽기·멈췄을 때 대처를 복사해 쓸 수 있는 명령으로 정리했다.
 
-Claude Code 없이 같은 절차를 실행하는 독립 프로그램은 [`docs/python_runtime.md`](docs/python_runtime.md)를 따른다. `.claude/agents/*.md`를 그대로 system instruction으로 쓰고, 게이트 전제조건·record_id·revision 무효화·블라인드 격리·LOCK 조립을 Python이 결정론적으로 수행하며, Gemini API(기본 `gemini-3.8-flash`, `claim-copa.yaml`에서 변경)로 각 역할을 호출한다.
+Claude Code 없이 같은 절차를 실행하는 독립 프로그램은 [`docs/python_runtime.md`](docs/python_runtime.md)를 따른다. `.claude/agents/*.md`를 그대로 system instruction으로 쓰고, 게이트 전제조건·record_id·revision 무효화·블라인드 격리·LOCK 조립을 Python이 결정론적으로 수행하며, Gemini API(기본 `gemini-3.8-flash`, `claim-agent.yaml`에서 변경)로 각 역할을 호출한다.
 
 ```bash
-pip install -e . && claim-copa doctor --contracts
-claim-copa run --request-yaml eval/cases/sample-clip-holder/request.yaml --replay eval/cases/sample-clip-holder/fixtures   # 오프라인 데모
-claim-copa feedback · claim-copa runs rca <run_id> · claim-copa eval run --case … --shadow · claim-copa lessons propose --from-feedback   # 개선 루프
+pip install -e . && claim-agent doctor --contracts
+claim-agent run --request-yaml eval/cases/sample-clip-holder/request.yaml --replay eval/cases/sample-clip-holder/fixtures   # 오프라인 데모
+claim-agent feedback · claim-agent runs rca <run_id> · claim-agent eval run --case … --shadow · claim-agent lessons propose --from-feedback   # 개선 루프
 ```
 
 ## 웹 단일 에이전트판
@@ -38,4 +40,4 @@ claim-copa feedback · claim-copa runs rca <run_id> · claim-copa eval run --cas
 - 서브에이전트 부재 자체는 `LOCK_MISSING_OR_STALE` 사유가 아니다. 실제 입력·문언·근거·게이트 결함만 중단 사유가 된다.
 - 모든 기록은 `bundle_version`, `source_set_id`, `input_revision`, `design_revision`, `candidate_id`, `revision`으로 버전 고정된다.
 
-웹 업로드용 묶음은 `scripts/build-web-bundle.ps1`로 생성한다. 결과물은 `dist/claim-copa-web-<버전>/`과 같은 이름의 ZIP 파일이다.
+웹 업로드용 묶음은 `scripts/build-web-bundle.ps1`로 생성한다. 결과물은 `dist/claim-agent-web-<버전>/`과 같은 이름의 ZIP 파일이다.

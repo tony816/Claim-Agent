@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from claim_copa.models.request import RunRequest
-from claim_copa.runtime import build_runtime
+from claim_agent.models.request import RunRequest
+from claim_agent.runtime import build_runtime
 
 ROOT = Path(__file__).resolve().parents[1]
 CASE = ROOT / "eval" / "cases" / "sample-clip-holder"

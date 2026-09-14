@@ -2,11 +2,16 @@
 from __future__ import annotations
 
 import os
+import ssl
+import sys
 import time
+from types import SimpleNamespace
+import uuid
 from typing import Any
 
 from .base import CallResult, CallSpec, ProviderError, parse_json_text
 from .cache import CacheManager
+from ..live_events import EventWriter, visible_text
 
 THINKING_BUDGET_FALLBACK = {"MINIMAL": 512, "LOW": 1024, "MEDIUM": 8192, "HIGH": -1}
 
@@ -17,18 +22,46 @@ def make_client(api_key_env: str = "GEMINI_API_KEY", api_key: str | None = None)
     key = api_key or os.environ.get(api_key_env) or os.environ.get("GOOGLE_API_KEY")
     if not key:
         raise ProviderError(f"{api_key_env} is not set")
-    return genai.Client(api_key=key)
+    kwargs: dict[str, Any] = {"api_key": key}
+    if sys.platform == "win32":
+        import truststore
+
+        # Validate TLS with Windows' trusted roots, including managed CA roots.
+        # Keep certificate and hostname verification enabled.
+        context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        kwargs["http_options"] = {"client_args": {"verify": context}}
+    return genai.Client(**kwargs)
 
 
 class GeminiProvider:
     name = "gemini"
 
-    def __init__(self, client: Any, cache: CacheManager | None = None, retry_attempts: int = 3, backoff_s: list[float] | None = None):
+    def __init__(self, client: Any, cache: CacheManager | None = None, retry_attempts: int = 3, backoff_s: list[float] | None = None, events: EventWriter | None = None):
         self.client = client
         self.cache = cache
         self.retry_attempts = retry_attempts
         self.backoff_s = backoff_s or [2, 8, 20]
         self._thinking_level_unsupported: set[str] = set()
+        self.events = events
+
+    def _emit(self, kind: str, spec: CallSpec, call_id: str, **data: Any) -> None:
+        if self.events:
+            self.events.emit(kind, call_id=call_id, role=spec.role, scope=spec.scope, phase=spec.phase,
+                             target=spec.meta.get("target_claim_id"), **data)
+
+    def _stream(self, spec: CallSpec, contents: list[Any], config: Any, call_id: str) -> Any:
+        chunks: list[str] = []
+        usage = None
+        candidates = []
+        for response in self.client.models.generate_content_stream(model=spec.model, contents=contents, config=config):
+            part = visible_text(response)
+            if part:
+                chunks.append(part)
+                self._emit("delta", spec, call_id, text=part)
+            usage = getattr(response, "usage_metadata", None) or usage
+            if self._finish_reason(response):
+                candidates = response.candidates
+        return SimpleNamespace(text="".join(chunks), usage_metadata=usage, candidates=candidates)
 
     # ------------------------------------------------------------------ helpers
     def _thinking_config(self, model: str, level: str) -> Any:
@@ -38,14 +71,17 @@ class GeminiProvider:
             return types.ThinkingConfig(thinking_budget=THINKING_BUDGET_FALLBACK.get(level.upper(), -1))
         return types.ThinkingConfig(thinking_level=level.upper())
 
-    def _build_contents(self, spec: CallSpec, include_sources: bool) -> list[Any]:
+    def _build_contents(self, spec: CallSpec, include_sources: bool, shared_cached: bool = False) -> list[Any]:
         from google.genai import types
 
         parts: list[Any] = []
         if include_sources and spec.sources_block:
             parts.append(types.Part.from_text(text=spec.sources_block))
-        parts.append(types.Part.from_text(text=spec.packet_text))
-        for img in spec.images:
+        packet = spec.packet_text
+        if shared_cached:
+            packet = packet.replace(spec.cache_packet_text, "", 1)
+        parts.append(types.Part.from_text(text=packet))
+        for img in ([] if shared_cached and spec.cache_images else spec.images):
             parts.append(types.Part.from_bytes(data=img.data, mime_type=img.mime_type))
         return [types.Content(role="user", parts=parts)]
 
@@ -66,6 +102,8 @@ class GeminiProvider:
             kwargs["response_json_schema"] = spec.json_schema
         if spec.tools:
             kwargs["tools"] = spec.tools
+        else:
+            kwargs["automatic_function_calling"] = {"disable": True}
         return types.GenerateContentConfig(**kwargs)
 
     @staticmethod
@@ -106,19 +144,38 @@ class GeminiProvider:
     # ------------------------------------------------------------------ main
     def generate(self, spec: CallSpec) -> CallResult:
         cache_entry = None
-        if spec.use_cache and self.cache is not None and spec.sources_block:
-            cache_entry = self.cache.get_or_create(spec.model, spec.role, spec.scope, spec.system_instruction, spec.sources_block)
+        shared = spec.cache_packet_text
+        blind = spec.role == "blind-claim-reconstruction-reviewer"
+        if shared and (blind or spec.tools or spec.packet_text.count(shared) != 1):
+            raise ProviderError("Shared context must occur exactly once and cannot enter blind/tool calls")
+        if spec.cache_images and not shared:
+            raise ProviderError("Image caching requires an exact shared context block")
+        if spec.use_cache and not blind and self.cache is not None and (spec.sources_block or shared):
+            cache_source = spec.sources_block + ("\n" + shared if shared else "")
+            cache_entry = self.cache.get_or_create(
+                spec.model, spec.role, spec.scope, spec.system_instruction, cache_source,
+                images=spec.images if spec.cache_images else (), identity=spec.run_id if shared else "",
+            )
         json_mode = spec.json_schema is not None and not spec.tools
         last_exc: Exception | None = None
         for attempt in range(self.retry_attempts):
-            contents = self._build_contents(spec, include_sources=cache_entry is None)
+            call_id = uuid.uuid4().hex
+            self._emit("request", spec, call_id, attempt=attempt + 1,
+                       text=spec.packet_text, system=spec.system_instruction, sources=spec.sources_block,
+                       images=[img.label for img in spec.images])
+            contents = self._build_contents(spec, include_sources=cache_entry is None, shared_cached=bool(cache_entry and shared))
             config = self._config(spec, cache_entry.name if cache_entry else None, json_mode)
             t0 = time.time()
             try:
-                resp = self.client.models.generate_content(model=spec.model, contents=contents, config=config)
+                if self.events and not spec.tools:
+                    resp = self._stream(spec, contents, config, call_id)
+                else:
+                    resp = self.client.models.generate_content(model=spec.model, contents=contents, config=config)
+                    self._emit("delta", spec, call_id, text=visible_text(resp))
             except Exception as exc:  # noqa: BLE001
                 last_exc = exc
                 msg = str(exc)
+                self._emit("error", spec, call_id, text=msg)
                 low = msg.lower()
                 if "thinking_level" in low and spec.model not in self._thinking_level_unsupported:
                     self._thinking_level_unsupported.add(spec.model)
@@ -134,6 +191,8 @@ class GeminiProvider:
                 raise ProviderError(f"Gemini call failed for {spec.role}: {msg}") from exc
             latency = int((time.time() - t0) * 1000)
             text = resp.text or ""
+            self._emit("response_end", spec, call_id, finish_reason=self._finish_reason(resp),
+                       function_calls=self._function_calls(resp))
             parsed = parse_json_text(text) if json_mode or spec.json_schema is not None else None
             return CallResult(
                 text=text,
