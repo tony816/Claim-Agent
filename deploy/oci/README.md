@@ -17,6 +17,24 @@ from Claude take the same path as the web chat: automatic routing, the gated pip
 3. Watch the bootstrap (a few minutes): `ssh ubuntu@<public-ip> sudo tail -f /var/log/claim-agent-bootstrap.log`
    until it prints `== ready: https://<host>/mcp`.
 
+### 1-b. Or add it to a VM that already runs
+
+When a new VM cannot be created (for example `LimitExceeded` on A1 cores), install on an existing VM over SSH. The
+script uses the same layout as the cloud-init path, adds one Caddy site block for the VM's sslip.io name (backing up
+the Caddyfile and rolling back if validation fails), and leaves other sites, firewall rules and services alone.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tony816/Claim-Agent/main/deploy/oci/install.sh | sudo sh
+```
+
+It stops after printing the connector URL if the secrets are still empty. Fill them (section 2), then run the same
+command again: it starts the service. `CLAIM_AGENT_MCP_PORT=...` changes the local port if 8765 is taken.
+
+The script supports Ubuntu (`apt`) and Oracle Linux (`dnf`; the SSH user is `opc`, and Python 3.12/3.11 is installed
+because the system `python3` on Oracle Linux 9 is 3.9). On an SELinux-enforcing host where Caddy runs confined as
+`httpd_t`, the script prints the `setsebool -P httpd_can_network_connect 1` command instead of changing the policy;
+run it yourself if the connector URL answers 502.
+
 ## 2. Secrets (only you, over SSH)
 
 ```bash
