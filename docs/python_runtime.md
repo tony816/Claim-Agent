@@ -21,11 +21,13 @@
 웹챗의 모든 전송은 수동 모드 선택과 관계없이 요청 분류를 거친다. 선택값과 종속항 옵션은 `ui_hints`로만 전달하며, 현재 질문이 요구하는 산출물이 우선한다. “변경하라는 지시가 있는데 어느 방법이 적절한가”라는 질문은 수정본 생성과 구분하여 `REVIEW_ONLY`로 처리한다. 작성 게이트에서 중지된 경우에도 그 역할의 실제 분석 보고서를 결과 화면에 표시하되 후속 미검수 상태를 명시한다.
 
 ```bash
-pip install -e .            # google-genai, pydantic, pyyaml, python-dotenv
-# 프로젝트 루트의 .env에 GEMINI_API_KEY=... 저장 (없으면 --replay만 가능)
-claim-agent doctor --contracts      # 키·소스·역할·스키마 점검 (+ --live로 모델·JSON·캐시 프로브)
+pip install -e .            # google-genai, pydantic, pyyaml, python-dotenv, Pillow, pypdf, python-docx, olefile (+ anthropic: provider.kind=anthropic일 때)
+# 프로젝트 루트의 .env에 GEMINI_API_KEY=... 저장 (없으면 --replay만 가능). Anthropic은 ANTHROPIC_API_KEY.
+claim-agent doctor --contracts      # 키·소스·역할·스키마 점검 (+ --live로 모델·JSON·캐시 프로브, 단가 누락 경고)
 claim-agent models                  # 실제 사용 가능한 모델 ID 확인 → claim-agent.yaml의 model.default 수정
 ```
+
+역할 파일의 파생본(`.codex/agents/*.toml`, 웹 번들)은 `python scripts/build_role_derivatives.py`로 `.claude/agents/*.md`에서 생성하며 CI가 `--check`로 드리프트를 막는다. 역할 프롬프트를 고치면 이 스크립트를 한 번 실행한다.
 
 기본 모델 ID `gemini-3.8-flash`는 설정값일 뿐 확인된 값이 아니다. `claim-agent models`로 목록을 보고 `claim-agent.yaml`을 고친다. `thinking_level`을 지원하지 않는 모델이면 provider가 자동으로 `thinking_budget`으로 폴백하고, 캐시 최소 토큰 미달이면 인라인 전송으로 폴백한다.
 
@@ -105,9 +107,50 @@ claim-agent review --reviewers syntax-scope-reviewer,oa-strategy-reviewer --clai
 
 ## 설정 (`claim-agent.yaml`)
 
-역할별 `thinking_level`·`temperature`·`model`, `cache.{enabled,ttl}`, `pipeline.max_return_loops`, `pipeline.max_concurrency`, `pipeline.expand_multi_dependent`(다중 종속 인용을 대안 체인별로 역구성), `lessons.inject`, `telemetry.pricing`(비용 추정용 $/M). 실험 변형은 점 표기 키로 이를 덮어쓴다.
+역할별 `thinking_level`·`temperature`·`model`, `cache.{enabled,ttl,warm,min_expected_reuse}`, `pipeline.max_return_loops`, `pipeline.max_concurrency`, `pipeline.expand_multi_dependent`(다중 종속 인용을 대안 체인별로 역구성; `resume --expand-multi`로 그때그때 승인 가능), `pipeline.{max_calls,max_total_tokens,max_cost_usd}`(예산 가드), `materials.{max_image_side,files_api}`, `retention.{days,keep_locks}`, `provider.kind`, `lessons.inject`, `telemetry.pricing`(비용 추정용 $/M; 예시 값은 실제 단가표로 확인). 실험 변형은 점 표기 키로 이를 덮어쓴다.
 
-스타일 조정자의 조건부 코퍼스 검색은 2단계 호출로 구현된다(`aux_mode: two_phase`): 1단계는 도구(`open_routing_index`, `search_style_corpus`) 가능 텍스트 모드, 2단계는 도구 로그를 첨부한 JSON 모드. 도구는 정확 조각 최대 2개만 반환하고 분야·아키텍처 검색을 거부한다. `off`로 끄면 `NOT_ACTIVATED`로 기록된다.
+스타일 조정자의 조건부 코퍼스 검색은 2단계 호출로 구현된다(`aux_mode: two_phase`): 1단계는 도구(`open_routing_index`, `search_style_corpus`) 가능 텍스트 모드로, README·07만 사전 로딩하고 도면을 제외하며 `aux_thinking_level`(기본 LOW)·`aux_max_output_tokens`(기본 2048)로 가볍게 실행한다. 2단계는 도구 로그를 첨부한 JSON 모드다. 도구는 정확 조각 최대 2개만 반환하고 분야·아키텍처 검색을 거부한다. `off`로 끄면 `NOT_ACTIVATED`로 기록된다.
+
+## 프로바이더
+
+`provider.kind`가 실제 호출을 담당한다. 역할 파일·패킷·게이트·기록은 프로바이더 중립이며 fixtures/replay도 공통이다.
+
+| | `gemini` (기본) | `anthropic` |
+|---|---|---|
+| 클라이언트 | `google-genai`, `GEMINI_API_KEY` | `anthropic`, `ANTHROPIC_API_KEY`(또는 `ant auth login` 프로필) |
+| 모델 | `model.default`, 역할별 `model` | `provider.anthropic.model`(기본 `claude-opus-5`), 역할별 `model` |
+| 캐시 | 명시적 context cache(아래 정책) + Files API | `cache_control`(프롬프트 접두 캐시)을 시스템 지시·소스 블록에 표시 |
+| 사고 | `thinking_level` → `thinking_level`/`thinking_budget` | adaptive thinking + `output_config.effort`(HIGH→high 등); `temperature`는 보내지 않음 |
+| JSON | `response_json_schema` | `output_config.format`(구조화 출력); 거부되면 프롬프트 JSON 지시로 재시도 |
+| 도구 | SDK 자동 함수 호출 | 수동 tool_use→tool_result 루프(최대 6회) |
+| 거부 | — | `stop_reason: refusal`이면 ProviderError; `fallbacks: default`(베타)로 서버 측 대체 모델을 먼저 시도 |
+
+`claim-agent models`·`doctor --live`는 설정된 프로바이더로 동작한다. 웹·TUI 대화 경로도 같은 프로바이더(`CallSpec.history`로 이전 턴 전달)를 쓴다.
+
+## 입력 형식과 도면
+
+텍스트 원자료는 `.md/.txt/.yaml/.json/.csv` 외에 `.pdf`(텍스트 레이어), `.docx`, `.hwpx`, `.hwp`(HWP 5.0)를 `sources/extract.py`가 본문 텍스트로 추출한다. 스캔 PDF·암호화 문서·배포용 HWP는 업로드 시점에 명확한 사유로 거부한다(OCR 미지원). 원본 파일의 sha256이 원자료 식별자이며 추출 요약은 `material_meta.extraction`에 남는다.
+
+도면은 intake에서 한 번 정규화한다(`materials.max_image_side`, 기본 2048px, 도면 부호 판독을 위해 더 줄이지 않음). 원본·정규화본 sha가 모두 기록되어 `input_revision`에 반영된다. `materials.files_api`가 켜져 있으면 Gemini Files API에 콘텐츠 해시당 1회 업로드하고 이후 호출은 URI로 참조한다(레지스트리 `runs/.files-registry.json`, 보존 기간 내 프로세스 간 재사용, 실패 시 inline 폴백). 호출 기록의 `context_transport.image_transport`로 확인한다.
+
+## 예산 가드와 성능 요약
+
+`pipeline.max_calls`·`max_total_tokens`·`max_cost_usd`(또는 `run/resume --max-calls …`)를 넘으면 다음 호출 전에 `HALTED_BUDGET_LIMIT`(종료 코드 4)로 중지한다. 완료된 호출은 버리지 않으며, 한도를 올린 뒤 `claim-agent resume <run_id>`로 이어서 진행한다. `report.md`의 **성능 요약**은 단계별 호출·지연·입력/캐시/출력 토큰·캐시 적중·추정 비용을 표로 보여 주고, CLI 요약도 한 줄을 출력한다. 비용은 `telemetry.pricing`에 사용 모델이 있어야 산정된다.
+
+## 후속 수정의 revision 경로
+
+웹·대화에서 기존 run을 이어 수정하면 라우터가 `revision_kind`(STYLE_ONLY·MEANING·DESIGN)를 고르고, `conversation_pipeline.revision_path`가 결정론적으로 검증한다. 새 자료·도면·선행기술·명세서·첨부가 있으면 항상 architect 재설계(d+1)이고, 그렇지 않으면 스타일만(r+1, style adjuster부터) 또는 의미(r+1, drafter부터)로 같은 run을 재개한다. 요청이 종속항 번호만 지목하고 유효한 종속항 세트가 있으면 종속항 revision만 올린다. CLI는 `resume --apply-style-fix|--apply-meaning-fix|--redesign [--scope DEPENDENT]`가 같은 경로다. 웹의 작업 상태 패널에서 결정·종류·범위·추가 자료를 골라 재개할 수 있다.
+
+## 내보내기·리비전 대조·보관
+
+- `claim-agent export <run_id> --format docx|md [--with-evidence]`: 잠긴 exact 문언을 헤더(LOCK 종류·식별자·sha256·잠정/최종 표시)와 함께 내보내고, DOCX는 다시 읽어 문언이 보존되었는지 검증한다. 웹은 `/api/export`.
+- `claim-agent runs diff <run_id> [--from r1 --to r2] [--scope DEPENDENT_SET]`: `기존 문언 / 제안 문언 / 문장 단위 변경 / 변경 이유 / 권리범위 영향(style record 인용) / 근거`. `report.md`에는 리비전 이력 표가 붙는다.
+- `claim-agent runs purge --older-than N [--include-locks] [--dry-run]`: `runs/`와 `.tui/requests/`에는 원자료·패킷 전문이 평문으로 남으므로 주기적으로 지운다. LOCK에 도달한 run은 기본 보존. `retention.days`로 기본값을 둔다.
+- 역할 봉투의 `limitation_evidence[]`(한정별 근거표)는 기록·내보내기 부록에 남고, `UNCONFIRMED` 행이 PASS와 함께 오면 오케스트레이터가 REVIEW로 중지한다(조건 4 근거표 공란 0건).
+
+## 골든 평가 세트
+
+프롬프트·모델·엔진 변경이 개선인지 판정하는 유일한 기준 데이터다. `eval/cases/README.md`에 구조와 `expected.yaml` 필드(주골격 용어·금지 용어·USER_LOCK 보존·발명 유형·역구성 판정·호출 상한)가 있다. `claim-agent eval new <case>`로 스캐폴드하고, `claim-agent eval live --case <case> --record …`로 예상 호출·비용을 확인한 뒤 1회 녹화하며, 이후 CI는 `eval run --all --replay-only`로 리플레이한다. 기밀 자료는 `eval/private/`(gitignore)에 두고 sanitize한 fixtures만 커밋한다.
 
 ## 개선 루프
 
@@ -146,23 +189,28 @@ claim-agent review --reviewers syntax-scope-reviewer,oa-strategy-reviewer --clai
 
 ## 라이브 스모크 절차 (사용자 PC)
 
-1. 프로젝트 루트의 `.env`에 `GEMINI_API_KEY=…` 저장 후 `claim-agent doctor --live` — 모델 존재, JSON+thinking_level, 캐시 생성 프로브 확인. 같은 이름의 기존 환경변수가 있으면 그 값이 우선한다.
-2. `claim-agent.yaml`의 `model.default`를 `claim-agent models` 결과의 실제 ID로 수정.
-3. `claim-agent run --request-yaml eval/cases/sample-clip-holder/request.yaml --record fixtures/live --run-id live-01`.
-4. 통과하면 `claim-agent fixtures sanitize fixtures/live`로 요청 미리보기를 지우고 `eval/cases/sample-clip-holder/fixtures/`를 교체한다(현재 fixtures는 `scripts/make_sample_fixtures.py`가 만든 합성 응답이다).
+1. 프로젝트 루트의 `.env`에 `GEMINI_API_KEY=…` 저장 후 `claim-agent doctor --live` — 모델 존재, JSON+thinking_level, 캐시 생성 프로브, 단가 등록 여부 확인. 같은 이름의 기존 환경변수가 있으면 그 값이 우선한다.
+2. `claim-agent.yaml`의 `model.default`를 `claim-agent models` 결과의 실제 ID로 수정하고 `telemetry.pricing`에 그 모델의 단가를 넣는다.
+3. `claim-agent eval live --case sample-clip-holder --record eval/cases/sample-clip-holder/fixtures` — 예상 호출 수·비용을 확인하고 실제로 1회 녹화한다.
+4. 통과하면 `claim-agent fixtures sanitize eval/cases/sample-clip-holder/fixtures`로 요청 미리보기를 지운다(현재 커밋된 fixtures는 `scripts/make_sample_fixtures.py`가 만든 합성 응답이며 엔진 회귀용이다). 실제 발명 케이스는 `claim-agent eval new`로 추가한다.
 
 ## 테스트
 
 ```bash
-python -m pytest            # 전체 테스트: 상태기계(scripted), 무효화·루프 한도·resume, 블라인드 격리, 코퍼스, 교훈, 피드백, RCA·선제 경고·역전파·도구 텔레메트리, Gemini provider 모킹
+python -m pytest            # 전체 테스트: 상태기계(scripted), 무효화·루프 한도·resume, 블라인드 격리, 코퍼스, 교훈, 피드백, RCA·선제 경고·역전파·도구 텔레메트리, 캐시 정책·전송, 예산, 파서, 문서 추출, 내보내기, diff·보관, 웹 API, Gemini·Anthropic provider 모킹
+ruff check claim_agent tests scripts && python scripts/build_role_derivatives.py --check && claim-agent eval run --all --replay-only   # CI가 실행하는 나머지
 ```
-`tests/scripted_roles.py`의 canned 봉투가 각 역할의 PASS/RETURN/REVIEW 응답을 흉내 낸다. 실제 Gemini 응답은 `--record`로 녹화한 fixture로 대체한다.
+`tests/scripted_roles.py`의 canned 봉투가 각 역할의 PASS/RETURN/REVIEW 응답을 흉내 낸다. 실제 모델 응답은 `--record`로 녹화한 fixture로 대체한다. `mypy claim_agent`는 CI에서 권고(advisory)로 돌며 오류 수가 0이 되면 필수로 바꾼다.
 
 ## 반복 컨텍스트 전달 최적화
 
+**캐시 생성 정책.** Gemini의 명시적 context cache는 생성 시 일반 입력 단가, 저장 시간 과금, 적중 시 할인이므로 한 번만 쓰는 번들에는 손해다. `cache.warm: auto`(기본)는 같은 역할×scope 번들을 이번 run에서 `min_expected_reuse`회 이상 쓰는 경우(스타일 2단계, 종속항 picture 팬아웃)이거나 같은 번들이 TTL 안에 한 번 더 요청된 경우(두 번째 관측 = 실제 재사용)에만 캐시를 만든다. 살아 있는 항목을 늦게 재사용하면 TTL을 연장한다. `always`는 첫 사용부터 만들고(배치·eval), `never`는 만들지 않는다. `CallSpec.expected_reuse`가 계획된 재사용 횟수를 전달한다.
+
+**패킷 배치.** 모든 패킷은 안정 블록(USER_LOCK·원자료·run 불변 상위 보고서)을 앞에, 가변 블록(RUN_HEADER·요청·리비전별 보고서·출력 계약)을 뒤에 둔다. 사용자 결정 메모는 출력 계약 직전에 붙는다. 같은 역할의 반복 호출(루프·복구·도구 2단계)이 동일 접두를 공유하므로 암묵 캐시를 지원하는 모델이 이를 재사용할 수 있고, Anthropic 프로바이더에서는 `cache_control` 접두 캐시에 그대로 대응한다.
+
 종속항별 도면 비교는 루트 LOCK·설계·종속항 설계·스타일·OA 보고서와 원자료·도면을 공통 캐시에 저장한다. 각 호출에는 부모항 체인, 목표항, 독립 blind snapshot 및 해당 호출 식별자만 별도로 보낸다. 캐시 키는 역할·scope·모델·system instruction·공통 텍스트·도면 내용/MIME/라벨·run_id에 결속된다. 보고서의 revision과 원자료가 바뀌면 키도 바뀐다. 동일 프로세스의 병렬 목표항은 하나의 캐시 생성 결과를 공유한다.
 
-캐시가 실패하거나 만료되면 기존 전체 입력으로 복구한다. blind 호출은 캐시 대상에서 제외한다. 로컬 calls의 packet_text에는 인계 전문을 그대로 남기며 context_transport에 공통 본문 길이와 이미지 개수를 기록한다. 캐시는 반복 전송·처리 비용을 줄이는 방법이며, 모델이 받는 전체 문맥 길이나 추론 시간이 같은 비율로 줄어든다는 뜻은 아니다.
+캐시가 실패하거나 만료되면 기존 전체 입력으로 복구한다. blind 호출은 캐시 대상에서 제외한다. 로컬 calls의 packet_text에는 인계 전문을 그대로 남기며 context_transport에 공통 본문 길이·이미지 개수·이미지 전송 방식(files_api/inline)을 기록한다. 캐시는 반복 전송·처리 비용을 줄이는 방법이며, 모델이 받는 전체 문맥 길이나 추론 시간이 같은 비율로 줄어든다는 뜻은 아니다. 웹 라우터의 `CLAUDE.md` 계약도 캐시 가능한 소스 블록으로 전달된다.
 
 숫자로 지정된 종속항 범위는 설계 후보, PRE_STYLE, 최종 스타일 세트에서 결정론적으로 대조한다. 범위 확대·누락·번호 중복은 REQUEST_SCOPE_MISMATCH로 중지하며 이전 PASS나 LOCK으로 우회하지 않는다. UI 옵션보다 현재 질문의 항 번호가 우선한다.
 

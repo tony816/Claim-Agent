@@ -23,13 +23,17 @@
 
 **처음 쓰는 분은 [`사용법.md`](사용법.md)부터 보면 된다.** 설치·실행·결과 읽기·멈췄을 때 대처를 복사해 쓸 수 있는 명령으로 정리했다.
 
-Claude Code 없이 같은 절차를 실행하는 독립 프로그램은 [`docs/python_runtime.md`](docs/python_runtime.md)를 따른다. `.claude/agents/*.md`를 그대로 system instruction으로 쓰고, 게이트 전제조건·record_id·revision 무효화·블라인드 격리·LOCK 조립을 Python이 결정론적으로 수행하며, Gemini API(기본 `gemini-3.8-flash`, `claim-agent.yaml`에서 변경)로 각 역할을 호출한다.
+Claude Code 없이 같은 절차를 실행하는 독립 프로그램은 [`docs/python_runtime.md`](docs/python_runtime.md)를 따른다. `.claude/agents/*.md`를 그대로 system instruction으로 쓰고, 게이트 전제조건·record_id·revision 무효화·블라인드 격리·LOCK 조립·예산 가드·근거표 검사를 Python이 결정론적으로 수행하며, Gemini API(기본 `gemini-3.8-flash`, `claim-agent.yaml`에서 변경) 또는 Anthropic API(`provider.kind: anthropic`)로 각 역할을 호출한다. 원자료는 MD/TXT 외에 PDF·DOCX·HWPX·HWP를 받고, 도면은 한 번 정규화해 Files API로 전달한다.
 
 ```bash
 pip install -e . && claim-agent doctor --contracts
 claim-agent run --request-yaml eval/cases/sample-clip-holder/request.yaml --replay eval/cases/sample-clip-holder/fixtures   # 오프라인 데모
+claim-agent export <run_id> --format docx · claim-agent runs diff <run_id> · claim-agent runs purge --older-than 30           # 결과·이력·보관
+claim-agent eval new <case> · claim-agent eval live --case <case> --record …   # 골든 평가 세트 (eval/cases/README.md)
 claim-agent feedback · claim-agent runs rca <run_id> · claim-agent eval run --case … --shadow · claim-agent lessons propose --from-feedback   # 개선 루프
 ```
+
+역할 파일의 Codex·웹 파생본은 `python scripts/build_role_derivatives.py`로 생성하며 CI(`.github/workflows/ci.yml`)가 lint·테스트·리플레이 eval·파생본 동기화를 검사한다.
 
 ## 웹 단일 에이전트판
 

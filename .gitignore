@@ -9,6 +9,7 @@
 /runs/
 /.tui/
 /eval/results/
+/eval/private/
 /reports/
 /fixtures/live/
 __pycache__/
