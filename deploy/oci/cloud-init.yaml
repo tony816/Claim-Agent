@@ -1,0 +1,110 @@
+#cloud-config
+# Claim-Agent remote MCP server on an OCI Always Free A1.Flex VM (Ubuntu, aarch64).
+#
+# Boot does everything except the secrets: it clones the public repository, installs it in a venv, opens 80/443,
+# and serves https://<public-ip-with-dashes>.sslip.io through Caddy (automatic Let's Encrypt certificate) in front of
+# `python -m claim_agent.mcp_server` on 127.0.0.1:8765.
+#
+# The service stays stopped until you fill the secrets over SSH:
+#   sudo nano /etc/claim-agent/claim-agent.env        # GEMINI_API_KEY=..., CLAIM_AGENT_MCP_PASSPHRASE=...
+#   sudo systemctl enable --now claim-agent-mcp
+# Progress of this script: sudo tail -f /var/log/claim-agent-bootstrap.log
+
+package_update: true
+packages:
+  - git
+  - python3
+  - python3-venv
+  - python3-pip
+  - caddy
+  - iptables-persistent
+
+users:
+  - default
+  - name: claimagent
+    system: true
+    shell: /usr/sbin/nologin
+    home: /opt/claim-agent
+
+write_files:
+  - path: /etc/claim-agent/claim-agent.env
+    permissions: "0600"
+    owner: root:root
+    content: |
+      # Fill both values, then: sudo systemctl enable --now claim-agent-mcp
+      GEMINI_API_KEY=
+      # Passphrase you type on the connector login page when claude.ai connects (use 20+ random characters).
+      CLAIM_AGENT_MCP_PASSPHRASE=
+  - path: /etc/systemd/system/claim-agent-mcp.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Claim-Agent remote MCP server
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      User=claimagent
+      Group=claimagent
+      WorkingDirectory=/opt/claim-agent/app
+      EnvironmentFile=/etc/claim-agent/claim-agent.env
+      EnvironmentFile=/etc/claim-agent/public-url.env
+      # Refuse to start with an empty key or passphrase instead of serving an unauthenticated or broken endpoint.
+      # `$$` hands a literal `$` to the shell; systemd would otherwise expand the variables itself.
+      ExecStartPre=/bin/sh -c 'test -n "$$GEMINI_API_KEY" && test $${#CLAIM_AGENT_MCP_PASSPHRASE} -ge 20'
+      ExecStart=/opt/claim-agent/venv/bin/python -m claim_agent.mcp_server --project-root /opt/claim-agent/app --host 127.0.0.1 --port 8765
+      Restart=on-failure
+      RestartSec=5
+      NoNewPrivileges=true
+      PrivateTmp=true
+      ProtectSystem=strict
+      ProtectHome=true
+      ReadWritePaths=/opt/claim-agent
+
+      [Install]
+      WantedBy=multi-user.target
+  - path: /usr/local/sbin/claim-agent-bootstrap
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      set -eu
+      exec >>/var/log/claim-agent-bootstrap.log 2>&1
+      echo "== bootstrap $(date -Is)"
+
+      # Oracle's Ubuntu images REJECT everything but SSH in iptables even when the security list allows 80/443.
+      for port in 443 80; do
+        iptables -C INPUT -p tcp --dport "$port" -m state --state NEW -j ACCEPT 2>/dev/null \
+          || iptables -I INPUT 6 -p tcp --dport "$port" -m state --state NEW -j ACCEPT
+      done
+      netfilter-persistent save
+
+      # Code and venv, owned by the service user.
+      if [ ! -d /opt/claim-agent/app/.git ]; then
+        git clone --depth 1 https://github.com/tony816/Claim-Agent.git /opt/claim-agent/app
+      fi
+      python3 -m venv /opt/claim-agent/venv
+      /opt/claim-agent/venv/bin/pip install --upgrade pip
+      /opt/claim-agent/venv/bin/pip install -e '/opt/claim-agent/app[mcp]'
+      chown -R claimagent:claimagent /opt/claim-agent
+
+      # sslip.io maps 1-2-3-4.sslip.io to 1.2.3.4, so the public IP alone yields a hostname Let's Encrypt can certify.
+      ip=$(curl -fsS --retry 5 https://checkip.amazonaws.com | tr -d '[:space:]')
+      host="$(echo "$ip" | tr . -).sslip.io"
+      printf 'CLAIM_AGENT_MCP_PUBLIC_URL=https://%s\n' "$host" > /etc/claim-agent/public-url.env
+      chmod 0644 /etc/claim-agent/public-url.env
+
+      cat > /etc/caddy/Caddyfile <<EOF
+      $host {
+        encode gzip
+        reverse_proxy 127.0.0.1:8765 {
+          flush_interval -1
+        }
+      }
+      EOF
+      systemctl daemon-reload
+      systemctl enable caddy
+      systemctl restart caddy
+      echo "== ready: https://$host/mcp  (fill /etc/claim-agent/claim-agent.env, then enable claim-agent-mcp)"
+
+runcmd:
+  - [/usr/local/sbin/claim-agent-bootstrap]

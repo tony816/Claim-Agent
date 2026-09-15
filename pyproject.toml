@@ -22,6 +22,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+# Remote MCP server (claim_agent.mcp_server) for claude.ai connectors; deploy/oci/cloud-init.yaml installs `.[mcp]`.
+mcp = ["mcp==2.2.0"]
 
 [project.scripts]
 claim-agent = "claim_agent.cli:main"
