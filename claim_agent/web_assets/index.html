@@ -5,6 +5,7 @@
 <aside id="sidebar">
   <a class="brand" href="/" aria-label="Claim-Agent 홈"><span class="mark">C</span> Claim-Agent</a>
   <button id="new-chat" class="new-chat">＋ 새 대화</button>
+  <button id="model-settings-open" class="new-chat">⚙ 에이전트 모델 설정</button>
   <p class="side-label side-label-row">프로젝트<button id="new-project" title="새 프로젝트" aria-label="새 프로젝트">＋</button></p><nav id="projects" aria-label="프로젝트 목록"></nav>
   <p class="side-label">내 대화</p><nav id="sessions" aria-label="대화 목록"></nav>
   <div class="side-bottom"><span class="local-dot"></span> 이 컴퓨터에 저장됨<button id="shutdown">프로그램 종료</button></div>
@@ -66,4 +67,22 @@
   </footer>
 </main>
 <div id="drop-overlay" hidden>파일을 놓아서 대화에 첨부하세요</div>
+<dialog id="model-settings-dialog" aria-labelledby="model-settings-title">
+  <div class="settings-heading"><div><h2 id="model-settings-title">에이전트 모델 설정</h2><p>구독 계정을 연결하고, 역할에 맞는 모델을 선택하세요.</p></div><button id="model-settings-close" type="button" aria-label="모델 설정 닫기">✕</button></div>
+  <div id="model-settings-error" role="alert" hidden></div>
+  <section class="settings-section"><div class="settings-heading"><h3>1. 계정 연결</h3><button id="auth-refresh" type="button">연결 상태 확인</button></div>
+    <div id="auth-connections" class="auth-connections"></div>
+    <p class="settings-note">공식 CLI가 브라우저 로그인과 OAuth 갱신을 처리합니다. 이 앱 전용 로그인이 필요하며, 인증 정보는 이 컴퓨터의 CLI 저장소에 보관됩니다. 구독 사용량 한도와 계정별 추가 사용 정책이 적용됩니다.</p>
+  </section>
+  <form id="model-settings-form">
+    <section class="settings-section"><h3>2. 기본 모델</h3><p class="settings-note">일반 대화·요청 분류와 ‘기본 설정 따름’ 역할에 적용됩니다.</p>
+      <div id="default-model-controls" class="default-model-controls"></div>
+    </section>
+    <section class="settings-section"><div class="settings-heading"><h3>3. 서브에이전트별 모델</h3><button id="models-apply-all" type="button">전체에 기본 설정 적용</button></div>
+      <p class="settings-note">제공자와 모델을 서로 다르게 지정할 수 있습니다. 추론 강도는 해당 모델이 지원해야 합니다. 모델 ID를 직접 입력할 수도 있습니다.</p>
+      <div id="role-model-controls"></div>
+    </section>
+    <div class="settings-actions"><span id="model-settings-saved" role="status"></span><button id="model-settings-save" class="primary" type="submit">설정 저장</button></div>
+  </form>
+</dialog>
 </body></html>

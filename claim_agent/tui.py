@@ -116,8 +116,9 @@ class ClaimAgentApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        key = os.environ.get(self.cfg.model.api_key_env) or os.environ.get("GOOGLE_API_KEY")
-        yield Static(f"{self.cfg.model.default}  ·  API 키 {'저장됨' if key else '없음 — .env에 입력 필요'}  ·  준비", id="status", markup=False)
+        key = os.environ.get(self.cfg.api_key_env) or (self.cfg.provider.kind == "gemini" and os.environ.get("GOOGLE_API_KEY"))
+        auth = "구독 OAuth · 웹 모델 설정에서 연결" if self.cfg.provider.kind.endswith("_oauth") else f"API 키 {'저장됨' if key else '없음 — .env에 입력 필요'}"
+        yield Static(f"{self.cfg.default_model}  ·  {auth}  ·  준비", id="status", markup=False)
         with Horizontal(id="workspace"):
             with VerticalScroll(id="compose-pane"):
                 yield Label("01  프롬프트", classes="heading")
@@ -142,7 +143,7 @@ class ClaimAgentApp(App):
                     yield Button("전체 비우기", id="clear")
                 yield Static("TXT·MD·PNG·JPG·WEBP 등 지원. 모든 자료를 여기에 함께 넣으세요.", classes="hint")
                 yield Label("03  작성 설정", classes="heading")
-                yield Input(value=self.cfg.model.default, placeholder="모델 ID", id="model")
+                yield Input(value=self.cfg.default_model, placeholder="모델 ID", id="model")
                 with Horizontal(classes="row"):
                     yield Checkbox("종속항도 작성", id="dependent")
                     yield Input(value="2~8", placeholder="종속항 범위", id="dep-target")
@@ -178,7 +179,7 @@ class ClaimAgentApp(App):
         self.set_interval(0.2, self.poll_state)
 
     def redact(self, text: str) -> str:
-        for name in {self.cfg.model.api_key_env, "GOOGLE_API_KEY", "GEMINI_API_KEY"}:
+        for name in {self.cfg.model.api_key_env, self.cfg.provider.anthropic.api_key_env, "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"}:
             value = os.environ.get(name)
             if value:
                 text = text.replace(value, "[API KEY]")
@@ -371,7 +372,9 @@ class ClaimAgentApp(App):
         if not model:
             self.notify("모델 ID를 입력하세요.", severity="warning")
             return
-        if not (os.environ.get(self.cfg.model.api_key_env) or os.environ.get("GOOGLE_API_KEY")):
+        from .model_settings import connection
+
+        if not self.cfg.provider.kind.endswith("_oauth") and not connection(self.cfg, self.cfg.provider.kind)["connected"]:
             self.notify(".env에 API 키를 저장한 뒤 프로그램을 다시 열어 주세요.", severity="error")
             return
         run_id = time.strftime("tui-%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:8]

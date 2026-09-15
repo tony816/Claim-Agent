@@ -9,7 +9,13 @@ model:
 # Which live provider runs the roles. Role files are provider-neutral; only transport, caching and
 # thinking mapping differ (docs/python_runtime.md → 프로바이더). Fixtures/replay work for both.
 provider:
-  kind: gemini                     # gemini | anthropic
+  kind: gemini                     # gemini | anthropic | claude_oauth | codex_oauth
+  claude_oauth:
+    model: sonnet                  # default | sonnet | opus | haiku | account-accessible model ID
+    timeout_s: 600
+  codex_oauth:
+    model: default                 # CLI account default, or account-accessible model ID
+    timeout_s: 600
   anthropic:
     model: claude-opus-5
     api_key_env: ANTHROPIC_API_KEY
@@ -18,6 +24,8 @@ provider:
     structured_outputs: true
 
 roles:
+  # Each role can set provider + model independently. Omitted/null values inherit defaults.
+  # Example: claim-drafter: {provider: claude_oauth, model: opus, thinking_level: HIGH}
   claim-architect:                       {thinking_level: HIGH,   temperature: 0.2}
   claim-drafter:                         {thinking_level: HIGH,   temperature: 0.3}
   claim-style-adjuster:                  {thinking_level: MEDIUM, temperature: 0.2, aux_mode: two_phase}

@@ -98,7 +98,7 @@ def routed_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
         # The footnote is for the reader only; the history the model sees next turn keeps the bare answer.
         answer = result["answer"] + "\n\n" + usage_note(provider.usage, time.time() - started)
         return {**result, "answer": answer, "effective_mode": route.mode, "route": route.model_dump()}
-    model_key = "provider.anthropic.model" if cfg.provider.kind == "anthropic" else "model.default"
+    model_key = cfg.default_model_key
     rt = build_runtime(cfg.project_root, config_path, overrides={model_key: request["model"]})
     pipeline_provider = make_provider(rt)
     try:

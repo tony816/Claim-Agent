@@ -6,6 +6,8 @@
 
 ## 구성
 
+웹의 **⚙ 에이전트 모델 설정**에서 Claude·Codex 구독 OAuth 계정을 연결하고, 9개 역할의 제공자·모델·추론 강도를 변경할 수 있습니다. [구독 연결과 모델 설정 안내](docs/subscription-models.md)를 참고하세요.
+
 - `CLAUDE.md`: 주 오케스트레이터의 우선순위, 활성 순서, 필수 검수 루프
 - `claim-architect`: 주골격·근거·최소충분 한정 설계
 - `dependent-claim-strategy-architect`: 독립항 LOCK 뒤 종속항 후보의 과제–특징–작동원리–효과를 검증하고 단순 도면 묘사를 배제

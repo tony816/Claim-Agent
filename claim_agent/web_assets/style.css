@@ -26,3 +26,18 @@ nav .session-row{display:flex;align-items:center;border-radius:8px;margin-bottom
 .full-report .body{margin-top:8px;font-size:13px}
 .full-report summary{color:#5d6b66}
 .body p.note{font-size:12px;color:#7a7a7a;margin:4px 0}
+
+/* Agent model settings */
+#model-settings-dialog{width:min(1080px,94vw);max-height:90vh;border:1px solid #d9e3de;border-radius:18px;padding:26px;color:#26352f;background:#fcfdfc;box-shadow:0 20px 80px #0003}
+#model-settings-dialog::backdrop{background:#172c2466;backdrop-filter:blur(3px)}
+#model-settings-dialog h2{font-size:23px;margin:0 0 8px}#model-settings-dialog h3{font-size:15px;margin:0}
+.settings-heading{display:flex;justify-content:space-between;align-items:center;gap:16px}.settings-heading p{font-size:13px;color:#6d7973;margin:0}
+#model-settings-dialog button{border:1px solid #cddbd3;border-radius:8px;padding:8px 12px;font-size:12px;background:#fff;color:#284b42}
+#model-settings-dialog button:hover:not(:disabled){background:#e8f1ec}#model-settings-dialog button:disabled{opacity:.5;cursor:default}
+.settings-section{margin-top:24px;padding-top:20px;border-top:1px solid #e2e9e4}.settings-note{color:#6b776f;font-size:12px;line-height:1.7;margin:10px 0}
+.auth-connections{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}.auth-card{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:15px;border:1px solid #dde6e0;border-radius:12px;background:white}.auth-card strong{font-size:13px}.auth-card p{font-size:11px;line-height:1.6;margin:0;word-break:keep-all}.auth-card a{font-size:11px;color:#3d7560}.auth-connected{font-size:12px;color:#23734d}.auth-disconnected{font-size:12px;color:#7f796b}
+.default-model-controls{display:grid;grid-template-columns:1fr 1fr;gap:14px;max-width:690px}.model-field{display:flex;flex-direction:column;gap:5px;font-size:11px;color:#69766d;min-width:0}.model-field select,.model-field input{width:100%;max-width:none;border:1px solid #d5dfd8;border-radius:8px;background:#fff;padding:9px;color:#26352f;font-size:12px}.model-field input{margin-top:2px}.model-field select:focus,.model-field input:focus{outline:2px solid #6d9e84;outline-offset:1px}
+.role-model-row{display:grid;grid-template-columns:1.1fr 1fr 1.3fr .65fr;gap:12px;padding:13px 0;border-bottom:1px solid #e8ede9;align-items:start}.role-model-name{display:flex;flex-direction:column;gap:5px;padding-top:7px}.role-model-name strong{font-size:13px}.role-model-name small{font-size:10px;color:#839087;overflow-wrap:anywhere}
+.settings-actions{position:sticky;bottom:-26px;background:#fcfdfcf5;display:flex;align-items:center;justify-content:space-between;padding:18px 0 5px;gap:14px;margin-top:16px}.settings-actions span{font-size:12px;color:#426954}#model-settings-dialog button.primary{background:#284b42;color:white;padding:11px 25px}#model-settings-error{padding:12px;background:#fff0e9;color:#943f28;border-radius:9px;margin-top:16px;font-size:13px}
+#model-settings-dialog button.primary:hover:not(:disabled){background:#3e6758;color:#fff}
+@media(max-width:800px){.auth-connections{grid-template-columns:1fr 1fr}.role-model-row{grid-template-columns:1fr 1fr}.role-model-name{grid-column:1/-1}.role-model-row .model-field:last-child{grid-column:1/-1}.default-model-controls{grid-template-columns:1fr}#model-settings-dialog{padding:18px}.settings-actions{bottom:-18px}}

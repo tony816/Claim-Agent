@@ -60,16 +60,28 @@ def build_runtime(project_root: Path, config_path: Path | None = None, variant: 
 
 
 def live_provider(cfg: AppConfig, events=None, api_key: str | None = None) -> LLMProvider:
-    """The configured live provider (provider.kind): Gemini with context cache + Files API, or Anthropic."""
-    if cfg.provider.kind == "anthropic":
+    """Route each role to its configured provider; construct only providers actually used."""
+    if any(role.provider and role.provider != cfg.provider.kind for role in cfg.roles.values()):
+        from .provider.router import RoleProvider
+
+        return RoleProvider(cfg, lambda kind: _live_provider(cfg, kind, events, api_key if kind == cfg.provider.kind else None))
+    return _live_provider(cfg, cfg.provider.kind, events, api_key)
+
+
+def _live_provider(cfg: AppConfig, kind: str, events=None, api_key: str | None = None) -> LLMProvider:
+    if kind in {"claude_oauth", "codex_oauth"}:
+        from .provider.subscription import SubscriptionProvider
+
+        return SubscriptionProvider(kind, getattr(cfg.provider, kind), events)
+    if kind == "anthropic":
         from .provider.anthropic_provider import AnthropicProvider, make_anthropic_client
 
         a = cfg.provider.anthropic
         return AnthropicProvider(make_anthropic_client(a.api_key_env, api_key), events=events, thinking=a.thinking, fallbacks=a.fallbacks,
                                  structured_outputs=a.structured_outputs, send_temperature=a.send_temperature,
                                  retry_attempts=cfg.pipeline.retry.max_attempts, backoff_s=cfg.pipeline.retry.backoff_s)
-    if cfg.provider.kind != "gemini":
-        raise ValueError(f"unknown provider.kind: {cfg.provider.kind} (gemini | anthropic)")
+    if kind != "gemini":
+        raise ValueError(f"unknown provider.kind: {kind}")
     from .provider.files import FileStore
     from .provider.gemini import GeminiProvider, make_client
 

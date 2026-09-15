@@ -34,7 +34,10 @@ def _rt(args, variant_path: str | None = None) -> Runtime:
     variant = Variant.load(Path(variant_path)) if variant_path else None
     overrides = {}
     if getattr(args, "model", None):
-        overrides["model.default"] = args.model
+        from .config import load_config
+
+        cfg = load_config(Path(args.config) if args.config else None, root, variant.overrides if variant else None)
+        overrides[cfg.default_model_key] = args.model
     if getattr(args, "no_cache", False):
         overrides["cache.enabled"] = False
     for flag, key in (("max_calls", "pipeline.max_calls"), ("max_total_tokens", "pipeline.max_total_tokens"), ("max_cost_usd", "pipeline.max_cost_usd")):
@@ -212,6 +215,10 @@ def cmd_doctor(args) -> int:
 
 def cmd_models(args) -> int:
     rt = _rt(args)
+    if rt.cfg.provider.kind.endswith("_oauth"):
+        print(f"provider: {rt.cfg.provider.kind}\nconfigured model: {rt.cfg.default_model}")
+        print("구독 CLI: 웹 모델 설정에서 계정 기본 모델 또는 사용 가능한 모델 ID를 지정하세요. API models.list는 사용하지 않습니다.")
+        return 0
     from .runtime import live_provider
 
     gp = live_provider(rt.cfg)
@@ -278,7 +285,7 @@ def _eval_live(rt: Runtime, args) -> int:
     rows = []
     for run in rt.store.list_runs():
         rows.extend(read_telemetry(rt.store.telemetry_path(run)))
-    model = args.model or rt.cfg.model.default
+    model = args.model or rt.cfg.default_model
     total_calls, total_cost = 0, 0.0
     for case in cases:
         est = estimate_run(case.request, model, rt.cfg.telemetry.pricing, rows)
@@ -395,7 +402,7 @@ def cmd_lessons(args) -> int:
                 materials = extract_llm_materials(record, halt)
                 provider = _provider(rt, args)
                 key = f"{halt.get('role')}|{halt.get('stage')}|{halt.get('reason_code') or halt.get('kind')}"
-                l = propose_with_llm(provider, rt.cfg.model.default, materials, ls, halt.get("role", ""), [f"{args.from_run}:{halt.get('record_id')}"], key)
+                l = propose_with_llm(provider, rt.cfg.default_model, materials, ls, halt.get("role", ""), [f"{args.from_run}:{halt.get('record_id')}"], key)
                 if l is None:
                     print("model produced no usable draft (근거 부족)")
                 else:

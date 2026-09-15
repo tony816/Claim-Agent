@@ -30,7 +30,14 @@ def run_doctor(rt: Runtime, live: bool = False, model: str | None = None, contra
     depth = schema_depth(ENVELOPE_JSON_SCHEMA)
     rows.append(("envelope schema", "OK" if depth <= 3 else "WARN", f"depth={depth}, properties={len(ENVELOPE_JSON_SCHEMA['properties'])}"))
     key_present = bool(os.environ.get(cfg.api_key_env) or (cfg.provider.kind == "gemini" and os.environ.get("GOOGLE_API_KEY")) or (cfg.provider.kind == "anthropic" and os.environ.get("ANTHROPIC_AUTH_TOKEN")))
-    rows.append(("api key", "OK" if key_present else "WARN", f"{cfg.api_key_env} {'set' if key_present else 'not set — live calls impossible; use --replay'}"))
+    if cfg.provider.kind.endswith("_oauth"):
+        from .model_settings import connection
+
+        status = connection(cfg, cfg.provider.kind)
+        key_present = status["connected"]
+        rows.append(("subscription login", "OK" if key_present else "WARN", status["message"]))
+    else:
+        rows.append(("api key", "OK" if key_present else "WARN", f"{cfg.api_key_env} {'set' if key_present else 'not set — live calls impossible; use --replay'}"))
 
     if contracts:
         root = cfg.project_root
@@ -44,6 +51,9 @@ def run_doctor(rt: Runtime, live: bool = False, model: str | None = None, contra
             rows.append((f"contract {rel}", "OK" if not missing else "FAIL", "all tokens present" if not missing else f"missing: {missing}"))
 
     if live:
+        if cfg.provider.kind.endswith("_oauth"):
+            rows.append(("live probe", "SKIP", "구독 로그인 상태만 확인. 실제 모델 호출·사용량 청구 없음."))
+            return rows
         if not key_present:
             rows.append(("live probe", "SKIP", "no API key"))
             return rows

@@ -64,6 +64,7 @@ class Workspace:
         self.sessions: dict[str, dict] = {}
         self.projects: dict[str, dict] = {}
         self.jobs: dict[str, dict] = {}
+        self.auth_jobs: dict[str, dict] = {}
         for path in (self.folder / "projects").glob("*/project.json"):
             data = read_state(path)
             if data and re.fullmatch(r"[a-f0-9]{32}", str(data.get("id", ""))):
@@ -80,11 +81,73 @@ class Workspace:
                 self.sessions[data["id"]] = data
 
     def redact(self, text: str) -> str:
-        for name in {self.cfg.model.api_key_env, "GEMINI_API_KEY", "GOOGLE_API_KEY"}:
+        for name in {self.cfg.model.api_key_env, self.cfg.provider.anthropic.api_key_env, "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"}:
             value = os.environ.get(name)
             if value:
                 text = text.replace(value, "[API KEY]")
         return text
+
+    def model_settings(self) -> dict:
+        from .model_settings import settings_snapshot
+
+        with self.lock:
+            return {**settings_snapshot(self.cfg), "busy": bool(self.running_count())}
+
+    def save_model_settings(self, data: dict) -> dict:
+        from .model_settings import settings_overrides
+
+        with self.lock:
+            if self.running_count():
+                raise ValueError("실행 중에는 모델 설정을 저장할 수 없습니다. 작업 완료 또는 중지 후 저장하세요.")
+            overrides = settings_overrides(self.cfg, data)
+            save_json(self.root / ".tui" / "model-settings.json", overrides)
+            self.cfg = load_config(self.config, self.root)
+            return self.model_settings()
+
+    def auth_status(self) -> dict:
+        from .model_settings import PROVIDERS, connection
+
+        result = {kind: connection(self.cfg, kind) for kind in PROVIDERS}
+        with self.lock:
+            for kind, job in self.auth_jobs.items():
+                result[kind].update(job)
+        return result
+
+    def auth_login(self, kind: str) -> dict:
+        from .provider.subscription import KINDS, executable, login
+
+        if kind not in KINDS:
+            raise ValueError("구독 제공자를 선택하세요.")
+        with self.lock:
+            if self.running_count():
+                raise ValueError("작업 완료 또는 중지 후 로그인하세요.")
+            if self.auth_jobs.get(kind, {}).get("pending"):
+                return {"ok": True}
+            configured = getattr(self.cfg.provider, kind).executable
+            executable(kind, configured)
+            self.auth_jobs[kind] = {"pending": True, "login_message": "브라우저에서 구독 계정 로그인을 완료하세요."}
+
+            def work():
+                try:
+                    status = login(kind, configured)
+                    message = status["message"]
+                except (ValueError, RuntimeError) as exc:
+                    message = str(exc)
+                finally:
+                    with self.lock:
+                        self.auth_jobs[kind] = {"pending": False, "login_message": locals().get("message", "로그인 실패")}
+
+            threading.Thread(target=work, daemon=True).start()
+            return {"ok": True}
+
+    def require_connection(self):
+        from .model_settings import connection
+
+        if any(job.get("pending") for job in self.auth_jobs.values()):
+            raise ValueError("계정 로그인이 진행 중입니다. 로그인 완료 후 요청을 보내세요.")
+        status = connection(self.cfg, self.cfg.provider.kind)
+        if not status["connected"]:
+            raise ValueError("모델 설정에서 연결을 확인하세요. " + status["message"])
 
     def directory(self, sid: str) -> Path:
         if not re.fullmatch(r"[a-f0-9]{32}", sid) or sid not in self.sessions:
@@ -339,8 +402,7 @@ class Workspace:
             text = str(data.get("text", "")).strip()
             if not text or len(text) > 200000:
                 raise ValueError("메시지를 입력하세요. 최대 20만 글자까지 보낼 수 있습니다.")
-            if not (os.environ.get(self.cfg.model.api_key_env) or os.environ.get("GOOGLE_API_KEY")):
-                raise ValueError("프로젝트 .env에 API 키를 저장한 뒤 다시 실행해 주세요.")
+            self.require_connection()
             mode = data.get("mode", "CHAT")
             if mode not in {"CHAT", "AUTHORING_DRAFT"}:
                 raise ValueError("지원하지 않는 대화 모드입니다.")
@@ -355,7 +417,7 @@ class Workspace:
             dependent, target, target_mode = resolve_claim_target(data)
             rid = "web-" + uuid.uuid4().hex
             job_dir = self.root / ".tui" / "requests" / rid
-            model = self.cfg.model.default
+            model = self.cfg.default_model
             # Every web request is classified. The selection is a hint, never a
             # bypass around interpretation of the user's current question.
             job_dir.mkdir(parents=True)
@@ -427,8 +489,7 @@ class Workspace:
                 raise ValueError("결정 내용을 입력하세요.")
             if not status["halt"] and kind in ("none", "accept_unverified"):
                 raise ValueError("중지된 작업이 아닙니다. 스타일·의미·재설계 중 하나를 고르세요.")
-            if not (os.environ.get(self.cfg.model.api_key_env) or os.environ.get("GOOGLE_API_KEY")):
-                raise ValueError("프로젝트 .env에 API 키를 저장한 뒤 다시 실행해 주세요.")
+            self.require_connection()
             selected = data.get("files", [])
             known = {item["id"]: item for item in session["files"]}
             if not isinstance(selected, list) or any(fid not in known for fid in selected):
@@ -440,7 +501,7 @@ class Workspace:
             job_dir.mkdir(parents=True)
             decision = job_dir / "decision.txt"
             decision.write_text(text or "비게이팅 UNVERIFIED 수용", encoding="utf-8")
-            command = resume_command(self.root, run_id, decision, kind, self.cfg.model.default, add, scope)
+            command = resume_command(self.root, run_id, decision, kind, self.cfg.default_model, add, scope)
             if self.config:
                 command += ["--config", str(self.config)]
             report = self.cfg.path("runs_dir") / run_id / "report.md"
@@ -501,13 +562,17 @@ class Workspace:
         reader = EventReader(job["folder"] / "events.jsonl")
         try:
             options = child_options(self.root)
+            if os.name != "nt":
+                options["start_new_session"] = True
             options["env"]["CLAIM_AGENT_EVENT_LOG"] = str(reader.path)
             with (job["folder"] / "console.log").open("w", encoding="utf-8") as console:
                 with self.lock:
                     process = subprocess.Popen(command, stdout=console, stderr=subprocess.STDOUT, **options)
                     job["process"] = process
                     if job["stopped"]:
-                        process.terminate()
+                        from .processes import terminate_tree
+
+                        terminate_tree(process)
                 while process.poll() is None:
                     with self.lock:
                         self.consume_events(job, message, reader)
@@ -553,7 +618,9 @@ class Workspace:
         finally:
             process = job.get("process")
             if process and process.poll() is None:
-                process.kill()
+                from .processes import terminate_tree
+
+                terminate_tree(process)
                 process.wait()
             with self.lock:
                 if job["mode"] != "CHAT" and (self.cfg.path("runs_dir") / job["run_id"] / "state.json").exists():
@@ -570,7 +637,9 @@ class Workspace:
             if job and not job["done"]:
                 job["stopped"] = True
                 if job["process"] and job["process"].poll() is None:
-                    job["process"].terminate()
+                    from .processes import terminate_tree
+
+                    terminate_tree(job["process"])
 
     def close(self) -> None:
         for sid in list(self.jobs):
@@ -649,11 +718,15 @@ class Handler(BaseHTTPRequestHandler):
             if url.path in ("/", "/app.js", "/style.css"):
                 name, mime = {"/": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"), "/style.css": ("style.css", "text/css")}[url.path]
                 self.send(200, (ASSETS / name).read_bytes(), mime + "; charset=utf-8")
+            elif url.path == "/api/model-settings":
+                self.json(workspace.model_settings())
+            elif url.path == "/api/auth/status":
+                self.json(workspace.auth_status())
             elif url.path == "/api/sessions":
                 with workspace.lock:
                     sessions = sorted(workspace.sessions.values(), key=lambda x: x["updated"], reverse=True)
                     projects = sorted(workspace.projects.values(), key=lambda x: x["updated"], reverse=True)
-                    self.json(dict(model=workspace.cfg.model.default, code_version=code_fingerprint(), busy=workspace.running_count(),
+                    self.json(dict(model=workspace.cfg.default_model, code_version=code_fingerprint(), busy=workspace.running_count(),
                                    sessions=[dict(id=s["id"], title=s["title"], project_id=s.get("project_id")) for s in sessions],
                                    projects=[dict(id=p["id"], name=p["name"], files=len(p["files"]),
                                                   sessions=sum(1 for s in sessions if s.get("project_id") == p["id"])) for p in projects]))
@@ -733,7 +806,11 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(raw or b"{}")
             if not isinstance(data, dict):
                 raise ValueError("잘못된 요청입니다.")
-            if url.path == "/api/new":
+            if url.path == "/api/model-settings":
+                self.json(workspace.save_model_settings(data))
+            elif url.path == "/api/auth/login":
+                self.json(workspace.auth_login(str(data.get("provider", ""))))
+            elif url.path == "/api/new":
                 project_id = data.get("project_id")
                 if project_id is not None and not isinstance(project_id, str):
                     raise ValueError("프로젝트를 찾을 수 없습니다.")

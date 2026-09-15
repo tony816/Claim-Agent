@@ -53,6 +53,8 @@ class TelemetryRow:
 
 
 def estimate_cost(model: str, usage: dict[str, int], pricing: dict[str, dict[str, float]]) -> float | None:
+    if usage.get("subscription_calls"):
+        return None
     p = pricing.get(model)
     if not p:
         return None

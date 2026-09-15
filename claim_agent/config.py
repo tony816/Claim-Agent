@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 DEFAULT_CONFIG_NAME = "claim-agent.yaml"
+ProviderKind = Literal["gemini", "anthropic", "claude_oauth", "codex_oauth"]
 
 
 class ModelConfig(BaseModel):
@@ -27,12 +29,21 @@ class AnthropicConfig(BaseModel):
     send_temperature: bool = False    # sampling params are rejected on Claude Opus 5 / Fable 5
 
 
+class SubscriptionConfig(BaseModel):
+    model: str = "default"            # default = CLI account default
+    executable: str | None = None     # executable path, never a shell command
+    timeout_s: int = Field(default=600, ge=10, le=3600)
+
+
 class ProviderConfig(BaseModel):
-    kind: str = "gemini"              # gemini | anthropic
+    kind: ProviderKind = "gemini"
     anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
+    claude_oauth: SubscriptionConfig = Field(default_factory=lambda: SubscriptionConfig(model="sonnet"))
+    codex_oauth: SubscriptionConfig = Field(default_factory=lambda: SubscriptionConfig(model="default"))
 
 
 class RoleConfig(BaseModel):
+    provider: ProviderKind | None = None
     model: str | None = None
     thinking_level: str = "HIGH"      # MINIMAL | LOW | MEDIUM | HIGH
     temperature: float = 0.2
@@ -118,11 +129,21 @@ class AppConfig(BaseModel):
         return self.roles.get(name, RoleConfig())
 
     def model_for(self, role_name: str) -> str:
-        return self.role(role_name).model or self.default_model
+        return self.role(role_name).model or self.default_model_for(self.provider_for(role_name))
+
+    def provider_for(self, role_name: str) -> str:
+        return self.role(role_name).provider or self.provider.kind
+
+    def default_model_for(self, kind: str) -> str:
+        return self.model.default if kind == "gemini" else getattr(self.provider, kind).model
+
+    @property
+    def default_model_key(self) -> str:
+        return "model.default" if self.provider.kind == "gemini" else f"provider.{self.provider.kind}.model"
 
     @property
     def default_model(self) -> str:
-        return self.provider.anthropic.model if self.provider.kind == "anthropic" else self.model.default
+        return self.default_model_for(self.provider.kind)
 
     @property
     def api_key_env(self) -> str:
@@ -169,7 +190,11 @@ def load_config(
     # Load only this project's file, preserving explicitly set environment values.
     # utf-8-sig also supports .env files saved with a BOM by Windows editors.
     load_dotenv(root / ".env", override=False, encoding="utf-8-sig")
-    raw = apply_overrides(load_raw_config(path, root), overrides)
+    raw = load_raw_config(path, root)
+    settings = root / ".tui" / "model-settings.json"
+    if settings.exists():
+        raw = apply_overrides(raw, json.loads(settings.read_text(encoding="utf-8")))
+    raw = apply_overrides(raw, overrides)
     cfg = AppConfig.model_validate(raw)
     cfg.project_root = root
     return cfg

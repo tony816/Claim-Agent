@@ -3,6 +3,75 @@ history.replaceState(null, "", "/");
 const $ = id => document.getElementById(id);
 const state = {id:null, data:null, pending:[], busy:false, uploading:0, composing:false, nodes:new Map(), generation:0, project:null, view:"chat", projectData:null, log:{cursor:null, text:""}};
 const drafts = new Map();
+let modelSettings=null, authTimer=null;
+function settingsError(text){$("model-settings-error").textContent=text;$("model-settings-error").hidden=!text;}
+function settingsChanged(){$("model-settings-saved").textContent="저장하지 않은 변경사항";}
+function settingSelect(label, options, value, change){
+  const wrap=el("label","model-field",label),select=el("select");select.setAttribute("aria-label",label);
+  for(const [id,title] of options){const option=el("option","",title);option.value=id;select.append(option);}
+  select.value=value;select.onchange=()=>{change(select.value);settingsChanged();};wrap.append(select);return wrap;
+}
+function modelPicker(kind,value,label,inherit,onchange){
+  const models=modelSettings.providers[kind].models,choices=inherit?[["","기본 모델 따름 · "+modelSettings.defaults[kind]]]:[];
+  for(const model of models)choices.push([model,model==="default"?"계정 기본 모델 (CLI 자동 선택)":model]);
+  choices.push(["__custom","모델 ID 직접 입력…"]);
+  const custom=value!==null&&!models.includes(value), wrap=settingSelect(label,choices,custom?"__custom":value||"",v=>{
+    input.hidden=v!=="__custom";input.required=v==="__custom";
+    onchange(v==="__custom"?input.value:v||null);if(v==="__custom")input.focus();
+  });
+  const input=el("input");input.placeholder="모델 ID 입력";input.setAttribute("aria-label",label+" 직접 입력");input.value=custom?value:"";input.hidden=!custom;input.required=custom;input.maxLength=160;
+  input.oninput=()=>{onchange(input.value.trim());settingsChanged();};wrap.append(input);return wrap;
+}
+function renderModelSettings(){
+  const defaults=$("default-model-controls");defaults.replaceChildren();
+  const choices=Object.entries(modelSettings.providers).map(([id,p])=>[id,p.label]);
+  defaults.append(settingSelect("기본 연결 방식",choices,modelSettings.provider,v=>{for(const role of modelSettings.roles){if(!role.provider)role.model=null;}modelSettings.provider=v;renderModelSettings();}));
+  defaults.append(modelPicker(modelSettings.provider,modelSettings.defaults[modelSettings.provider],"기본 모델",false,v=>{
+    modelSettings.defaults[modelSettings.provider]=v;
+  }));
+  const rows=$("role-model-controls");rows.replaceChildren();
+  for(const role of modelSettings.roles){
+    const row=el("div","role-model-row"),title=el("div","role-model-name");title.append(el("strong","",role.label),el("small","",role.id));row.append(title);
+    row.append(settingSelect(role.label+" 연결",[["","기본 설정 따름"],...choices],role.provider||"",v=>{role.provider=v||null;role.model=null;renderModelSettings();}));
+    row.append(modelPicker(role.provider||modelSettings.provider,role.model,role.label+" 모델",true,v=>{role.model=v;}));
+    row.append(settingSelect(role.label+" 추론",modelSettings.thinking_levels.map(x=>[x,{MINIMAL:"최소",LOW:"낮음",MEDIUM:"보통",HIGH:"높음"}[x]]),role.thinking_level,v=>{role.thinking_level=v;}));
+    rows.append(row);
+  }
+  $("model-settings-save").disabled=modelSettings.busy;
+  if(modelSettings.busy)$("model-settings-saved").textContent="실행 중에는 저장할 수 없습니다. 완료 또는 중지 후 다시 여세요.";
+}
+async function refreshAuth(){
+  clearTimeout(authTimer);const data=await api("/api/auth/status"),box=$("auth-connections");box.replaceChildren();
+  for(const [kind,status] of Object.entries(data)){
+    const card=el("div","auth-card"),meta=modelSettings.providers[kind];card.append(el("strong","",meta.label));
+    card.append(el("span",status.connected?"auth-connected":"auth-disconnected",status.connected?"● 연결됨":"○ 연결 필요"));
+    card.append(el("p","",status.pending?status.login_message:status.message));
+    if(status.login_message&&!status.pending&&!status.connected)card.append(el("p","",status.login_message));
+    if(kind.endsWith("_oauth")){
+      const button=el("button","",status.pending?"브라우저 승인 대기 중…":status.connected?"다른 구독 계정으로 로그인":"구독 계정 연결");button.type="button";button.disabled=!status.installed||status.pending||modelSettings.busy;
+      button.onclick=async()=>{button.disabled=true;settingsError("");try{await api("/api/auth/login",{provider:kind});await refreshAuth();}catch(e){settingsError(e.message);button.disabled=false;}};card.append(button);
+      const link=el("a","","CLI 설치 안내 ↗");link.href=meta.install_url;link.target="_blank";link.rel="noopener noreferrer";card.append(link);
+    }
+    box.append(card);
+  }
+  if(Object.values(data).some(s=>s.pending)&&$("model-settings-dialog").open)authTimer=setTimeout(()=>refreshAuth().catch(e=>settingsError(e.message)),3000);
+}
+$("model-settings-open").onclick=async()=>{
+  settingsError("");$("model-settings-saved").textContent="";
+  try{modelSettings=await api("/api/model-settings");renderModelSettings();$("model-settings-dialog").showModal();$("auth-connections").textContent="연결 확인 중…";await refreshAuth();}catch(e){settingsError(e.message);error(e.message);}
+};
+$("model-settings-close").onclick=()=>$("model-settings-dialog").close();
+$("model-settings-dialog").onclose=()=>clearTimeout(authTimer);
+$("auth-refresh").onclick=()=>refreshAuth().catch(e=>settingsError(e.message));
+$("models-apply-all").onclick=()=>{for(const role of modelSettings.roles){role.provider=null;role.model=null;}renderModelSettings();settingsChanged();};
+$("model-settings-form").onsubmit=async event=>{
+  event.preventDefault();settingsError("");$("model-settings-save").disabled=true;
+  try{
+    const roles=Object.fromEntries(modelSettings.roles.map(r=>[r.id,{provider:r.provider,model:r.model,thinking_level:r.thinking_level}]));
+    modelSettings=await api("/api/model-settings",{provider:modelSettings.provider,defaults:modelSettings.defaults,roles});renderModelSettings();
+    $("model-settings-saved").textContent="저장됨 · 다음 요청부터 적용됩니다";await list();
+  }catch(e){settingsError(e.message);}finally{$("model-settings-save").disabled=!!modelSettings.busy;}
+};
 const routeNames = {CHAT:"일반 대화",META:"설정·진행 확인",AUTHORING_DRAFT:"청구항 작성·수정",FINALIZATION:"출원용 최종 검증",REVIEW_ONLY:"특허 의견·제한 검수"};
 const el = (tag, cls, text) => {const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
 function error(message){$("error").textContent=message;$("error").hidden=!message;}
