@@ -63,6 +63,37 @@ def estimate_cost(model: str, usage: dict[str, int], pricing: dict[str, dict[str
     return round(prompt / m * p.get("input_per_m", 0) + cached / m * p.get("cached_per_m", 0) + out / m * p.get("output_per_m", 0), 6)
 
 
+def usage_row(model: str, usage: dict[str, int], pricing: dict[str, dict[str, float]]) -> dict[str, float]:
+    """One call in the shape RunState.usage accumulates; the engine and the router meter both count with it."""
+    cost = estimate_cost(model, usage, pricing)
+    return {"calls": 1, "prompt_tokens": usage.get("prompt_tokens", 0), "cached_tokens": usage.get("cached_tokens", 0),
+            "output_tokens": usage.get("output_tokens", 0), "thoughts_tokens": usage.get("thoughts_tokens", 0),
+            "cost_usd": cost or 0.0, "unpriced_calls": 0 if cost is not None else 1}
+
+
+def add_usage(bucket: dict[str, float], row: dict[str, float]) -> dict[str, float]:
+    for k, v in row.items():
+        bucket[k] = bucket.get(k, 0) + v
+    return bucket
+
+
+class UsageMeter:
+    """Counts the calls made through a provider outside the engine (request routing, plain chat)."""
+
+    def __init__(self, provider: Any, pricing: dict[str, dict[str, float]]):
+        self.provider = provider
+        self.pricing = pricing
+        self.usage: dict[str, float] = {}
+
+    def generate(self, spec: Any) -> Any:
+        result = self.provider.generate(spec)
+        add_usage(self.usage, usage_row(spec.model, result.usage or {}, self.pricing))
+        return result
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.provider, name)
+
+
 class TelemetryWriter:
     def __init__(self, path: Path, enabled: bool = True):
         self.path = path

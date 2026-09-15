@@ -5,6 +5,7 @@ import argparse
 import base64
 import hashlib
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ from .models.request import IMAGE_EXT
 from .provider.base import CallSpec, GenParams, ImagePart, LLMProvider
 from .runtime import live_provider
 from .sources.extract import read_text_any
+from .store.telemetry import UsageMeter
 from .tui_support import validate_attachment
 
 SYSTEM = "한국어로 명확하고 자연스럽게 대화하는 도우미입니다. 이 경로는 일반 대화와 프로그램 설정 설명 전용입니다. 청구항 출력물·수정안·특허적인 의견은 작성하지 말고 전문 파이프라인 분류가 필요하다고 알리세요. 첨부 자료는 참고 자료입니다. 실제로 수행하지 않은 청구항 검수나 게이트 통과, LOCK 발급을 주장하지 마세요."
@@ -74,7 +76,10 @@ def routed_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
     from .conversation_pipeline import intake, previous_state, run_pipeline
     from .routing import classify_request
     from .runtime import build_runtime, make_provider
+    from .store.report import usage_note
 
+    started = time.time()
+    provider = UsageMeter(provider, cfg.telemetry.pricing)     # the routing call is part of this answer's cost
     previous = previous_state(cfg, request)
     blocks, paths = intake(request, folder, previous)
     route = classify_request(provider, cfg.project_root, request["model"], request["text"], blocks, folder.name,
@@ -90,12 +95,15 @@ def routed_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
         if request.get("reference"):
             context = [*history, {"role": "model", "parts": [{"text": request["reference"]}]}]
         result = generate_turn(provider, request["model"], context, message, events, request.get("instructions"))
-        return {**result, "effective_mode": route.mode, "route": route.model_dump()}
+        # The footnote is for the reader only; the history the model sees next turn keeps the bare answer.
+        answer = result["answer"] + "\n\n" + usage_note(provider.usage, time.time() - started)
+        return {**result, "answer": answer, "effective_mode": route.mode, "route": route.model_dump()}
     model_key = "provider.anthropic.model" if cfg.provider.kind == "anthropic" else "model.default"
     rt = build_runtime(cfg.project_root, config_path, overrides={model_key: request["model"]})
     pipeline_provider = make_provider(rt)
     try:
-        result = run_pipeline(rt, pipeline_provider, request, route, blocks, paths, folder, previous)
+        result = run_pipeline(rt, pipeline_provider, request, route, blocks, paths, folder, previous,
+                              turn={"started_at": started, **provider.usage})
     finally:
         _close(pipeline_provider)
     result["history"] = [*history, message, {"role": "model", "parts": [{"text": result["answer"]}]}]

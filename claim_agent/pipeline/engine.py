@@ -31,7 +31,7 @@ from ..roles.registry import RoleRegistry
 from ..sources.registry import SourceSet
 from ..store.report import render_chat_report, render_report
 from ..store.runstore import RunStore
-from ..store.telemetry import TelemetryRow, TelemetryWriter, estimate_cost, now
+from ..store.telemetry import TelemetryRow, TelemetryWriter, estimate_cost, now, usage_row
 from . import packets
 from .blind_guard import BlindPacket
 from .claimtext import ClaimParseError, MultiDependentChain, contains_user_lock, exact_sha256, parent_chain, parent_chain_text, parse_claim_set, validate_parent_refs
@@ -210,6 +210,7 @@ class PipelineEngine:
         self._bundle = bundle
         state.halt = None
         state.outcome = "RUNNING"
+        started, before = now(), dict(state.usage)
         try:
             self.scope_guard(state, bundle)
             if state.stage == Stage.REVIEW_ONLY:
@@ -224,6 +225,8 @@ class PipelineEngine:
             state.halt = Halt(stage=state.stage.value, role="provider", kind="ERROR", message=str(exc))
             state.stage = Stage.HALTED
             state.outcome = "HALTED_ERROR"
+        # state.usage keeps growing across resumes of the same run; the answer's footnote is about this turn only.
+        state.turn = {**{k: v - before.get(k, 0) for k, v in state.usage.items()}, "started_at": started, "finished_at": now()}
         self.store.save_state(state)
         self.store.write_report(state.run_id, render_report(state))
         self.store.write_chat_report(state.run_id, render_chat_report(state))
@@ -545,12 +548,8 @@ class PipelineEngine:
         self._account(state, spec.stage, spec.model, usage, result.latency_ms, result.cache_hit)
 
     def _account(self, state: RunState, stage: str, model: str, usage: dict[str, int], latency_ms: int, cache_hit: bool) -> None:
-        cost = estimate_cost(model, usage, self.cfg.telemetry.pricing)
-        state.add_usage(stage, {
-            "calls": 1, "prompt_tokens": usage.get("prompt_tokens", 0), "cached_tokens": usage.get("cached_tokens", 0),
-            "output_tokens": usage.get("output_tokens", 0), "thoughts_tokens": usage.get("thoughts_tokens", 0),
-            "latency_ms": latency_ms, "cost_usd": cost or 0.0, "cache_hits": 1 if cache_hit else 0, "unpriced_calls": 0 if cost is not None else 1,
-        })
+        state.add_usage(stage, {**usage_row(model, usage, self.cfg.telemetry.pricing),
+                                "latency_ms": latency_ms, "cache_hits": 1 if cache_hit else 0})
 
     def _telemetry_tool(self, state: RunState, spec: CallSpec, result: CallResult, ids: Identifiers, record_id: str, tool_log: ToolLog) -> None:
         """One row for the tool-phase call itself, then one row per restricted corpus tool call.

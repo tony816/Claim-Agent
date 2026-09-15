@@ -24,7 +24,7 @@ function markdown(node,text){
     const heading=line.match(/^(#{1,3})\s+(.*)$/);if(heading){const h=el("h"+heading[1].length);inline(h,heading[2]);node.append(h);i++;continue;}
     if(line.includes("|")&&i+1<lines.length&&/^\s*\|?\s*:?-{3}/.test(lines[i+1])){const table=el("table");const addRow=(value,head)=>{const row=el("tr");for(const cell of value.trim().replace(/^\||\|$/g,"").split("|")){const c=el(head?"th":"td");inline(c,cell.trim());row.append(c);}table.append(row);};addRow(line,true);i+=2;while(i<lines.length&&lines[i].includes("|"))addRow(lines[i++],false);node.append(table);continue;}
     const list=line.match(/^\s*(?:[-*]|\d+\.)\s+/);if(list){const ordered=/^\s*\d/.test(line),ul=el(ordered?"ol":"ul");while(i<lines.length&&/^\s*(?:[-*]|\d+\.)\s+/.test(lines[i])){const li=el("li");inline(li,lines[i++].replace(/^\s*(?:[-*]|\d+\.)\s+/,""));ul.append(li);}node.append(ul);continue;}
-    const p=el("p");inline(p,line);node.append(p);i++;
+    const p=el("p",line.startsWith("※ ")?"note":"");inline(p,line);node.append(p);i++;
   }
 }
 function resize(){const p=$("prompt");p.style.height="auto";p.style.height=Math.min(p.scrollHeight,180)+"px";}

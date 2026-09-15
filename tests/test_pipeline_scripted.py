@@ -233,35 +233,61 @@ def test_resume_refuses_stale_source_set(rt, request_indep, tmp_path):
     assert all(r.stale for r in st.records.values())
 
 
-def test_chat_report_keeps_the_claims_and_drops_what_the_run_panel_shows(rt, request_dep):
-    """The conversation answer repeated the gate table, cost table and revision history the panel already renders."""
-    from claim_agent.store.report import render_chat_report, render_report
+def _summary(chat: str) -> str:
+    return chat.split("## 요약 코멘트\n\n", 1)[1].split("\n\n", 1)[0]
+
+
+def test_chat_report_puts_the_claims_first_then_a_short_summary_and_a_usage_footnote(rt, request_dep):
+    """The answer is the claim text; everything the report adds shrinks to ≤500 characters plus time, tokens and cost."""
+    from claim_agent.store.report import SUMMARY_LIMIT, render_chat_report, render_report
 
     engine = rt.engine(ScriptedProvider(R.happy_script()))
     state = engine.run(engine.start(request_dep, "chat-report"))
     full, chat = render_report(state), render_chat_report(state)
     assert state.outcome == "DRAFT_CLAIM_LOCK+DRAFT_DEPENDENT_SET_LOCK"
-    assert R.ROOT_CLAIM in chat and "DRAFT_CLAIM_LOCK" in chat and "DRAFT_DEPENDENT_SET_LOCK" in chat
+    assert chat.startswith("## 최종안") and chat.index(R.ROOT_CLAIM) < chat.index("## 요약 코멘트")
+    assert "DRAFT_CLAIM_LOCK" in chat and "DRAFT_DEPENDENT_SET_LOCK" in chat
     for claim in R.DEP_CLAIMS:
-        assert claim[3] in chat
-    assert "실행된 모든 단계가 PASS입니다." in chat
-    assert "SPEC_NOT_PROVIDED" in chat and "PRIOR_ART_NOT_PROVIDED" in chat
-    for panel_only in ("## 성능 요약", "## 리비전 이력", "| 단계 | 역할 | record_id |", "추정 비용"):
-        assert panel_only in full and panel_only not in chat
-    assert len(chat) * 3 < len(full)
+        assert chat.index(claim[3]) < chat.index("## 요약 코멘트")
+    summary = _summary(chat)
+    assert 0 < len(summary) <= SUMMARY_LIMIT
+    assert "실행된 모든 단계 PASS" in summary and "정식 명세서 미제공" in summary and "선행기술 미제공" in summary
+    # The footnote is this turn's usage; on a fresh run that is the whole run's accounting.
+    t = state.turn
+    calls, tokens = int(t["calls"]), int(t["prompt_tokens"] + t["output_tokens"] + t["thoughts_tokens"])
+    assert calls == int(state.usage["calls"]) > 0 and t["finished_at"] >= t["started_at"]
+    assert "※ 작업 소요 " in chat and f"토큰 {tokens:,} " in chat and f"호출 {calls}회" in chat and "API 비용 " in chat
+    for full_only in ("## 성능 요약", "## 리비전 이력", "| 단계 | 역할 | record_id |", "## 핵심 판단"):
+        assert full_only in full and full_only not in chat
     # Both are written; report.md stays the complete record.
     assert rt.store.chat_report_path("chat-report").name == "report-chat.md"
     assert (rt.cfg.path("runs_dir") / "chat-report" / "report.md").read_text(encoding="utf-8") == full
     assert (rt.cfg.path("runs_dir") / "chat-report" / "report-chat.md").read_text(encoding="utf-8") == chat
 
 
-def test_chat_report_of_a_halted_run_keeps_the_stopping_analysis(rt, request_indep):
-    from claim_agent.store.report import render_chat_report
+def test_chat_report_of_a_halted_run_summarizes_the_stop_and_leaves_the_analysis_to_the_full_report(rt, request_indep):
+    from claim_agent.store.report import SUMMARY_LIMIT, render_chat_report, render_report
 
     engine = rt.engine(ScriptedProvider({"claim-architect": [R.architect(locked=False)]}))
     state = engine.run(engine.start(request_indep, "chat-halt"))
-    chat = render_chat_report(state)
-    assert state.halt and "## 중지" in chat and "## 중지 단계의 검토 내용" in chat
-    assert state.halt.report_markdown in chat                       # the role's own analysis, not a summary
-    assert "ARCHITECT (claim-architect): REVIEW" in chat and "미실행 필수 단계: DRAFT" in chat
-    assert "claim-agent resume chat-halt" in chat
+    chat, full = render_chat_report(state), render_report(state)
+    summary = _summary(chat)
+    assert state.halt and "- 중지: " in summary and "@ ARCHITECT" in summary
+    assert state.halt.report_markdown not in chat and state.halt.report_markdown in full
+    assert "ARCHITECT REVIEW" in summary and "미실행: DRAFT" in summary and "claim-agent resume chat-halt" in summary
+    assert "독립항 문언 없음" in chat and len(summary) <= SUMMARY_LIMIT
+    # However long the stopping role's message and issues are, the comment stays within the limit.
+    state.halt.message = "가" * 2000
+    state.halt.open_issues = [dict(kind="BLOCK", code=f"C{i}", text="나" * 400) for i in range(6)]
+    long_summary = _summary(render_chat_report(state))
+    assert len(long_summary) <= SUMMARY_LIMIT and long_summary.startswith("- 결과 ") and "미검증: " in long_summary
+
+
+def test_usage_note_says_when_the_cost_cannot_be_computed():
+    from claim_agent.store.report import usage_note
+
+    priced = dict(calls=2, prompt_tokens=3000, cached_tokens=1000, output_tokens=400, thoughts_tokens=100, cost_usd=0.01234, unpriced_calls=0)
+    assert usage_note(priced, 3725) == "※ 작업 소요 1시간 2분 · 토큰 3,500 (입력 3,000, 그중 캐시 1,000 · 출력 500) · API 비용 $0.0123 (호출 2회, telemetry.pricing 단가로 산출한 추정치)"
+    assert "API 비용 $0.0123 이상 (호출 2회 중 1회 단가 없음)" in usage_note({**priced, "unpriced_calls": 1}, 59)
+    assert "작업 소요 59초" in usage_note(priced, 59) and "산출 불가" in usage_note({**priced, "unpriced_calls": 2}, 125)
+    assert usage_note({}, None) == "※ 작업 소요 미기록 · API 호출 없음 (토큰 0 · 비용 $0)"

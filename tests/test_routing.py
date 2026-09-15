@@ -121,8 +121,9 @@ def test_failed_design_never_calls_drafter_or_plain_chat(rt, request_indep, tmp_
     assert result["status"] == "review" and result["finish_reason"] == "PIPELINE_HALTED"
     assert [c.role for c in provider.calls] == ["claim-architect"]
     assert not rt.store.load_state(result["run_id"]).candidate.draft_claim_lock
-    assert "## 중지 단계의 검토 내용" in result["answer"]
-    assert rt.store.load_state(result["run_id"]).halt.report_markdown in result["answer"]
+    halt = rt.store.load_state(result["run_id"]).halt
+    assert "- 중지: " in result["answer"] and halt.report_markdown not in result["answer"]
+    assert halt.report_markdown in (rt.cfg.path("runs_dir") / result["run_id"] / "report.md").read_text(encoding="utf-8")
 
 
 def test_opinion_uses_reviewer_report_without_authoring_or_locks(rt, tmp_path):
@@ -139,8 +140,9 @@ def test_opinion_uses_reviewer_report_without_authoring_or_locks(rt, tmp_path):
     assert state.candidate.current.exact_text is None
     assert state.candidate.design_revision == "N/A"
     assert not state.candidate.draft_claim_lock and not state.candidate.final_claim_lock
-    assert "## 검토 의견" in result["answer"]
-    assert state.review_reports["oa-strategy-reviewer"] in result["answer"]
+    answer, report = result["answer"], state.review_reports["oa-strategy-reviewer"]
+    assert answer.startswith("## 검토 의견") and report in answer               # the opinion is the deliverable, in full
+    assert answer.index(report) < answer.index("## 요약 코멘트") and "REVIEW_ONLY 검토 결과" in answer
     assert "독립항 문언 없음 (설계 단계에서 중지)" not in result["answer"]
 
 
@@ -173,6 +175,29 @@ def test_automatic_followup_preserves_id_and_rechecks_new_revision(rt, request_i
     assert current.candidate.draft_claim_lock != old_lock
     assert len([c for c in provider.calls if c.phase == "main"]) == 8
     assert current.request["user_lock"] == previous.request["user_lock"]
+
+
+def test_plain_chat_answer_carries_time_tokens_and_cost_including_the_routing_call(rt, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from claim_agent.provider.base import CallResult
+
+    class Provider:
+        def generate(self, spec):
+            return CallResult(text="안녕하세요", usage={"prompt_tokens": 1000, "cached_tokens": 200, "output_tokens": 500})
+
+    def classify(provider, *args):
+        provider.generate(SimpleNamespace(model="m", role="request-router"))
+        return RouteDecision(mode="CHAT", reason="일반 대화")
+
+    monkeypatch.setitem(rt.cfg.telemetry.pricing, "m", {"input_per_m": 1.0, "cached_per_m": 0.1, "output_per_m": 2.0})
+    monkeypatch.setattr(routing, "classify_request", classify)
+    result = chat.routed_turn(Provider(), rt.cfg, None, dict(text="안녕", files=[], history=[], model="m"), tmp_path, EventWriter(tmp_path / "events.jsonl"))
+    assert result["answer"].startswith("안녕하세요\n\n※ 작업 소요 ")
+    assert "토큰 3,000 (입력 2,000, 그중 캐시 400 · 출력 1,000)" in result["answer"]
+    # (800 × $1 + 200 × $0.1 + 500 × $2) / 1M per call, two calls
+    assert "API 비용 $0.0036 (호출 2회" in result["answer"]
+    assert result["history"][-1]["parts"][0]["text"] == "안녕하세요"          # the model never sees its own footnote
 
 
 def test_router_failure_never_generates_an_answer(rt, tmp_path, monkeypatch):
@@ -243,3 +268,34 @@ def test_single_claim_picked_in_composer_limits_the_dependent_work(rt, request_i
     assert state.request["dependent_target"] == "3" and result["status"] == "complete"
     assert [c["claim_no"] for c in state.dependent.current.claims] == [3]
     assert [c.meta["target_claim_id"] for c in provider.calls if c.scope == "DEPENDENT_SINGLE"] == ["3", "3"]
+
+
+def test_windows_line_endings_never_reach_the_exact_text_a_reviewer_must_echo(request_indep, tmp_path):
+    """A pasted claim saved as CRLF halted every review: the model echoes LF, and the exact-text hash differed."""
+    import hashlib
+    from pathlib import Path
+
+    from claim_agent.models.request import MaterialBundle
+
+    claim = "【청구항 9】\n제8항에 있어서,\n상기 오목면은,\n시약 튜브 취급 장치."
+    blocks, _ = intake(dict(text=claim, files=[], history=[]), tmp_path)
+    assert b"\r" not in Path(blocks[-1]["path"]).read_bytes()
+    crlf = tmp_path / "pasted.txt"
+    crlf.write_bytes(claim.replace("\n", "\r\n").encode("utf-8"))
+    bundle = MaterialBundle.load(request_indep.model_copy(update={"claim_file": str(crlf)}))
+    assert bundle.claim_file_text() == claim
+    assert bundle.by_category("claim_file")[0].sha256 == hashlib.sha256(crlf.read_bytes()).hexdigest()   # identity = bytes
+
+
+REWRITE_REQUEST = "명확한 청구항이지만 간결성과 담백함 가독성 등의 밸런스가 준수되지 않은 청구항이야. 이에 대한 하네스가 존재할텐데? 제시해준 하기 9항은 그렇지 못함."
+
+
+def test_router_treats_a_standards_complaint_about_a_claim_as_rewriting_it(project_root):
+    provider = ScriptedProvider({"request-router": [{
+        "mode": "AUTHORING_DRAFT", "reason": "제시한 9항이 작성 기준에 못 미친다는 지적 — 9항 재작성",
+        "dependent": True, "dependent_target": "9",
+    }]})
+    route = classify_request(provider, project_root, "test", REWRITE_REQUEST, [], "rewrite-9", None, "미완성된 9항 작성하기.")
+    assert route.mode == "AUTHORING_DRAFT" and route.dependent_target == "9"
+    system = provider.calls[0].system_instruction
+    assert "작성 기준을 충족하지 못한다고 지적" in system and "지침에 특정 항의 작성·완성이 적혀 있고" in system

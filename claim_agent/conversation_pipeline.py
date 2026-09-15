@@ -32,7 +32,7 @@ def intake(request: dict, folder: Path, previous=None) -> tuple[list[dict], dict
         bid = f"input-{len(blocks) + 1}"
         p = Path(path) if path else directory / f"{bid}-{digest[:12]}.txt"
         if not path:
-            p.write_text(text, encoding="utf-8")
+            p.write_text(text, encoding="utf-8", newline="")     # no CRLF translation on Windows: the file is the exact text
         blocks.append(dict(id=bid, text=text, origin=origin, category=category, path=str(p), is_request=is_request))
         if origin == "user":
             field = {"spec": "spec_path", "prior_art": "prior_art"}.get(category, "invention_sources")
@@ -151,7 +151,8 @@ def previous_state(cfg, request):
 
 
 def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list[dict],
-                 paths: dict, folder: Path, previous=None):
+                 paths: dict, folder: Path, previous=None, turn: dict | None = None):
+    """`turn` carries what the conversation spent before the engine started: `started_at` plus the routing usage."""
     if route.mode in {"AUTHORING_DRAFT", "FINALIZATION"}:
         route.dependent, route.dependent_target = constrain_target(request["text"], route.dependent, route.dependent_target)
         route.dependent, route.dependent_target = apply_ui_target(route.mode, route.dependent, route.dependent_target, request["text"], request.get("ui_hints"))
@@ -185,6 +186,10 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
     else:
         state = engine.run(engine.start(req, folder.name))
     state.notes.append("자동 요청 분류: " + route.mode + " — " + route.reason + (f" (revision 경로: {applied})" if resume else ""))
+    if turn:
+        from .store.telemetry import add_usage
+        add_usage(state.turn, {k: v for k, v in turn.items() if k != "started_at"})
+        state.turn["started_at"] = min(state.turn.get("started_at", turn["started_at"]), turn["started_at"])
     from .store.report import render_chat_report, render_report
     rt.store.save_state(state)
     rt.store.write_report(state.run_id, render_report(state))

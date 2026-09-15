@@ -142,15 +142,21 @@ def _load_path(p: Path, category: str, max_image_side: int = DEFAULT_MAX_SIDE) -
         norm = normalize_image(raw, IMAGE_EXT[ext], max_image_side)
         meta = {"original_size": norm.original_size, "size": norm.size, "resized": norm.resized, "bytes": len(norm.data), "original_bytes": len(raw), "note": norm.note}
         return [MaterialItem(str(p), p.name, "image", sha, None, norm.mime_type, norm.data, category, norm.sha256 if norm.resized else None, meta)]
+    # sha stays the hash of the file's bytes (material identity); the text is what roles read and echo back, and a
+    # model never reproduces Windows line endings, so a CRLF file would fail every exact_claim_text comparison.
     if ext in TEXT_EXT or ext == "":
-        return [MaterialItem(str(p), p.name, "text", sha, raw.decode("utf-8", errors="replace"), None, None, category)]
+        return [MaterialItem(str(p), p.name, "text", sha, _lf(raw.decode("utf-8", errors="replace")), None, None, category)]
     if ext in DOC_EXT:
         try:
             extracted = extract_text(p)
         except ExtractionError as exc:
             raise ValueError(f"{p.name}: {exc}") from exc
-        return [MaterialItem(str(p), p.name, "text", sha, extracted.text, None, None, category, extraction=extracted.as_meta())]
+        return [MaterialItem(str(p), p.name, "text", sha, _lf(extracted.text), None, None, category, extraction=extracted.as_meta())]
     raise ValueError(f"unsupported material type {ext}: {p} (use md/txt/pdf/docx/hwpx/hwp or png/jpg/webp)")
+
+
+def _lf(text: str) -> str:
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def encode_image(item: MaterialItem) -> str:
