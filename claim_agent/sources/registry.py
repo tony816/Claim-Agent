@@ -19,7 +19,7 @@ SOURCE_FILES: dict[str, str] = {
     "CORPUS": "청구항_문체학습용_분야별검색최적화본.md",
 }
 
-ADAPTER_VERSION = 1
+ADAPTER_VERSION = 2
 
 
 @dataclass(frozen=True)

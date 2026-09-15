@@ -16,6 +16,8 @@ def _gate_table(state: RunState) -> str:
             note.append("STALE")
         if not r.issued:
             note.append("미발급")
+        if r.evidence_counts:
+            note.append("근거 " + "/".join(f"{k[0]}{v}" for k, v in r.evidence_counts.items() if v))
         rows.append(f"| {r.stage} | {r.role} | `{rid}` | {r.status} | {gates} | {' '.join(note) or '-'} |")
     return "\n".join(rows)
 

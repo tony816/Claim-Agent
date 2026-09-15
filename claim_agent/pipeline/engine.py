@@ -355,6 +355,12 @@ class PipelineEngine:
             if actual is not None and actual != requested:
                 scope_problem = f"요청한 종속항 {sorted(requested)}와 산출 항 번호 {sorted(str(x) for x in actual)}가 다릅니다. 임의 범위 확대/누락을 허용하지 않습니다."
         issued = contract.passes(env, state.request_mode) if role in REVIEWER_ROLES or role == "blind-claim-reconstruction-reviewer" else env.status in (Status.PASS, Status.PASS_RANGE)
+        evidence_problem = None
+        unconfirmed = env.unconfirmed_evidence()
+        if unconfirmed and env.status in (Status.PASS, Status.PASS_RANGE):
+            # 조건 4: 근거표 공란 0건. A PASS with UNCONFIRMED evidence rows contradicts itself → REVIEW.
+            evidence_problem = f"EVIDENCE_UNCONFIRMED: 근거 미확인 한정 {len(unconfirmed)}건이 PASS 판정과 함께 보고됨: " + "; ".join(unconfirmed[:5])
+            issued = False
         if scope_problem:
             issued = False
         text_for_hash = env.exact_claim_text if env.exact_claim_text else expected_exact
@@ -363,6 +369,7 @@ class PipelineEngine:
             execution_status=env.execution_status.value, gates=env.gates.present(), issued=issued,
             text_sha256=exact_sha256(text_for_hash.strip()) if text_for_hash else None, ids=ids.as_dict(), source_set_id=state.source_set_id,
             invention_primary=env.invention_type.primary.value if env.invention_type else None,
+            evidence_counts={b: sum(1 for e in env.limitation_evidence if e.basis.value == b) for b in ("DIRECT", "DERIVED", "UNCONFIRMED")} if env.limitation_evidence else {},
         )
         call_payload = {
             "seq": seq, "role": role, "scope": scope.value, "stage": stage.value, "record_id": rid, "model": spec.model,
@@ -383,6 +390,7 @@ class PipelineEngine:
             "issued": issued, "exact_claim_text": env.exact_claim_text,
             "claims": [c.model_dump() for c in env.claims], "candidates": [c.model_dump() for c in env.candidates],
             "per_claim_gates": [g.model_dump() for g in env.per_claim_gates], "open_issues": [o.model_dump() for o in env.open_issues],
+            "limitation_evidence": [e.model_dump(mode="json") for e in env.limitation_evidence], "evidence_problem": evidence_problem,
             "source_set_id": state.source_set_id, "call_file": ref.call_file, "aux_source_usage": env.aux_source_usage,
             "tool_log": tool_log.render() if tool_log.calls else "조건부 보조 소스: NOT_ACTIVATED", "report_markdown": env.report_markdown,
         }
@@ -401,6 +409,9 @@ class PipelineEngine:
             self.store.save_state(state)
         if scope_problem:
             raise PipelineHalt(Halt(stage=stage.value, role=role, kind="REVIEW", reason_code="OTHER", message="REQUEST_SCOPE_MISMATCH: " + scope_problem, record_id=rid))
+        if evidence_problem:
+            raise PipelineHalt(Halt(stage=stage.value, role=role, kind="REVIEW", reason_code="OTHER", message=evidence_problem, record_id=rid,
+                                    open_issues=[{"kind": "EVIDENCE_UNCONFIRMED", "code": "COND4", "text": lim, "return_to": None} for lim in unconfirmed]))
         return env, ref
 
     def _guard_budget(self, state: RunState, stage: Stage) -> None:

@@ -7,6 +7,7 @@ no dynamic keys and no additionalProperties.
 """
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -110,6 +111,23 @@ class CandidateItem(BaseModel):
     parent_claim_no: int | None = None
 
 
+class EvidenceBasis(str, Enum):  # noqa: UP042
+    DIRECT = "DIRECT"            # 직접 기재
+    DERIVED = "DERIVED"          # 통상의 기술자가 명확히 도출
+    UNCONFIRMED = "UNCONFIRMED"  # 근거 미확인
+
+
+class LimitationEvidence(BaseModel):
+    """One row of the 한정별 근거표 (조건 4): limitation → source → location → basis."""
+    model_config = ConfigDict(extra="ignore")
+    limitation: str
+    role: str | None = None          # F/E/C/N/I/S 또는 null
+    source_name: str | None = None   # 원자료 파일명 또는 USER_LOCK
+    location: str | None = None      # 단락·도면 번호·표 행
+    basis: EvidenceBasis = EvidenceBasis.UNCONFIRMED
+    note: str | None = None
+
+
 class OpenIssue(BaseModel):
     model_config = ConfigDict(extra="ignore")
     kind: str            # REVIEW | BLOCK | UNVERIFIED | EVIDENCE_UNCONFIRMED
@@ -137,6 +155,7 @@ class RoleEnvelope(BaseModel):
     candidates: list[CandidateItem] = Field(default_factory=list)
     sketchability: Sketchability | None = None
     open_issues: list[OpenIssue] = Field(default_factory=list)
+    limitation_evidence: list[LimitationEvidence] = Field(default_factory=list)
     sources_read: list[str] = Field(default_factory=list)
     aux_source_usage: str | None = None   # NOT_ACTIVATED | USED
     report_markdown: str = ""
@@ -154,6 +173,9 @@ class RoleEnvelope(BaseModel):
             if gr.gate == gate:
                 return gr.reason_code
         return None
+
+    def unconfirmed_evidence(self) -> list[str]:
+        return [e.limitation for e in self.limitation_evidence if e.basis == EvidenceBasis.UNCONFIRMED]
 
     def non_pass_checks(self) -> list[str]:
         return [c.name for c in self.checks if c.status not in (GateValue.PASS, GateValue.NOT_APPLICABLE, GateValue.PASS_RANGE)]
@@ -267,6 +289,19 @@ ENVELOPE_JSON_SCHEMA: dict[str, Any] = _obj(
         "sketchability": _enum([s.value for s in Sketchability], nullable=True),
         "open_issues": _arr(
             _obj({"kind": _str(), "code": _str(), "text": _str(), "return_to": _str(nullable=True)}, ["kind", "text"])
+        ),
+        "limitation_evidence": _arr(
+            _obj(
+                {
+                    "limitation": _str("한정 문언"),
+                    "role": _str("F/E/C/N/I/S", nullable=True),
+                    "source_name": _str("근거 원자료 파일명 또는 USER_LOCK", nullable=True),
+                    "location": _str("근거 위치(단락·도면·표)", nullable=True),
+                    "basis": _enum([b.value for b in EvidenceBasis], desc="DIRECT 직접 기재 / DERIVED 명확한 도출 / UNCONFIRMED 근거 미확인"),
+                    "note": _str(nullable=True),
+                },
+                ["limitation", "basis"],
+            )
         ),
         "sources_read": _arr(_str()),
         "aux_source_usage": _enum(["NOT_ACTIVATED", "USED"], nullable=True),

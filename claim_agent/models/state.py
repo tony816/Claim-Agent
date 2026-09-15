@@ -54,6 +54,7 @@ class RecordRef(BaseModel):
     ids: dict[str, Any] = Field(default_factory=dict)
     source_set_id: str = ""
     invention_primary: str | None = None
+    evidence_counts: dict[str, int] = Field(default_factory=dict)   # DIRECT/DERIVED/UNCONFIRMED rows in limitation_evidence
     created_at: float = Field(default_factory=time.time)
 
 
