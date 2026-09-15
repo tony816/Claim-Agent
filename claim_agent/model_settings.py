@@ -87,4 +87,4 @@ def settings_snapshot(cfg):
     return {"provider": cfg.provider.kind, "defaults": {p: cfg.default_model_for(p) for p in PROVIDERS}, "providers": providers,
             "thinking_levels": THINKING, "roles": [{"id": name, "label": label, "provider": cfg.role(name).provider,
                 "model": cfg.role(name).model, "thinking_level": cfg.role(name).thinking_level,
-                "effective_provider": cfg.provider_for(name), "effective_model": cfg.model_for(name)} for name, label in zip(ROLE_NAMES, ROLE_LABELS)]}
+                "effective_provider": cfg.provider_for(name), "effective_model": cfg.model_for(name)} for name, label in zip(ROLE_NAMES, ROLE_LABELS, strict=True)]}
