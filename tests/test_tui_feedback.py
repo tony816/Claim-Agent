@@ -53,7 +53,9 @@ def test_feedback_revises_existing_pipeline_and_rechecks_gates(rt, request_indep
             app.query_one("#feedback-run", Select).value = "feedback-existing"
             app.query_one("#request", Composer).load_text("부품의 연결 관계를 다시 검토하여 수정해 주세요.")
             await pilot.click("#start")
-            assert app.running
+            async with asyncio.timeout(5):          # the Button.Pressed message can still be in flight when click() returns
+                while not app.running:
+                    await asyncio.sleep(0.05)
             async with asyncio.timeout(30):
                 while app.running:
                     await asyncio.sleep(.1)

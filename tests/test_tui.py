@@ -140,7 +140,9 @@ def test_headless_offline_pipeline_result(project_root, tmp_path, monkeypatch):
             app.query_one("#request", Composer).load_text("독립항 잠정안 작성")
             app.query_one("#material", Composer).load_text("오프라인 UI 연결 시험용 원자료")
             await pilot.click("#start")
-            assert app.running
+            async with asyncio.timeout(5):          # the Button.Pressed message can still be in flight when click() returns
+                while not app.running:
+                    await asyncio.sleep(0.05)
             assert app.query_one("#start", Button).disabled
             async with asyncio.timeout(30):
                 while app.running:
