@@ -232,9 +232,48 @@ def cmd_feedback(args) -> int:
     return 0
 
 
+def _eval_live(rt: Runtime, args) -> int:
+    """Golden-set live run: show the call/cost estimate first, then run with the real provider (optionally recording)."""
+    from .improve.estimate import estimate_run
+
+    eval_dir = rt.cfg.path("eval_dir")
+    cases = [EvalCase.load(p.parent) for p in sorted((eval_dir / "cases").glob("*/request.yaml")) if args.all or p.parent.name == args.case]
+    if not cases:
+        raise SystemExit("no eval case matched (--case <id> 또는 --all)")
+    rows = []
+    for run in rt.store.list_runs():
+        rows.extend(read_telemetry(rt.store.telemetry_path(run)))
+    model = args.model or rt.cfg.model.default
+    total_calls, total_cost = 0, 0.0
+    for case in cases:
+        est = estimate_run(case.request, model, rt.cfg.telemetry.pricing, rows)
+        total_calls += est.calls
+        total_cost += est.cost or 0.0
+        print(f"{case.case_id}: {est.render()}")
+    cost_text = f"${total_cost:.4f}" if rt.cfg.telemetry.pricing.get(model) else "N/A"
+    print(f"합계: 호출 {total_calls}회, 추정 비용 {cost_text} (모델 {model})")
+    if not args.yes:
+        answer = input("실제 API를 호출합니다. 진행할까요? [y/N] ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("취소했습니다.")
+            return 0
+    args.replay = None
+    args.replay_only = False
+    args.sub = "run"
+    return cmd_eval(args)
+
+
 def cmd_eval(args) -> int:
     rt = _rt(args)
     eval_dir = rt.cfg.path("eval_dir")
+    if args.sub == "new":
+        from .improve.evalharness import scaffold_case
+
+        d = scaffold_case(eval_dir / "cases", args.case_id)
+        print(f"created {d}\n  1) sources/invention.md에 발명 설명, 도면은 sources/에 넣고 request.yaml에 등록\n  2) expected.yaml의 기대값 채우기\n  3) claim-agent eval live --case {args.case_id} --record {d / 'fixtures'} 로 1회 녹화 후 claim-agent fixtures sanitize {d / 'fixtures'}")
+        return 0
+    if args.sub == "live":
+        return _eval_live(rt, args)
     if args.sub == "list":
         for p in sorted((eval_dir / "cases").glob("*/request.yaml")):
             print(p.parent.name)
@@ -274,8 +313,8 @@ def cmd_eval(args) -> int:
             final_text = (cur.exact_text if cur else None) or ""
             if state.dependent and state.dependent.current and state.dependent.current.exact_text:
                 final_text += "\n" + state.dependent.current.exact_text
-            checks = evaluate(state, case.expected, final_text)
             tokens, calls = summarize(state, read_telemetry(vrt.store.telemetry_path(run_id)))
+            checks = evaluate(state, case.expected, final_text, tokens, calls)
             results.append(EvalResult(case.case_id, variant.variant_id, run_id, state.outcome, checks, tokens, calls, state.total_loops))
             print(f"{case.case_id} / {variant.variant_id}: {state.outcome} passed={results[-1].passed} calls={calls}")
     out = write_results(Path(args.out) if args.out else eval_dir / "results", results, diffs)
@@ -497,6 +536,16 @@ def build_parser() -> argparse.ArgumentParser:
     er.add_argument("--replay-only", action="store_true", help="skip cases without recorded fixtures (CI mode; never calls the API)")
     er.add_argument("--out")
     es.add_parser("list")
+    en = es.add_parser("new", help="scaffold a golden case directory (request.yaml, expected.yaml, sources/)")
+    en.add_argument("case_id")
+    el = es.add_parser("live", help="golden-set live run: estimate calls/cost first, then call the real API (use --record to keep fixtures)")
+    common_provider(el)
+    el.add_argument("--case")
+    el.add_argument("--all", action="store_true")
+    el.add_argument("--baseline", action="store_true")
+    el.add_argument("--shadow", action="store_true")
+    el.add_argument("--out")
+    el.add_argument("--yes", "-y", action="store_true", help="skip the confirmation prompt")
     ec = es.add_parser("compare")
     ec.add_argument("a")
     ec.add_argument("b")

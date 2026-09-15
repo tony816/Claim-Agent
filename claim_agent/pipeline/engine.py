@@ -320,6 +320,7 @@ class PipelineEngine:
             record_id=rid, kind=kind, role=role, scope=scope.value, stage=stage.value, status=env.status.value,
             execution_status=env.execution_status.value, gates=env.gates.present(), issued=issued,
             text_sha256=exact_sha256(text_for_hash.strip()) if text_for_hash else None, ids=ids.as_dict(), source_set_id=state.source_set_id,
+            invention_primary=env.invention_type.primary.value if env.invention_type else None,
         )
         call_payload = {
             "seq": seq, "role": role, "scope": scope.value, "stage": stage.value, "record_id": rid, "model": spec.model,

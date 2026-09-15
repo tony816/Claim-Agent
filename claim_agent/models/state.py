@@ -53,6 +53,7 @@ class RecordRef(BaseModel):
     call_file: str = ""
     ids: dict[str, Any] = Field(default_factory=dict)
     source_set_id: str = ""
+    invention_primary: str | None = None
     created_at: float = Field(default_factory=time.time)
 
 
