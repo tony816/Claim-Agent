@@ -99,3 +99,62 @@ def test_apply_ui_target_narrows_but_the_request_text_wins():
     assert apply_ui_target("AUTHORING_DRAFT", True, "2~8", "종속항 써줘", {"dependent": True, "target": "2~8"}) == (True, "2~8")
     with pytest.raises(ValueError, match="요청 문장의 항 번호"):
         apply_ui_target("AUTHORING_DRAFT", True, "5", "5항 고쳐줘", single)
+
+
+DEPENDENT_FRAGMENT = """【청구항 9】
+제8항에 있어서,
+상기 구속부는 상기 캡 수용 공간의 둘레를 따라 형성되는 오목면을 포함하는 홀더."""
+
+CLAIM_SET_WITH_ROOT = """【청구항 1】
+기둥과 상기 기둥에 결합되는 캡을 포함하는 홀더.
+
+【청구항 8】
+제1항에 있어서,
+상기 캡은 캡 수용 공간을 구획하는 홀더.
+
+【청구항 9】
+제8항에 있어서,
+상기 구속부는 상기 캡 수용 공간의 둘레를 따라 형성되는 오목면을 포함하는 홀더."""
+
+
+def _dependent_request(request_indep, tmp_path, text, target="9"):
+    path = tmp_path / "claims.md"
+    path.write_text(text, encoding="utf-8")
+    req = request_indep.model_copy()
+    req.dependent, req.dependent_target, req.claim_file = True, target, str(path)
+    return req
+
+
+def test_dependent_fragment_never_enters_the_independent_pipeline(rt, request_indep, tmp_path):
+    """The 9분/13회 호출 failure: a dependent fragment ran the INDEPENDENT stages and every gate rejected it."""
+    provider = ScriptedProvider(R.happy_script())
+    engine = rt.engine(provider)
+    request = _dependent_request(request_indep, tmp_path, DEPENDENT_FRAGMENT)
+    state = engine.run(engine.start(request, "dependent-fragment"))
+    assert provider.calls == []                                  # stopped before the first model call
+    assert state.halt.reason_code == "INDEPENDENT_SCOPE_DEPENDENT_CLAIM_TEXT"
+    assert state.halt.kind == "BLOCK" and state.halt.role == "engine"
+    assert "제8항" in state.halt.message and "부모항" in state.halt.message
+    assert not state.candidate.draft_claim_lock and state.dependent is None
+    assert any(i["code"] == "INDEPENDENT_SCOPE_DEPENDENT_CLAIM_TEXT" for i in state.halt.open_issues)
+
+
+def test_dependent_request_with_an_unresolvable_parent_chain_stops_first(rt, request_indep, tmp_path):
+    broken = CLAIM_SET_WITH_ROOT.replace("""【청구항 8】
+제1항에 있어서,
+상기 캡은 캡 수용 공간을 구획하는 홀더.
+
+""", "")
+    provider = ScriptedProvider(R.happy_script())
+    state = rt.engine(provider).run(rt.engine(provider).start(_dependent_request(request_indep, tmp_path, broken), "broken-chain"))
+    assert provider.calls == [] and state.halt.reason_code == "DEPENDENT_PARENT_CHAIN_MISSING"
+    assert "제9항" in state.halt.open_issues[0]["text"]
+
+
+def test_a_claim_set_with_its_root_and_plain_material_still_run(rt, request_indep, request_dep, tmp_path):
+    """The guard must not catch the normal paths: a full set, or authoring claim 1 and its dependents together."""
+    engine = rt.engine(ScriptedProvider(R.happy_script()))
+    with_root = engine.start(_dependent_request(request_indep, tmp_path, CLAIM_SET_WITH_ROOT), "with-root")
+    engine.scope_guard(with_root, engine._bundle)
+    from_material = engine.start(request_dep, "from-material")
+    engine.scope_guard(from_material, engine._bundle)             # no claim file at all

@@ -25,6 +25,8 @@ from .tui_support import CATEGORIES, RESUME_KINDS, child_options, read_state, re
 
 ASSETS = Path(__file__).with_name("web_assets")
 MAX_UPLOAD = 20 * 1024 * 1024
+MAX_LIVE_LOG = 300000       # sliding window of the live log kept in memory and rendered in the browser
+MIN_GZIP = 1400             # responses above this are gzipped when the browser accepts it
 MAX_PROJECT_TEXT = 100000
 PROJECT_TEXT_FIELDS = ("name", "description", "instructions", "user_lock")
 
@@ -261,14 +263,25 @@ class Workspace:
             draft_claim_lock=cand.get("draft_claim_lock"), final_claim_lock=cand.get("final_claim_lock"),
         )
 
-    def snapshot(self, sid: str) -> dict:
+    def snapshot(self, sid: str, log_from: int | None = None) -> dict:
+        """Session state for one poll. `log_from` is the client's live-log cursor: only what came after it is sent.
+
+        Without a cursor (first load) the whole window is sent with `log_reset`, which tells the client to replace
+        its buffer rather than append. A cursor that fell behind the window, or points past a restarted job, also
+        gets a reset, so the browser can never silently stitch a gap into the log.
+        """
         with self.lock:
             self.directory(sid)
             # Do not expose backend Gemini history (binary payloads) or filesystem paths.
             result = json.loads(json.dumps(self.sessions[sid]))
             job = self.jobs.get(sid)
             result["running"] = bool(job and not job["done"])
-            result["live_log"] = job["log"][-300000:] if job else ""
+            base, log = (job["log_base"], job["log"]) if job else (0, "")
+            cursor = base + len(log)
+            reset = log_from is None or not base <= log_from <= cursor
+            result["live_log"] = log if reset else log[log_from - base:]
+            result["log_cursor"] = cursor
+            result["log_reset"] = reset
             result["run"] = self.run_status(self.sessions[sid].get("run_id"))
             pid = self.sessions[sid].get("project_id")
             project = self.projects.get(pid) if pid else None
@@ -371,7 +384,7 @@ class Workspace:
             session["title"] = session["messages"][0]["text"][:36]
             session["updated"] = time.time()
             self.persist(session)
-            job = dict(done=False, stopped=False, process=None, log="", mid=mid, folder=job_dir,
+            job = dict(done=False, stopped=False, process=None, log="", log_base=0, mid=mid, folder=job_dir,
                        mode="CHAT", run_id=None, previous_report=0)
             self.jobs[sid] = job
             thread = threading.Thread(target=self.execute, args=(sid, job, command), daemon=True)
@@ -439,12 +452,23 @@ class Workspace:
             ])
             session["updated"] = time.time()
             self.persist(session)
-            job = dict(done=False, stopped=False, process=None, log="", mid=mid, folder=job_dir,
+            job = dict(done=False, stopped=False, process=None, log="", log_base=0, mid=mid, folder=job_dir,
                        mode="RESUME", run_id=run_id, previous_report=report.stat().st_mtime_ns if report.exists() else 0)
             self.jobs[sid] = job
             thread = threading.Thread(target=self.execute, args=(sid, job, command), daemon=True)
             job["thread"] = thread
             thread.start()
+
+    def trim_log(self, job: dict) -> None:
+        """Redact, then keep the last MAX_LIVE_LOG characters, counting what fell off the front.
+
+        `log_base + len(log)` is a cursor that only grows, so a client can ask for everything after the position it
+        already has instead of re-downloading the whole window on every poll. Re-redacting the whole buffer never
+        changes the part a client has already received (it holds no raw key any more), so old cursors stay valid.
+        """
+        redacted = self.redact(job["log"])
+        job["log_base"] = job.get("log_base", 0) + max(0, len(redacted) - MAX_LIVE_LOG)
+        job["log"] = redacted[-MAX_LIVE_LOG:]
 
     def consume_events(self, job: dict, message: dict, reader: EventReader) -> None:
         for event in reader.read():
@@ -469,7 +493,7 @@ class Workspace:
             else:
                 job["log"] += f"\n[{label} · {kind}] " + json.dumps(event, ensure_ascii=False) + "\n"
             job["call_id"] = event.get("call_id")
-        job["log"] = self.redact(job["log"])[-300000:]
+        self.trim_log(job)
 
     def execute(self, sid: str, job: dict, command: list[str]) -> None:
         session = self.sessions[sid]
@@ -491,7 +515,8 @@ class Workspace:
                 with self.lock:
                     self.consume_events(job, message, reader)
             with self.lock:
-                job["log"] += "\n" + self.redact((job["folder"] / "console.log").read_text(encoding="utf-8", errors="replace"))
+                job["log"] += "\n" + (job["folder"] / "console.log").read_text(encoding="utf-8", errors="replace")
+                self.trim_log(job)
                 if job["stopped"]:
                     message["status"] = "stopped"
                     message["text"] += "\n\n[응답을 중지했습니다.]"
@@ -520,7 +545,8 @@ class Workspace:
             with self.lock:
                 message["status"] = "error"
                 message["text"] += "\n\n" + self.redact(str(exc))
-                job["log"] += "\n" + self.redact(str(exc))
+                job["log"] += "\n" + str(exc)
+                self.trim_log(job)
         finally:
             process = job.get("process")
             if process and process.poll() is None:
@@ -529,7 +555,7 @@ class Workspace:
             with self.lock:
                 if job["mode"] != "CHAT" and (self.cfg.path("runs_dir") / job["run_id"] / "state.json").exists():
                     session["run_id"] = job["run_id"]
-                (job["folder"] / "display.log").write_text(job["log"][-300000:], encoding="utf-8")
+                (job["folder"] / "display.log").write_text(job["log"], encoding="utf-8")
                 job["done"] = True
                 session["updated"] = time.time()
                 self.persist(session)
@@ -565,8 +591,16 @@ class Handler(BaseHTTPRequestHandler):
         pass  # Never log bootstrap tokens or message contents to the console.
 
     def send(self, status: int, body: bytes, content_type="application/json; charset=utf-8", cookie=False):
+        encoding = ""
+        if len(body) >= MIN_GZIP and "gzip" in self.headers.get("Accept-Encoding", ""):
+            import gzip
+
+            body, encoding = gzip.compress(body, 6), "gzip"
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+        if encoding:
+            self.send_header("Content-Encoding", encoding)
+            self.send_header("Vary", "Accept-Encoding")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -623,7 +657,8 @@ class Handler(BaseHTTPRequestHandler):
             elif url.path == "/api/project":
                 self.json(workspace.project_snapshot(query.get("id", [""])[0]))
             elif url.path == "/api/session":
-                self.json(workspace.snapshot(query.get("id", [""])[0]))
+                cursor = query.get("log_from", [""])[0]
+                self.json(workspace.snapshot(query.get("id", [""])[0], int(cursor) if cursor.isdigit() else None))
             elif url.path == "/api/diff":
                 sid = query.get("id", [""])[0]
                 with workspace.lock:

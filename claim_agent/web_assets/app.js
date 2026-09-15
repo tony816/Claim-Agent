@@ -1,7 +1,7 @@
 "use strict";
 history.replaceState(null, "", "/");
 const $ = id => document.getElementById(id);
-const state = {id:null, data:null, pending:[], busy:false, uploading:0, composing:false, nodes:new Map(), generation:0, project:null, view:"chat", projectData:null};
+const state = {id:null, data:null, pending:[], busy:false, uploading:0, composing:false, nodes:new Map(), generation:0, project:null, view:"chat", projectData:null, log:{cursor:null, text:""}};
 const drafts = new Map();
 const routeNames = {CHAT:"일반 대화",META:"설정·진행 확인",AUTHORING_DRAFT:"청구항 작성·수정",FINALIZATION:"출원용 최종 검증",REVIEW_ONLY:"특허 의견·제한 검수"};
 const el = (tag, cls, text) => {const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
@@ -80,12 +80,22 @@ function render(data){
     if(view.routeLabel){view.routeLabel.textContent=m.execution_mode?"자동 분류 · "+(routeNames[m.execution_mode]||m.execution_mode):m.mode==="AUTHORING_DRAFT"?"청구항 작성·수정":"";view.routeLabel.title=m.route_reason||"";}
     if(view.text!==m.text||view.status!==m.status){if(m.role==="user")view.body.textContent=m.text;else if(m.text)markdown(view.body,m.text);else view.body.replaceChildren(el("span","pending",m.mode==="CHAT"?"답변을 작성하고 있어요…":"에이전트가 자료를 검토하고 있어요…"));view.text=m.text;}
     if(view.logs){
-      if(m.status==="running"){view.pre.textContent=data.live_log||"연결 중…";view.summary.textContent="작업 중 · 실시간 로그";if(view.status!=="running")view.logs.open=true;}
+      if(m.status==="running"){view.pre.textContent=state.log.text||"연결 중…";view.summary.textContent="작업 중 · 실시간 로그";if(view.status!=="running")view.logs.open=true;}
       else {view.summary.textContent=(m.status==="error"?"오류 확인 · ":m.status==="review"?"검토 필요 · ":"")+"작업 로그 펼치기";if(view.status==="running"){view.logs.open=false;view.pre.textContent="";}}
     }
     view.status=m.status;
   }
   renderRun(data);controls();if(follow)box.scrollTop=box.scrollHeight;
+}
+// 실시간 로그는 커서 이후의 새 부분만 받아 이어 붙인다(매 폴링마다 30만 자 전문을 다시 받지 않는다).
+async function fetchSession(id, incremental){
+  const cursor=incremental&&state.log.cursor!==null?"&log_from="+state.log.cursor:"";
+  const data=await api("/api/session?id="+encodeURIComponent(id)+cursor);
+  if(!incremental||data.log_reset)state.log.text=data.live_log||"";
+  else if(data.live_log)state.log.text+=data.live_log;
+  if(state.log.text.length>300000)state.log.text=state.log.text.slice(-300000);   // 서버 창과 같은 길이로 유지
+  state.log.cursor=data.log_cursor??null;
+  return data;
 }
 async function list(){
   const data=await api("/api/sessions");$("model").textContent=data.model;
@@ -105,7 +115,7 @@ function showChat(){state.view="chat";$("project-panel").hidden=true;$("conversa
 async function open(id){
   if(state.busy||state.uploading)return;
   if(state.id)drafts.set(state.id,{text:$("prompt").value,files:state.pending,mode:$("mode").value});
-  const version=++state.generation;const data=await api("/api/session?id="+id);if(version!==state.generation)return;
+  const version=++state.generation;state.log={cursor:null, text:""};const data=await fetchSession(id,false);if(version!==state.generation)return;
   state.id=id;state.nodes.clear();$("messages").replaceChildren();state.pending=drafts.get(id)?.files||[];
   $("prompt").value=drafts.get(id)?.text||localStorage.getItem("draft-"+id)||"";
   $("mode").value=drafts.get(id)?.mode||data.messages.filter(m=>m.role==="user").at(-1)?.mode||"CHAT";
@@ -123,7 +133,7 @@ async function deleteSession(id,title){
   if(next)await open(next.id);else await create();
 }
 async function create(projectId){if(state.busy||state.uploading)return;const data=await api("/api/new",{project_id:projectId===undefined?state.project:projectId});await open(data.id);}
-async function refresh(){const id=state.id,version=state.generation;if(!id)return;const data=await api("/api/session?id="+id);if(id===state.id&&version===state.generation){const wasRunning=state.data?.running;render(data);if(wasRunning&&!data.running)await list();}}
+async function refresh(){const id=state.id,version=state.generation;if(!id)return;const data=await fetchSession(id,true);if(id===state.id&&version===state.generation){const wasRunning=state.data?.running;render(data);if(wasRunning&&!data.running)await list();}}
 async function upload(files){
   if(state.view==="project")return projectUpload(files);
   if(!files.length)return;const id=state.id;if(!id)return;state.uploading++;controls();error("");
@@ -133,7 +143,7 @@ async function send(event){
   event.preventDefault();if(state.composing||state.busy||state.uploading||state.data?.running||!$("prompt").value.trim())return;
   state.busy=true;controls();error("");const id=state.id,text=$("prompt").value;
   const t=claimTarget();if(!t.ok){error(t.error);return;}
-  try{await api("/api/send",{id,text,mode:$("mode").value,files:state.pending.map(f=>f.id),target_mode:t.target_mode,target_claim:t.target_claim,target_segments:t.target_segments,dependent:t.dependent,target:t.target});$("prompt").value="";localStorage.removeItem("draft-"+id);state.pending=[];drafts.delete(id);pending();resize();await refresh();await list();$("conversation").scrollTop=$("conversation").scrollHeight;}
+  try{await api("/api/send",{id,text,mode:$("mode").value,files:state.pending.map(f=>f.id),target_mode:t.target_mode,target_claim:t.target_claim,target_segments:t.target_segments,dependent:t.dependent,target:t.target});$("prompt").value="";localStorage.removeItem("draft-"+id);state.pending=[];drafts.delete(id);pending();resize();await refresh();restartPoll();await list();$("conversation").scrollTop=$("conversation").scrollHeight;}
   catch(e){error(e.message);}finally{state.busy=false;controls();$("prompt").focus();}
 }
 $("composer").onsubmit=send;
@@ -150,9 +160,20 @@ document.addEventListener("drop",event=>{drag=0;$("drop-overlay").hidden=true;if
 $("new-chat").onclick=()=>create().catch(e=>error(e.message));$("menu").onclick=()=>document.body.classList.toggle("sidebar-open");
 $("new-project").onclick=()=>createProject().catch(e=>error(e.message));
 $("mode").onchange=controls;$("stop").onclick=async()=>{try{await api("/api/stop",{id:state.id});await refresh();}catch(e){error(e.message);}};
-$("shutdown").onclick=async()=>{if(state.data?.running&&!confirm("진행 중인 응답을 중지하고 프로그램을 종료할까요?"))return;try{await api("/api/shutdown",{});clearInterval(timer);$("composer").hidden=true;error("프로그램을 종료했습니다. 다시 이용하려면 바탕화면 실행기를 더블클릭하세요.");}catch(e){error(e.message);}};
+$("shutdown").onclick=async()=>{if(state.data?.running&&!confirm("진행 중인 응답을 중지하고 프로그램을 종료할까요?"))return;try{await api("/api/shutdown",{});stopPolling();$("composer").hidden=true;error("프로그램을 종료했습니다. 다시 이용하려면 바탕화면 실행기를 더블클릭하세요.");}catch(e){error(e.message);}};
 for(const button of document.querySelectorAll("[data-prompt]"))button.onclick=()=>{$("prompt").value=button.dataset.prompt;resize();controls();$("prompt").focus();};
-const timer=setInterval(()=>{if(!state.busy)refresh().catch(()=>error("프로그램에 연결할 수 없습니다. 실행기를 다시 더블클릭해 주세요."));},700);
+let timer=null,polling=true;
+function poll(){
+  if(!polling)return;
+  const wait=state.data?.running?700:2500;      // 작업 중에는 촘촘히, 대기 중에는 느슨하게
+  timer=setTimeout(async()=>{
+    if(!state.busy){try{await refresh();}catch(e){error("프로그램에 연결할 수 없습니다. 실행기를 다시 더블클릭해 주세요.");}}
+    poll();
+  },wait);
+}
+function stopPolling(){polling=false;clearTimeout(timer);}
+function restartPoll(){clearTimeout(timer);poll();}     // 전송·재개 직후에는 대기 간격을 기다리지 않는다
+poll();
 (async()=>{try{state.project=localStorage.getItem("claim-project")||null;const sessions=await list();const saved=localStorage.getItem("claim-session");if(sessions.length)await open(sessions.find(s=>s.id===saved)?.id||sessions[0].id);else await create(null);}catch(e){error(e.message);}})();
 
 // ---- 프로젝트: 지침·USER_LOCK·소스 파일을 미리 설정해 두는 폴더. 속한 대화의 매 요청에 자동으로 전달된다.
@@ -239,6 +260,6 @@ $("resume-form").onsubmit=async event=>{
   if(kind!=="accept_unverified"&&!text){error("결정 내용을 입력하세요.");return;}
   state.busy=true;controls();error("");
   try{await api("/api/resume",{id:state.id,kind:state.pending.length&&kind!=="none"&&kind!=="accept_unverified"?"restart":kind,text,files:state.pending.map(f=>f.id),scope:$("resume-scope").hidden?"":$("resume-scope").value});
-    $("resume-text").value="";state.pending=[];pending();await refresh();$("conversation").scrollTop=$("conversation").scrollHeight;}
+    $("resume-text").value="";state.pending=[];pending();await refresh();restartPoll();$("conversation").scrollTop=$("conversation").scrollHeight;}
   catch(e){error(e.message);}finally{state.busy=false;controls();}
 };

@@ -151,12 +151,67 @@ class PipelineEngine:
         self._bundle = bundle
         return state
 
+    def scope_guard(self, state: RunState, bundle: MaterialBundle) -> None:
+        """Refuse a dependent-claim request that has no independent claim to hang it on — before any model call.
+
+        A dependent fragment ('제8항에 있어서, …') carries neither its parent chain nor the top-level structure, so
+        feeding it to the INDEPENDENT stages produces a claim whose 주골격 is missing and which every downstream gate
+        must reject. That verdict used to arrive after the whole pipeline had run. It is decided here instead, so the
+        run stops with an actionable reason and zero calls.
+        """
+        req = RunRequest.model_validate(state.request)
+        c = state.candidate
+        if req.request_mode == RequestMode.REVIEW_ONLY or not req.dependent:
+            return
+        if c.draft_claim_lock or c.final_claim_lock:
+            return                      # this run already produced the root claim the dependent set hangs on
+        text = bundle.claim_file_text()
+        if not text or not text.strip():
+            return                      # authoring from raw material: claim 1 is written here first, then the set
+        try:
+            claims = parse_claim_set(text)
+        except ClaimParseError:
+            return                      # not a claim document; it stays ordinary material
+        if not claims:
+            return
+
+        def halt(reason: str, message: str, issues: list[str]) -> None:
+            raise PipelineHalt(Halt(
+                stage=Stage.ARCHITECT.value, role="engine", kind="BLOCK", reason_code=reason, message=message,
+                open_issues=[{"kind": "SCOPE", "code": reason, "text": t} for t in issues],
+            ))
+
+        if not any(x.is_independent for x in claims):
+            numbers = ", ".join(f"제{x.claim_no}항" for x in claims)
+            missing = sorted({p for x in claims for p in x.parent_nos} - {x.claim_no for x in claims})
+            halt(
+                "INDEPENDENT_SCOPE_DEPENDENT_CLAIM_TEXT",
+                f"종속항 작성 요청인데 제공된 청구항이 종속항({numbers})뿐입니다. 부모항 "
+                + (", ".join(f"제{n}항" for n in missing) or "제1항")
+                + " 문언을 함께 제공하거나, 같은 대화에서 독립항을 먼저 작성해 LOCK을 만든 뒤 종속항을 요청하세요. "
+                  "종속항 단편만으로 독립항 파이프라인을 실행하면 부모항 선행기재와 상위 구조가 빠져 주골격이 소실됩니다.",
+                [f"제공된 청구항: {numbers}", f"누락된 부모항: {', '.join(f'제{n}항' for n in missing) or '없음'}"],
+            )
+        wanted = parse_target(req.dependent_target) or set()
+        by_no = {x.claim_no for x in claims}
+        broken = []
+        for no in sorted(wanted & by_no):
+            try:
+                parent_chain(claims, no, expand_multi=True)
+            except ClaimParseError as exc:
+                broken.append(f"제{no}항: {exc}")
+        if broken:
+            halt("DEPENDENT_PARENT_CHAIN_MISSING",
+                 "요청한 종속항의 부모항 체인을 제공된 청구항에서 복원할 수 없습니다. 인용된 항의 문언을 함께 제공해 주세요.",
+                 broken)
+
     def run(self, state: RunState) -> RunState:
         bundle = self._bundle or self._load_bundle(RunRequest.model_validate(state.request))
         self._bundle = bundle
         state.halt = None
         state.outcome = "RUNNING"
         try:
+            self.scope_guard(state, bundle)
             if state.stage == Stage.REVIEW_ONLY:
                 self._run_review_only(state, bundle)
             else:

@@ -1,6 +1,7 @@
 """Local HTTP boundaries and actual subprocess streaming, without API charges."""
 from __future__ import annotations
 
+import gzip
 import json
 import subprocess
 import sys
@@ -478,6 +479,78 @@ def test_sessions_endpoint_reports_code_version_busy_and_delete(workspace):
             call("/api/delete", {"id": sid})
         with call("/api/sessions") as response:
             assert json.load(response)["sessions"] == []
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+def test_live_log_is_sent_as_a_delta_and_resets_only_on_a_gap(workspace, request):
+    sid = workspace.create()["id"]
+    job = dict(done=True, log="", log_base=0)
+    workspace.jobs[sid] = job                       # a stand-in for a finished job: only its log matters here
+    request.addfinalizer(lambda: workspace.jobs.pop(sid, None))
+    job["log"] = "가" * 10
+    workspace.trim_log(job)
+    first = workspace.snapshot(sid)
+    assert first["log_reset"] and first["live_log"] == "가" * 10 and first["log_cursor"] == 10
+    job["log"] += "나" * 5 + "offline-web-secret"
+    workspace.trim_log(job)
+    delta = workspace.snapshot(sid, first["log_cursor"])
+    assert delta["live_log"] == "나" * 5 + "[API KEY]" and not delta["log_reset"]
+    assert delta["log_cursor"] == 10 + len(delta["live_log"])
+    assert workspace.snapshot(sid, delta["log_cursor"])["live_log"] == ""       # nothing new: an empty delta
+    # The window slides: a cursor that fell off the front gets the whole window back, never a stitched gap.
+    job["log"] += "다" * web.MAX_LIVE_LOG
+    workspace.trim_log(job)
+    over = workspace.snapshot(sid, 1)
+    assert over["log_reset"] and len(over["live_log"]) == web.MAX_LIVE_LOG
+    assert over["log_cursor"] == delta["log_cursor"] + web.MAX_LIVE_LOG
+    tail = workspace.snapshot(sid, over["log_cursor"] - 3)
+    assert tail["live_log"] == "다다다" and not tail["log_reset"]
+    assert workspace.snapshot(sid, 10**9)["log_reset"]                          # a cursor from an earlier job
+    fresh = workspace.snapshot(workspace.create()["id"], 0)                     # a session that never ran a job
+    assert fresh["live_log"] == "" and fresh["log_cursor"] == 0
+
+
+def test_polling_payload_stays_flat_while_the_log_grows(workspace, fake_chat):
+    server = web.Server(workspace)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    headers = {"X-Claim-Token": server.token, "Accept-Encoding": "gzip"}
+
+    def poll(sid, cursor=None):
+        """(bytes on the wire, bytes of JSON, parsed body)."""
+        path = f"/api/session?id={sid}" + (f"&log_from={cursor}" if cursor is not None else "")
+        with urlopen(Request(server.origin + path, headers=headers), timeout=3) as response:
+            raw = response.read()
+            body = gzip.decompress(raw) if response.headers.get("Content-Encoding") == "gzip" else raw
+            return len(raw), len(body), json.loads(body.decode("utf-8"))
+
+    try:
+        sid = workspace.create()["id"]
+        workspace.start(sid, {"text": "stop"})
+        wait_for(lambda: workspace.snapshot(sid)["running"])
+        job = workspace.jobs[sid]
+        with workspace.lock:
+            job["log"] += "긴 실시간 로그 " * 20000
+            workspace.trim_log(job)
+        wire_full, json_full, full = poll(sid)
+        assert full["log_reset"] and len(full["live_log"]) > 100000
+        assert json_full > 100000 and wire_full * 4 < json_full                 # gzip is applied on the wire
+        with workspace.lock:
+            job["log"] += "새 줄\n"
+            workspace.trim_log(job)
+        wire_delta, json_delta, delta = poll(sid, full["log_cursor"])
+        assert delta["live_log"] == "새 줄\n" and not delta["log_reset"]
+        assert json_delta < 2000 and json_delta * 50 < json_full                # payload no longer tracks log length
+        assert wire_delta < 1000
+        workspace.stop(sid)
+        wait_for(lambda: not workspace.snapshot(sid)["running"])
+        done = poll(sid, delta["log_cursor"])[2]                                # the console tail of the stopped job
+        assert len(done["live_log"]) < 2000 and not done["log_reset"]
+        idle = poll(sid, done["log_cursor"])[2]                                 # a finished job stops re-sending it
+        assert idle["live_log"] == "" and idle["log_cursor"] == done["log_cursor"]
     finally:
         server.shutdown()
         server.server_close()
