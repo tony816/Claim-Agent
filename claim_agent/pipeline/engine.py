@@ -990,7 +990,12 @@ class PipelineEngine:
             try:
                 chains = parent_chain(all_claims, cl.claim_no, expand_multi=self.cfg.pipeline.expand_multi_dependent)
             except MultiDependentChain as exc:
-                raise PipelineHalt(Halt(stage=st.value, role="engine", kind="BLOCK", reason_code="OTHER", message=f"MULTI_DEPENDENT_CHAIN: {exc}")) from exc
+                raise PipelineHalt(Halt(
+                    stage=st.value, role="engine", kind="REVIEW", reason_code="OTHER",
+                    message=f"MULTI_DEPENDENT_CHAIN: {exc} — 다중 종속항은 대안 체인별로 blind·picture를 따로 실행해야 한다. "
+                            "`claim-agent resume <run_id> --expand-multi`(또는 pipeline.expand_multi_dependent: true)로 대안 체인 확장 실행을 승인하거나, 단일 인용으로 고쳐 --apply-meaning-fix 한다.",
+                    open_issues=[{"kind": "REVIEW", "code": "MULTI_DEPENDENT_CHAIN", "text": str(exc), "return_to": None}],
+                )) from exc
             dc = next((c["dc_id"] for c in cur.claims if c["claim_no"] == cl.claim_no), None)
             for k, chain in enumerate(chains):
                 tid = str(cl.claim_no) if len(chains) == 1 else f"{cl.claim_no}-alt{k + 1}"

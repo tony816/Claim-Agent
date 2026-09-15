@@ -40,6 +40,8 @@ def _rt(args, variant_path: str | None = None) -> Runtime:
     for flag, key in (("max_calls", "pipeline.max_calls"), ("max_total_tokens", "pipeline.max_total_tokens"), ("max_cost_usd", "pipeline.max_cost_usd")):
         if getattr(args, flag, None) is not None:
             overrides[key] = getattr(args, flag)
+    if getattr(args, "expand_multi", False):
+        overrides["pipeline.expand_multi_dependent"] = True
     return build_runtime(root, Path(args.config) if args.config else None, variant, overrides)
 
 
@@ -441,6 +443,7 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--max-calls", type=int, help="budget guard: halt before exceeding this many provider calls")
         sp.add_argument("--max-total-tokens", type=int, help="budget guard: halt once prompt+output+thoughts tokens exceed this")
         sp.add_argument("--max-cost-usd", type=float, help="budget guard: halt once the estimated cost exceeds this (needs telemetry.pricing)")
+        sp.add_argument("--expand-multi", action="store_true", help="reconstruct multi-dependent claims once per alternative parent chain (pipeline.expand_multi_dependent)")
 
     r = sub.add_parser("run", help="run the authoring/finalization pipeline")
     common_provider(r)
