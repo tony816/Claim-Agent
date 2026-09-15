@@ -2,14 +2,15 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
+from ..claim_scope import parse_target
 from ..config import AppConfig
 from ..models.contracts import contract_for
-from ..models.enums import ExecStatus, GateValue, NextStep, RequestMode, Scope, Status, StyleChangeMode
+from ..models.enums import ExecStatus, NextStep, RequestMode, Scope, Status, StyleChangeMode
 from ..models.envelope import ENVELOPE_JSON_SCHEMA, RoleEnvelope
 from ..models.ids import Identifiers, bump_dependent_design_revision, bump_dependent_revision, bump_design_revision, bump_revision, input_revision_id, record_id
 from ..models.request import MaterialBundle, RunRequest
@@ -24,7 +25,6 @@ from ..models.state import (
     Stage,
     TargetRecon,
 )
-from ..claim_scope import parse_target
 from ..provider.base import CallResult, CallSpec, GenParams, LLMProvider, ProviderError
 from ..roles.prompt import PromptAssembler
 from ..roles.registry import RoleRegistry
@@ -34,7 +34,7 @@ from ..store.runstore import RunStore
 from ..store.telemetry import TelemetryRow, TelemetryWriter, estimate_cost, now
 from . import packets
 from .blind_guard import BlindPacket
-from .claimtext import ClaimParseError, MultiDependentChain, claim_set_text, contains_user_lock, exact_sha256, parent_chain, parent_chain_text, parse_claim_set, validate_parent_refs
+from .claimtext import ClaimParseError, MultiDependentChain, contains_user_lock, exact_sha256, parent_chain, parent_chain_text, parse_claim_set, validate_parent_refs
 from .corpus_tool import ToolLog, make_tools
 from .locks import build_claim_lock, build_dependent_set_lock
 from .transitions import LOOP_KEY, Transition, decide
@@ -842,7 +842,7 @@ class PipelineEngine:
             try:
                 all_claims = parse_claim_set(root_text + "\n\n" + set_text)
             except ClaimParseError as exc:
-                raise PipelineHalt(Halt(stage=st.value, role="engine", kind="BLOCK", reason_code="OTHER", message=f"CLAIM_PARSE_FAILED: {exc}", record_id=rid))
+                raise PipelineHalt(Halt(stage=st.value, role="engine", kind="BLOCK", reason_code="OTHER", message=f"CLAIM_PARSE_FAILED: {exc}", record_id=rid)) from exc
             problems = validate_parent_refs(all_claims)
             if problems:
                 raise PipelineHalt(Halt(stage=st.value, role="engine", kind="BLOCK", reason_code="OTHER", message="인용관계 오류: " + "; ".join(problems), record_id=rid))
@@ -924,7 +924,7 @@ class PipelineEngine:
             try:
                 chains = parent_chain(all_claims, cl.claim_no, expand_multi=self.cfg.pipeline.expand_multi_dependent)
             except MultiDependentChain as exc:
-                raise PipelineHalt(Halt(stage=st.value, role="engine", kind="BLOCK", reason_code="OTHER", message=f"MULTI_DEPENDENT_CHAIN: {exc}"))
+                raise PipelineHalt(Halt(stage=st.value, role="engine", kind="BLOCK", reason_code="OTHER", message=f"MULTI_DEPENDENT_CHAIN: {exc}")) from exc
             dc = next((c["dc_id"] for c in cur.claims if c["claim_no"] == cl.claim_no), None)
             for k, chain in enumerate(chains):
                 tid = str(cl.claim_no) if len(chains) == 1 else f"{cl.claim_no}-alt{k + 1}"

@@ -12,8 +12,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .provider.base import CallSpec, GenParams, LLMProvider
 from .claim_scope import constrain_target
+from .provider.base import CallSpec, GenParams, LLMProvider
 
 Reviewer = Literal["syntax-scope-reviewer", "oa-strategy-reviewer", "claim-success-reviewer"]
 

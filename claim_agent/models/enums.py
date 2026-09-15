@@ -4,7 +4,7 @@ from __future__ import annotations
 from enum import Enum
 
 
-class StrEnum(str, Enum):
+class StrEnum(str, Enum):  # noqa: UP042 — keep str-mixin semantics used by pydantic dumps
     def __str__(self) -> str:  # pragma: no cover - trivial
         return str(self.value)
 

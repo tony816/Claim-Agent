@@ -242,10 +242,14 @@ def cmd_eval(args) -> int:
     if args.sub == "compare":
         a = json.loads(Path(args.a).read_text(encoding="utf-8"))
         b = json.loads(Path(args.b).read_text(encoding="utf-8"))
-        for ra, rb in zip(a["results"], b["results"]):
+        for ra, rb in zip(a["results"], b["results"], strict=False):
             print(f"{ra['case_id']}: {ra['variant_id']} passed={ra['passed']} tokens={ra['tokens']} | {rb['variant_id']} passed={rb['passed']} tokens={rb['tokens']}")
         return 0
     cases = [EvalCase.load(p.parent) for p in sorted((eval_dir / "cases").glob("*/request.yaml")) if args.all or p.parent.name == args.case]
+    if getattr(args, "replay_only", False) and not args.replay and not args.record:
+        for case in [c for c in cases if not c.fixtures_dir]:
+            print(f"{case.case_id}: SKIP (no fixtures; --replay-only)")
+        cases = [c for c in cases if c.fixtures_dir]
     if not cases:
         raise SystemExit("no eval case matched")
     variants = [Variant.default()]
@@ -490,6 +494,7 @@ def build_parser() -> argparse.ArgumentParser:
     er.add_argument("--all", action="store_true")
     er.add_argument("--baseline", action="store_true")
     er.add_argument("--shadow", action="store_true")
+    er.add_argument("--replay-only", action="store_true", help="skip cases without recorded fixtures (CI mode; never calls the API)")
     er.add_argument("--out")
     es.add_parser("list")
     ec = es.add_parser("compare")

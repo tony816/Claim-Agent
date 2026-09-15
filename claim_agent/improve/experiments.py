@@ -26,7 +26,7 @@ class Variant:
         return f"{self.name}-{sha256_text(blob)[:8]}"
 
     @classmethod
-    def load(cls, path: Path) -> "Variant":
+    def load(cls, path: Path) -> Variant:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         suffix = {}
         for role, val in (data.get("prompt_suffix") or {}).items():
@@ -43,7 +43,7 @@ class Variant:
         return cls(name=data.get("name") or path.stem, description=data.get("description", ""), overrides=data.get("overrides") or {}, prompt_suffix=suffix, lessons_include=include, path=path)
 
     @classmethod
-    def default(cls) -> "Variant":
+    def default(cls) -> Variant:
         return cls(name="default")
 
 

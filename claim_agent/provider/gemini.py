@@ -5,13 +5,13 @@ import os
 import ssl
 import sys
 import time
-from types import SimpleNamespace
 import uuid
+from types import SimpleNamespace
 from typing import Any
 
+from ..live_events import EventWriter, visible_text
 from .base import CallResult, CallSpec, ProviderError, parse_json_text
 from .cache import CacheManager
-from ..live_events import EventWriter, visible_text
 
 THINKING_BUDGET_FALLBACK = {"MINIMAL": 512, "LOW": 1024, "MEDIUM": 8192, "HIGH": -1}
 

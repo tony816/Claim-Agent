@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 _WRITE_LOCK = threading.Lock()
@@ -28,7 +28,7 @@ class EventWriter:
         path.parent.mkdir(parents=True, exist_ok=True)
 
     @classmethod
-    def from_env(cls, api_key_env: str = "GEMINI_API_KEY") -> "EventWriter | None":
+    def from_env(cls, api_key_env: str = "GEMINI_API_KEY") -> EventWriter | None:
         path = os.environ.get("CLAIM_AGENT_EVENT_LOG") or os.environ.get("CLAIM_COPA_EVENT_LOG")
         if not path:
             return None

@@ -256,7 +256,6 @@ def build_rca(store: RunStore, run_id: str, feedback: FeedbackReport | None = No
     if rep.fault is not None:
         fb = feedback or build_feedback(store.runs_dir)
         gate = next(iter(rep.fault.gates), None)
-        reason = rep.fault.reason_code or (gate and rep.fault.gates.get(gate)) or rep.fault.kind
         best = None
         for card in fb.pattern_cards:
             if card["role"] != rep.fault.role:

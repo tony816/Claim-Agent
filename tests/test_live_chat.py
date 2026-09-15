@@ -3,9 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
-from types import SimpleNamespace
 import sys
+from types import SimpleNamespace
 
 from claim_agent.chat import generate_turn, user_message
 from claim_agent.live_events import EventReader, EventWriter, visible_text
@@ -101,8 +100,9 @@ def test_chat_retains_roles_and_attachments(tmp_path):
 
 
 def test_tui_chat_stream_and_auto_collapse(tmp_path, monkeypatch):
-    from claim_agent.tui import ClaimAgentApp, Composer
     from textual.widgets import TextArea
+
+    from claim_agent.tui import ClaimAgentApp, Composer
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     script = tmp_path / "fake_chat.py"
     script.write_text('''import json, os, sys, time

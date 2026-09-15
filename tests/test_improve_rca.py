@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from claim_agent.improve.feedback import build_feedback, detect_alerts
+from claim_agent.improve.feedback import build_feedback
 from claim_agent.improve.lessons import LessonStore, propose_from_feedback, propose_with_llm
 from claim_agent.improve.rca import build_rca
 from claim_agent.provider.base import CallResult

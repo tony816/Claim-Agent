@@ -4,13 +4,13 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import time
-from urllib.request import Request, urlopen
-from urllib.parse import urlsplit
 import webbrowser
+from pathlib import Path
+from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 
 
 def existing_server(metadata: Path) -> str | None:
@@ -32,7 +32,7 @@ def existing_server(metadata: Path) -> str | None:
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
     os.chdir(root)
-    if sys.version_info < (3, 11):
+    if sys.version_info < (3, 11):  # noqa: UP036 — user-facing guard for old interpreters
         print("Python 3.11 이상을 설치해 주세요.")
         return 1
     metadata = root / ".tui" / "web" / "server.json"

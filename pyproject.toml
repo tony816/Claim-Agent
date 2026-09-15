@@ -38,3 +38,23 @@ include = ["claim_agent*", "claim_copa*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["live: requires GEMINI_API_KEY and network"]
+
+[tool.ruff]
+line-length = 200
+target-version = "py311"
+extend-exclude = ["eval", "runs", ".tui", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501", "E741"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["claim_agent", "claim_copa", "tests"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+check_untyped_defs = false
+warn_unused_ignores = false
+follow_imports = "silent"
+exclude = ["tests/", "scripts/", "eval/"]

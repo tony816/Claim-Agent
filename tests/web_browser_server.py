@@ -1,10 +1,10 @@
 """Disposable offline server for web_browser.cjs; never calls Gemini."""
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from claim_agent.web import Server, Workspace

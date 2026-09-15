@@ -1,8 +1,9 @@
 """Restricted corpus tools exposed to claim-style-adjuster (automatic function calling)."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from ..sources.corpus import MAX_FRAGMENTS, CorpusIndex, is_forbidden_query
 from ..sources.registry import SourceSet

@@ -16,6 +16,7 @@ from claim_agent.provider.gemini import GeminiProvider
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows certificate store")
 def test_make_client_uses_verified_windows_trust_store(monkeypatch):
     from google import genai
+
     from claim_agent.provider.gemini import make_client
 
     captured = {}

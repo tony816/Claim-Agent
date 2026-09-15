@@ -65,8 +65,8 @@ def make_provider(rt: Runtime, mode: str = "gemini", fixtures: Path | None = Non
         if fixtures is None:
             raise ValueError("--replay requires a fixtures directory")
         return ReplayProvider(fixtures, strict=strict_replay)
-    from .provider.gemini import GeminiProvider, make_client
     from .live_events import EventWriter
+    from .provider.gemini import GeminiProvider, make_client
 
     client = make_client(rt.cfg.model.api_key_env, api_key)
     cache = CacheManager(client, rt.cfg.path("runs_dir") / ".cache-registry.json", rt.cfg.cache.ttl, rt.cfg.cache.enabled)

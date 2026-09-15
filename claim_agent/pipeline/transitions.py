@@ -25,7 +25,7 @@ class Transition:
 
 def _gate_return(env: RoleEnvelope) -> NextStep | None:
     """A RETURN_TO_* value carried in a gate (e.g. CLAIM_STYLE_GATE: RETURN_TO_DRAFTER)."""
-    for name, val in env.gates.present().items():
+    for _name, val in env.gates.present().items():
         if val.startswith("RETURN_TO_"):
             try:
                 return NextStep(val)

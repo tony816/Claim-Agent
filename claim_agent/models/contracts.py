@@ -5,8 +5,8 @@ orchestrator never relies on the LLM's summary of its own gates.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 from .enums import CandidateClass, ExecStatus, FinalizedStatus, GateValue, RequestMode, Scope, Status
 from .envelope import RoleEnvelope

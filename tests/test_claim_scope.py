@@ -1,6 +1,6 @@
 import pytest
 
-from claim_agent.claim_scope import parse_target, constrain_target
+from claim_agent.claim_scope import constrain_target, parse_target
 from claim_agent.provider.scripted import ScriptedProvider
 from claim_agent.routing import classify_request
 from tests import scripted_roles as R

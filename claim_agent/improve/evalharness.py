@@ -22,7 +22,7 @@ class EvalCase:
     fixtures_dir: Path | None = None
 
     @classmethod
-    def load(cls, case_dir: Path) -> "EvalCase":
+    def load(cls, case_dir: Path) -> EvalCase:
         req = RunRequest.from_yaml(case_dir / "request.yaml")
         exp_path = case_dir / "expected.yaml"
         expected = yaml.safe_load(exp_path.read_text(encoding="utf-8")) if exp_path.exists() else {}

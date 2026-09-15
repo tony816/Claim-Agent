@@ -32,7 +32,7 @@ class RunRequest(BaseModel):
     review_scope: str = "INDEPENDENT"
 
     @classmethod
-    def from_yaml(cls, path: Path) -> "RunRequest":
+    def from_yaml(cls, path: Path) -> RunRequest:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         base = path.parent
         for key in ("invention_sources", "drawings", "prior_art"):
@@ -72,7 +72,7 @@ class MaterialBundle:
     user_lock: str | None = None
 
     @classmethod
-    def load(cls, req: RunRequest) -> "MaterialBundle":
+    def load(cls, req: RunRequest) -> MaterialBundle:
         items: list[MaterialItem] = []
         for cat, paths in (
             ("invention", req.invention_sources),

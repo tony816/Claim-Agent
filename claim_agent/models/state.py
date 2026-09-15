@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from .enums import RequestMode, StyleChangeMode
 
 
-class Stage(str, Enum):
+class Stage(str, Enum):  # noqa: UP042
     ARCHITECT = "ARCHITECT"
     DRAFT = "DRAFT"
     STYLE = "STYLE"

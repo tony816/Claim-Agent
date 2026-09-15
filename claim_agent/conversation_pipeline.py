@@ -7,8 +7,8 @@ import json
 import re
 from pathlib import Path
 
-from .models.request import IMAGE_EXT, RunRequest
 from .claim_scope import constrain_target
+from .models.request import IMAGE_EXT, RunRequest
 from .pipeline.engine import Decision
 from .routing import RouteDecision
 from .tui_support import validate_attachment

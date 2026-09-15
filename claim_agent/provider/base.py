@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from ..models.ids import sha256_text
 
@@ -88,7 +89,7 @@ class CallResult:
         }
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "CallResult":
+    def from_dict(cls, d: dict[str, Any]) -> CallResult:
         return cls(
             text=d.get("text", ""),
             parsed=d.get("parsed"),

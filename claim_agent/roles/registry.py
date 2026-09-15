@@ -60,7 +60,7 @@ class RoleRegistry:
         self.roles = roles
 
     @classmethod
-    def load(cls, roles_dir: Path) -> "RoleRegistry":
+    def load(cls, roles_dir: Path) -> RoleRegistry:
         roles: dict[str, RoleSpec] = {}
         for p in sorted(roles_dir.glob("*.md")):
             spec = load_role(p)

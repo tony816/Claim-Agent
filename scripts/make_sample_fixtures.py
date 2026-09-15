@@ -16,11 +16,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 
+import scripted_roles as R  # noqa: E402
+
 from claim_agent.models.request import RunRequest  # noqa: E402
 from claim_agent.provider.replay import RecordingProvider  # noqa: E402
 from claim_agent.provider.scripted import ScriptedProvider  # noqa: E402
 from claim_agent.runtime import build_runtime  # noqa: E402
-import scripted_roles as R  # noqa: E402
 
 
 def main() -> None:

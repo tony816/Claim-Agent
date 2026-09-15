@@ -4,10 +4,10 @@ from __future__ import annotations
 import base64
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import uuid
+from pathlib import Path
 
 
 def pick_files() -> dict:

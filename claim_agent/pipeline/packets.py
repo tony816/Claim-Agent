@@ -9,9 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .. import EXECUTION_PROFILE, PROTOCOL_VERSION
-from ..models.enums import RequestMode, Scope, StyleChangeMode
+from ..models.enums import Scope, StyleChangeMode
 from ..models.ids import Identifiers
-from ..models.request import MaterialBundle, MaterialItem
+from ..models.request import MaterialBundle
 from ..models.state import RunState
 from ..provider.base import ImagePart
 from .claimtext import flatten

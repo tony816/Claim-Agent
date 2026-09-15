@@ -56,7 +56,7 @@ class CorpusIndex:
     claims: list[CorpusClaim] = field(default_factory=list)
 
     @classmethod
-    def parse(cls, text: str) -> "CorpusIndex":
+    def parse(cls, text: str) -> CorpusIndex:
         lines = text.splitlines()
         claims: list[CorpusClaim] = []
         ex_id: str | None = None

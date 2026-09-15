@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import importlib.util
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 
 def main() -> int:
-    if sys.version_info < (3, 11):
+    if sys.version_info < (3, 11):  # noqa: UP036 — user-facing guard for old interpreters
         print("Python 3.11 이상을 설치해 주세요.")
         return 1
     root = Path(__file__).resolve().parents[1]

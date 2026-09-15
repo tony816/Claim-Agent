@@ -6,7 +6,8 @@ identifiers written in the packet header, so tests never hard-code ids.
 from __future__ import annotations
 
 import re
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from claim_agent.provider.base import CallSpec
 

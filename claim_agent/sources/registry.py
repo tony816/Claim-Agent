@@ -37,7 +37,7 @@ class SourceSet:
         self.sources_dir = sources_dir
 
     @classmethod
-    def load(cls, sources_dir: Path, project_root: Path | None = None) -> "SourceSet":
+    def load(cls, sources_dir: Path, project_root: Path | None = None) -> SourceSet:
         root = project_root or sources_dir.parent
         files: dict[str, SourceFile] = {}
         missing = []

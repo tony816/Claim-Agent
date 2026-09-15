@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pytest
 from textual.events import Paste
-from textual.widgets import Button, DataTable, Input, Select, TabbedContent, TextArea
+from textual.widgets import Button, DataTable, Select, TextArea
 
 from claim_agent.models.request import RunRequest
 from claim_agent.tui import ClaimAgentApp, Composer

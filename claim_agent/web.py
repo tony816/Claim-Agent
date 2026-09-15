@@ -2,20 +2,20 @@
 from __future__ import annotations
 
 import argparse
-from http.cookies import SimpleCookie
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
-from pathlib import Path
 import re
 import secrets
 import subprocess
 import sys
 import threading
 import time
-from urllib.parse import parse_qs, urlsplit
 import uuid
 import webbrowser
+from http.cookies import SimpleCookie
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 from .config import load_config
 from .live_events import EventReader
@@ -104,7 +104,7 @@ class Workspace:
                     path.read_text(encoding="utf-8-sig")
             except (ValueError, UnicodeError):
                 path.unlink()
-                raise ValueError("지원 형식: UTF-8 텍스트, MD, JSON, YAML, CSV, PNG, JPG, WEBP")
+                raise ValueError("지원 형식: UTF-8 텍스트, MD, JSON, YAML, CSV, PNG, JPG, WEBP") from None
             item = dict(id=fid, name=name, size=len(data))
             self.sessions[sid]["files"].append(item)
             self.persist(self.sessions[sid])

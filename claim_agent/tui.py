@@ -5,11 +5,11 @@ import argparse
 import asyncio
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import time
 import uuid
+from pathlib import Path
 
 from textual import events, work
 from textual.app import App, ComposeResult
@@ -597,7 +597,7 @@ class ClaimAgentApp(App):
             self.process.terminate()
             try:
                 await asyncio.wait_for(self.process.wait(), timeout=3)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self.process.kill()
                 await self.process.wait()
         self.add_log("중지 요청 · 이미 전송된 API 요청에는 사용량이 발생할 수 있습니다.")

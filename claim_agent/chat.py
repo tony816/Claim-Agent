@@ -4,8 +4,8 @@ from __future__ import annotations
 import argparse
 import base64
 import json
-from pathlib import Path
 import uuid
+from pathlib import Path
 
 from .config import load_config
 from .live_events import EventWriter, visible_text

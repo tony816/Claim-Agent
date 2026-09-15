@@ -1,7 +1,6 @@
 """Shared context is reused losslessly; gates and fresh blind inputs stay intact."""
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from types import SimpleNamespace
 
 import pytest
 
@@ -9,9 +8,8 @@ from claim_agent.provider.base import ImagePart, ProviderError
 from claim_agent.provider.cache import CacheManager
 from claim_agent.provider.gemini import GeminiProvider
 from claim_agent.provider.scripted import ScriptedProvider
-from claim_agent.pipeline import packets
-from tests.test_gemini_provider import _client, _spec
 from tests import scripted_roles as R
+from tests.test_gemini_provider import _client, _spec
 
 
 def shared_spec(**overrides):

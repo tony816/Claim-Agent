@@ -42,7 +42,7 @@ class Lesson:
         return yaml.safe_dump(asdict(self), allow_unicode=True, sort_keys=False)
 
     @classmethod
-    def from_yaml(cls, text: str) -> "Lesson":
+    def from_yaml(cls, text: str) -> Lesson:
         data = yaml.safe_load(text) or {}
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 

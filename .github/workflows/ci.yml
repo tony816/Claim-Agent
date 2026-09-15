@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" ruff mypy
+      - name: Lint (ruff)
+        run: ruff check claim_agent tests scripts
+      - name: Role-file derivatives are in sync with .claude/agents
+        run: python scripts/build_role_derivatives.py --check
+      - name: Contract tokens
+        run: claim-agent doctor --contracts
+      - name: Unit and state-machine tests
+        run: python -m pytest -q
+      - name: Replay eval (offline fixtures only)
+        run: claim-agent eval run --all --replay-only
+      - name: Type check (advisory until the error count reaches zero)
+        continue-on-error: true
+        run: mypy claim_agent
