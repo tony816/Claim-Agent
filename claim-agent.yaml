@@ -27,6 +27,11 @@ pipeline:
   max_concurrency: 3
   expand_multi_dependent: false
   retry: {max_attempts: 3, backoff_s: [2, 8, 20]}
+  # Budget guard (null = unlimited). Checked before every call; the run halts with HALTED_BUDGET_LIMIT
+  # and can be resumed after raising the limit (`claim-agent resume <run_id> --max-calls N`).
+  max_calls: 60
+  max_total_tokens: null
+  max_cost_usd: null
 
 paths:
   roles_dir: .claude/agents
@@ -41,4 +46,8 @@ lessons:
 
 telemetry:
   enabled: true
-  pricing: {}             # e.g. {gemini-3.8-flash: {input_per_m: 0.3, cached_per_m: 0.03, output_per_m: 2.5}}
+  # USD per 1M tokens. The values below are EXAMPLES from public price lists at the time of writing —
+  # confirm against https://ai.google.dev/pricing and add the model you actually use (doctor warns when missing).
+  pricing:
+    gemini-2.5-flash: {input_per_m: 0.30, cached_per_m: 0.075, output_per_m: 2.50}
+    gemini-2.5-pro:   {input_per_m: 1.25, cached_per_m: 0.31,  output_per_m: 10.00}

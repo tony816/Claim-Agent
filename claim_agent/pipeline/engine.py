@@ -67,6 +67,24 @@ class PipelineHalt(Exception):
         self.halt = halt
 
 
+def budget_violation(usage: dict[str, float], cfg: AppConfig) -> str | None:
+    """Message when the next call would exceed pipeline.max_calls, or accumulated tokens/cost already exceed their caps.
+
+    Checked before every provider call, so a completed call is never discarded; token and cost caps
+    can therefore be exceeded by at most one call.
+    """
+    pc = cfg.pipeline
+    calls = int(usage.get("calls", 0))
+    if pc.max_calls is not None and calls >= pc.max_calls:
+        return f"호출 수 한도 도달: {calls}/{pc.max_calls} (pipeline.max_calls)"
+    tokens = int(usage.get("prompt_tokens", 0) + usage.get("output_tokens", 0) + usage.get("thoughts_tokens", 0))
+    if pc.max_total_tokens is not None and tokens > pc.max_total_tokens:
+        return f"토큰 한도 초과: {tokens:,}/{pc.max_total_tokens:,} (pipeline.max_total_tokens)"
+    if pc.max_cost_usd is not None and usage.get("cost_usd", 0) > pc.max_cost_usd:
+        return f"비용 한도 초과: ${usage.get('cost_usd', 0):.4f}/${pc.max_cost_usd:.4f} (pipeline.max_cost_usd)"
+    return None
+
+
 @dataclass
 class Decision:
     text: str = ""
@@ -103,6 +121,7 @@ class PipelineEngine:
         self._bundle: MaterialBundle | None = None
         self._tool_logs: dict[str, ToolLog] = {}
         self._lock = threading.Lock()
+        self._pending_repairs: list[tuple[str, str, CallResult]] = []
 
     # ================================================================== run lifecycle
     def start(self, request: RunRequest, run_id: str | None = None) -> RunState:
@@ -260,6 +279,7 @@ class PipelineEngine:
         prompt = self.assembler.assemble(spec_role, scope)
         rc = self.cfg.role(role)
         contract = contract_for(role, scope)
+        self._guard_budget(state, stage)
         with self._lock:
             state.call_seq += 1
             seq = state.call_seq
@@ -278,6 +298,7 @@ class PipelineEngine:
             self._telemetry_tool(state, phase_a, res_a, ids, rid, tool_log)
             packet_text += "\n### 보조 소스 사용 기록 (오케스트레이터 도구 로그; 이 내용을 그대로 반영)\n\n" + tool_log.render() + "\n"
             self._tool_logs[rid] = tool_log
+            self._guard_budget(state, stage)
         spec = CallSpec(
             role=role, scope=scope.value, model=self.cfg.model_for(role), system_instruction=prompt.system_instruction,
             packet_text=packet_text, sources_block=prompt.sources_block, images=list(packet.images), json_schema=ENVELOPE_JSON_SCHEMA,
@@ -345,6 +366,9 @@ class PipelineEngine:
         with self._lock:
             state.records[rid] = ref
             self._telemetry(state, spec, result, env, ids, loop_index, repair_used)
+            for r_stage, r_model, r_res in self._pending_repairs:
+                self._account(state, r_stage, r_model, r_res.usage, r_res.latency_ms, r_res.cache_hit)
+            self._pending_repairs.clear()
             if self.shadow_hook is not None and not blind:
                 try:
                     self.shadow_hook(spec, env, state)
@@ -354,6 +378,12 @@ class PipelineEngine:
         if scope_problem:
             raise PipelineHalt(Halt(stage=stage.value, role=role, kind="REVIEW", reason_code="OTHER", message="REQUEST_SCOPE_MISMATCH: " + scope_problem, record_id=rid))
         return env, ref
+
+    def _guard_budget(self, state: RunState, stage: Stage) -> None:
+        with self._lock:
+            over = budget_violation(state.usage, self.cfg)
+        if over:
+            raise PipelineHalt(Halt(stage=stage.value, role="engine", kind="BUDGET_LIMIT", message=over + " — 한도를 올려 `claim-agent resume <run_id> --max-calls N --max-cost-usd X`로 재개"))
 
     def _generate_validated(self, spec: CallSpec, contract, ids: Identifiers, rid: str, expected_exact: str | None, preloaded: list[str], blind: bool):
         from .verify import cross_check
@@ -381,9 +411,15 @@ class PipelineEngine:
                 cache_packet_text=spec.cache_packet_text, cache_images=spec.cache_images,
             )
             result = self.provider.generate(repair_spec)
+            with self._lock:
+                self._account_result(spec.stage, spec.model, result)
             env = self._parse(result)
         halt_kind = "ENVELOPE_INVALID" if env is None else "ENVELOPE_REPORT_MISMATCH"
         raise PipelineHalt(Halt(stage=spec.stage, role=spec.role, kind=halt_kind, message="; ".join(problems) or "envelope invalid", record_id=rid))
+
+    def _account_result(self, stage: str, model: str, result: CallResult) -> None:
+        """Account a provider call that produced no telemetry row of its own (repair attempts)."""
+        self._pending_repairs.append((stage, model, result))
 
     @staticmethod
     def _parse(result: CallResult) -> RoleEnvelope | None:
@@ -415,6 +451,15 @@ class PipelineEngine:
             record_id=(spec.meta or {}).get("record_id"),
         )
         TelemetryWriter(self.store.telemetry_path(state.run_id), self.cfg.telemetry.enabled).write(row)
+        self._account(state, spec.stage, spec.model, usage, result.latency_ms, result.cache_hit)
+
+    def _account(self, state: RunState, stage: str, model: str, usage: dict[str, int], latency_ms: int, cache_hit: bool) -> None:
+        cost = estimate_cost(model, usage, self.cfg.telemetry.pricing)
+        state.add_usage(stage, {
+            "calls": 1, "prompt_tokens": usage.get("prompt_tokens", 0), "cached_tokens": usage.get("cached_tokens", 0),
+            "output_tokens": usage.get("output_tokens", 0), "thoughts_tokens": usage.get("thoughts_tokens", 0),
+            "latency_ms": latency_ms, "cost_usd": cost or 0.0, "cache_hits": 1 if cache_hit else 0, "unpriced_calls": 0 if cost is not None else 1,
+        })
 
     def _telemetry_tool(self, state: RunState, spec: CallSpec, result: CallResult, ids: Identifiers, record_id: str, tool_log: ToolLog) -> None:
         """One row for the tool-phase call itself, then one row per restricted corpus tool call.
@@ -449,6 +494,7 @@ class PipelineEngine:
                 tool={"calls": len(tool_log.calls), "activated": tool_log.used},
             )
         )
+        self._account(state, spec.stage, spec.model, usage, result.latency_ms, result.cache_hit)
         for call in tool_log.calls:
             results = call.get("results") or []
             writer.write(

@@ -46,6 +46,10 @@ class PipelineConfig(BaseModel):
     max_concurrency: int = 3
     expand_multi_dependent: bool = False
     retry: RetryConfig = Field(default_factory=RetryConfig)
+    # Budget guard: a run halts with HALTED_BUDGET_LIMIT when any limit is exceeded (None = unlimited).
+    max_calls: int | None = None
+    max_total_tokens: int | None = None       # prompt + output + thoughts, cached tokens included
+    max_cost_usd: float | None = None         # requires telemetry.pricing for the model
 
 
 class PathsConfig(BaseModel):

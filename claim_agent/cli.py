@@ -20,7 +20,7 @@ from .runtime import Runtime, build_runtime, make_provider, make_shadow_hook
 from .store.report import render_report
 from .store.telemetry import read_telemetry
 
-EXIT = {"DRAFT_CLAIM_LOCK": 0, "FINAL_CLAIM_LOCK": 0, "REVIEW_ONLY_DONE": 0, "HALTED_REVIEW": 2, "HALTED_USER_DECISION": 2, "HALTED_BLOCK": 3, "HALTED_UNVERIFIED": 3, "HALTED_LOOP_LIMIT": 4, "HALTED_ENVELOPE_INVALID": 5, "HALTED_ENVELOPE_REPORT_MISMATCH": 5, "HALTED_ERROR": 1}
+EXIT = {"DRAFT_CLAIM_LOCK": 0, "FINAL_CLAIM_LOCK": 0, "REVIEW_ONLY_DONE": 0, "HALTED_REVIEW": 2, "HALTED_USER_DECISION": 2, "HALTED_BLOCK": 3, "HALTED_UNVERIFIED": 3, "HALTED_LOOP_LIMIT": 4, "HALTED_BUDGET_LIMIT": 4, "HALTED_ENVELOPE_INVALID": 5, "HALTED_ENVELOPE_REPORT_MISMATCH": 5, "HALTED_ERROR": 1}
 
 
 def _exit_code(outcome: str) -> int:
@@ -37,6 +37,9 @@ def _rt(args, variant_path: str | None = None) -> Runtime:
         overrides["model.default"] = args.model
     if getattr(args, "no_cache", False):
         overrides["cache.enabled"] = False
+    for flag, key in (("max_calls", "pipeline.max_calls"), ("max_total_tokens", "pipeline.max_total_tokens"), ("max_cost_usd", "pipeline.max_cost_usd")):
+        if getattr(args, flag, None) is not None:
+            overrides[key] = getattr(args, flag)
     return build_runtime(root, Path(args.config) if args.config else None, variant, overrides)
 
 
@@ -71,6 +74,10 @@ def _print_summary(state) -> None:
         print(f"  halt: {h.kind} @ {h.stage} ({h.role}) {h.reason_code or ''} {h.message[:200]}")
         for o in h.open_issues[:5]:
             print(f"   - [{o.get('kind')}] {o.get('text','')[:160]}")
+    u = state.usage
+    if u.get("calls"):
+        cost = "N/A" if u.get("unpriced_calls") else f"${u.get('cost_usd', 0):.4f}"
+        print(f"  usage: {int(u['calls'])} calls, {u.get('latency_ms', 0) / 1000:.0f}s, in {int(u.get('prompt_tokens', 0)):,} (cached {int(u.get('cached_tokens', 0)):,}) / out {int(u.get('output_tokens', 0) + u.get('thoughts_tokens', 0)):,} tokens, cost {cost}")
     print(f"  report: runs/{state.run_id}/report.md")
 
 
@@ -431,6 +438,9 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--strict-replay", action="store_true")
         sp.add_argument("--record", help="fixtures dir to record live responses")
         sp.add_argument("--variant", help="experiments/<name>.yaml")
+        sp.add_argument("--max-calls", type=int, help="budget guard: halt before exceeding this many provider calls")
+        sp.add_argument("--max-total-tokens", type=int, help="budget guard: halt once prompt+output+thoughts tokens exceed this")
+        sp.add_argument("--max-cost-usd", type=float, help="budget guard: halt once the estimated cost exceeds this (needs telemetry.pricing)")
 
     r = sub.add_parser("run", help="run the authoring/finalization pipeline")
     common_provider(r)

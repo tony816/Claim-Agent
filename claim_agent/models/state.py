@@ -157,6 +157,13 @@ class RunState(BaseModel):
     updated_at: float = Field(default_factory=time.time)
     notes: list[str] = Field(default_factory=list)
     review_reports: dict[str, str] = Field(default_factory=dict)
+    usage: dict[str, float] = Field(default_factory=dict)   # calls, prompt_tokens, cached_tokens, output_tokens, thoughts_tokens, latency_ms, cost_usd, cache_hits, unpriced_calls
+    stage_usage: dict[str, dict[str, float]] = Field(default_factory=dict)   # stage -> same keys (성능 요약)
+
+    def add_usage(self, stage: str, row: dict[str, float]) -> None:
+        for bucket in (self.usage, self.stage_usage.setdefault(stage, {})):
+            for k, v in row.items():
+                bucket[k] = bucket.get(k, 0) + v
 
     def record(self, record_id: str | None) -> RecordRef | None:
         return self.records.get(record_id) if record_id else None

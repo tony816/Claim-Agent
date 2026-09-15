@@ -36,6 +36,31 @@ def _pending_stages(state: RunState) -> str:
     return "요청 경로의 역할 호출 기록이 있습니다. 각 게이트의 통과 여부와 LOCK 상태는 아래 표를 따릅니다."
 
 
+def _fmt_cost(u: dict[str, float]) -> str:
+    if not u.get("calls"):
+        return "-"
+    if u.get("unpriced_calls"):
+        return "N/A" if u.get("unpriced_calls") == u.get("calls") else f"${u.get('cost_usd', 0):.4f} (일부 미산정)"
+    return f"${u.get('cost_usd', 0):.4f}"
+
+
+def render_performance(state: RunState) -> str:
+    """성능 요약: 단계별 호출·지연·토큰·캐시 적중·추정 비용 (원문은 포함하지 않는다)."""
+    u = state.usage
+    if not u.get("calls"):
+        return ""
+    out = ["## 성능 요약", "", "| 단계 | 호출 | 지연(s) | 입력 토큰 | 캐시 토큰 | 출력+사고 토큰 | 캐시 적중 | 추정 비용 |", "|---|---|---|---|---|---|---|---|"]
+    for stage, s in state.stage_usage.items():
+        out.append(f"| {stage} | {int(s.get('calls', 0))} | {s.get('latency_ms', 0) / 1000:.1f} | {int(s.get('prompt_tokens', 0)):,} | {int(s.get('cached_tokens', 0)):,} | {int(s.get('output_tokens', 0) + s.get('thoughts_tokens', 0)):,} | {int(s.get('cache_hits', 0))} | {_fmt_cost(s)} |")
+    hit = f"{u.get('cache_hits', 0) / u['calls'] * 100:.0f}%"
+    out.append(f"| **합계** | {int(u['calls'])} | {u.get('latency_ms', 0) / 1000:.1f} | {int(u.get('prompt_tokens', 0)):,} | {int(u.get('cached_tokens', 0)):,} | {int(u.get('output_tokens', 0) + u.get('thoughts_tokens', 0)):,} | {hit} | {_fmt_cost(u)} |")
+    if u.get("unpriced_calls"):
+        out.append("")
+        out.append("비용은 `claim-agent.yaml`의 `telemetry.pricing`에 사용 모델 단가를 넣어야 산정된다.")
+    out.append("")
+    return "\n".join(out)
+
+
 def render_report(state: RunState, claims_only: bool = False) -> str:
     c = state.candidate
     cur = c.current
@@ -104,6 +129,9 @@ def render_report(state: RunState, claims_only: bool = False) -> str:
             out.append(f"| {tid} | `{t.blind_record_id}` | `{t.picture_record_id}` | {t.picture_status or '-'} |")
         out.append(f"\nDEPENDENT_RECONSTRUCTION_GATE: {dep.current.reconstruction_gate or 'N/A'}")
         out.append("")
+    perf = render_performance(state)
+    if perf:
+        out.append(perf)
     out.append("## 남은 REVIEW/BLOCK/UNVERIFIED")
     out.append("")
     if state.halt:
