@@ -154,7 +154,7 @@ claim-agent review --reviewers syntax-scope-reviewer,oa-strategy-reviewer --clai
 ## 테스트
 
 ```bash
-python -m pytest            # 44 tests: 상태기계(scripted), 무효화·루프 한도·resume, 블라인드 격리, 코퍼스, 교훈, 피드백, RCA·선제 경고·역전파·도구 텔레메트리, Gemini provider 모킹
+python -m pytest            # 전체 테스트: 상태기계(scripted), 무효화·루프 한도·resume, 블라인드 격리, 코퍼스, 교훈, 피드백, RCA·선제 경고·역전파·도구 텔레메트리, Gemini provider 모킹
 ```
 `tests/scripted_roles.py`의 canned 봉투가 각 역할의 PASS/RETURN/REVIEW 응답을 흉내 낸다. 실제 Gemini 응답은 `--record`로 녹화한 fixture로 대체한다.
 

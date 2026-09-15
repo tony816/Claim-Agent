@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # ----------------------------------------------------------------------------- claim text
 def test_parse_real_claim_set_and_chains():
-    text = (ROOT / "claim_agent_updated_claims_2026-08-27.md").read_text(encoding="utf-8")
+    text = (ROOT / "eval" / "cases" / "reagent-tube-review-only" / "sources" / "claims.md").read_text(encoding="utf-8")
     claims = parse_claim_set(text)
     assert [c.claim_no for c in claims] == [1, 2, 3, 4, 5]
     assert claims[0].is_independent and claims[3].parent_no == 3 and claims[4].parent_no == 3

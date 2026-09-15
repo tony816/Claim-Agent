@@ -32,8 +32,8 @@ claim-copa-web = "claim_agent.web:main"
 include = ["claim_agent*", "claim_copa*"]
 
 [tool.setuptools.package-data]
-"claim_copa.roles" = ["*.md"]
-"claim_copa" = ["web_assets/*.html", "web_assets/*.css", "web_assets/*.js"]
+"claim_agent.roles" = ["*.md"]
+"claim_agent" = ["web_assets/*.html", "web_assets/*.css", "web_assets/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

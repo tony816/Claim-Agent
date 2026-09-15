@@ -2,7 +2,7 @@ request_mode: REVIEW_ONLY
 candidate_id: reagent-tube
 request_text: |
   제공된 청구항 1~5의 통사적 귀속·부모항 체인·머리명사 결속만 제한 검토한다. 문언 수정은 산출물이 아니다.
-claim_file: ../../../claim_agent_updated_claims_2026-08-27.md
+claim_file: sources/claims.md
 reviewers:
   - syntax-scope-reviewer
 review_scope: INDEPENDENT

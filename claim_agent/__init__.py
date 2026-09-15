@@ -1,9 +1,5 @@
-"""Public Claim-Agent namespace, sharing the existing runtime implementation.
+"""Claim-Agent Python + Gemini runtime."""
 
-Keep the implementation path stable for workers started before the rename.
-Both module entry points remain usable without copying runtime code.
-"""
-
-from claim_copa import EXECUTION_PROFILE, PROTOCOL_VERSION, __path__, __version__
-
-__all__ = ["EXECUTION_PROFILE", "PROTOCOL_VERSION", "__version__"]
+__version__ = "0.1.0"
+EXECUTION_PROFILE = "PY_GEMINI_MULTI_CALL"
+PROTOCOL_VERSION = "1.4.0"

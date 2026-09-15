@@ -1,5 +1,10 @@
-"""Claim-Agent Python + Gemini runtime."""
+"""Compatibility alias for the pre-rename package path (``claim_copa``).
 
-__version__ = "0.1.0"
-EXECUTION_PROFILE = "PY_GEMINI_MULTI_CALL"
-PROTOCOL_VERSION = "1.4.0"
+Saved commands, reports and worker processes created before the rename keep
+working: ``python -m claim_copa.cli`` resolves to the same files as
+``claim_agent`` without copying runtime code.
+"""
+
+from claim_agent import EXECUTION_PROFILE, PROTOCOL_VERSION, __path__, __version__
+
+__all__ = ["EXECUTION_PROFILE", "PROTOCOL_VERSION", "__version__"]

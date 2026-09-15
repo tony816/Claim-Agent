@@ -46,7 +46,7 @@ try {
     Get-ChildItem -LiteralPath (Join-Path $projectRoot 'sources') -File -Filter '*.md' |
         Copy-Item -Destination (Join-Path $stagingDirectory 'sources')
 
-    foreach ($fileName in @('CLAUDE.md', 'README.md', '설정_개선보고서.md')) {
+    foreach ($fileName in @('CLAUDE.md', 'README.md')) {
         Copy-Item -LiteralPath (Join-Path $projectRoot $fileName) -Destination $stagingDirectory
     }
 
@@ -79,8 +79,7 @@ try {
         (Join-Path $stagingDirectory '.claude'),
         (Join-Path $stagingDirectory 'sources'),
         (Join-Path $stagingDirectory 'CLAUDE.md'),
-        (Join-Path $stagingDirectory 'README.md'),
-        (Join-Path $stagingDirectory '설정_개선보고서.md')
+        (Join-Path $stagingDirectory 'README.md')
     )
     Compress-Archive -Path $archiveInputs -DestinationPath $newArchivePath -CompressionLevel Optimal
 

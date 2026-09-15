@@ -366,6 +366,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     tui.set_defaults(func=open_tui)
 
+    wb = sub.add_parser("web", help="open the local web chat (same entry as the desktop launcher)")
+    wb.add_argument("--no-browser", action="store_true")
+
+    def open_web(args):
+        from .web import main as web_main
+
+        argv = ["--project-root", str(Path(args.project_root).resolve())]
+        if args.config:
+            argv += ["--config", str(Path(args.config).resolve())]
+        if args.no_browser:
+            argv.append("--no-browser")
+        return web_main(argv)
+
+    wb.set_defaults(func=open_web)
+
     def common_provider(sp):
         sp.add_argument("--model")
         sp.add_argument("--no-cache", action="store_true")

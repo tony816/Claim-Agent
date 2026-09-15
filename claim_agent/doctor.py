@@ -55,12 +55,25 @@ def run_doctor(rt: Runtime, live: bool = False, model: str | None = None, contra
             gp = GeminiProvider(client)
             names = gp.list_models()
             target = model or cfg.model.default
-            rows.append(("models.list", "OK" if target in names else "WARN", f"{len(names)} models; configured '{target}' {'found' if target in names else 'NOT found'}"))
+            rows.append(("models.list", "OK" if target in names else "WARN", f"{len(names)} models; configured '{target}' {'found' if target in names else 'NOT found'}" + ("" if target in names else suggest_model(target, names))))
+            if not cfg.telemetry.pricing.get(target):
+                rows.append(("pricing", "WARN", f"telemetry.pricing has no entry for '{target}'; cost estimates will be empty (see claim-agent.yaml)"))
             rows.extend(_probe_json(client, target))
             rows.extend(_probe_cache(client, target, cfg.cache.ttl))
         except Exception as exc:  # noqa: BLE001
             rows.append(("live probe", "FAIL", str(exc)[:300]))
     return rows
+
+
+def suggest_model(target: str, names: list[str]) -> str:
+    """Closest available model ids for a configured id that does not exist."""
+    import difflib
+
+    close = difflib.get_close_matches(target, names, n=3, cutoff=0.5)
+    if not close:
+        family = target.split("-")[0]
+        close = [n for n in names if n.startswith(family)][:3]
+    return f"; closest: {', '.join(close)}" if close else ""
 
 
 def _probe_json(client: Any, model: str) -> list[tuple[str, str, str]]:
