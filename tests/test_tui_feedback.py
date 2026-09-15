@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from textual.widgets import Select
+from textual.widgets import Button, Select
 
 from claim_agent.provider.scripted import ScriptedProvider
 from claim_agent.tui import ClaimAgentApp, Composer
@@ -52,10 +52,18 @@ def test_feedback_revises_existing_pipeline_and_rechecks_gates(rt, request_indep
             app.query_one("#mode", Select).value = "FEEDBACK"
             app.query_one("#feedback-run", Select).value = "feedback-existing"
             app.query_one("#request", Composer).load_text("부품의 연결 관계를 다시 검토하여 수정해 주세요.")
-            await pilot.click("#start")
-            async with asyncio.timeout(5):          # the Button.Pressed message can still be in flight when click() returns
-                while not app.running:
-                    await asyncio.sleep(0.05)
+            notes = []
+            monkeypatch.setattr(app, "notify", lambda message, *a, **k: notes.append(str(message)))
+            await pilot.pause()
+            # Press the widget rather than clicking screen coordinates: after the mode change the compositor map can
+            # lag the re-layout and a coordinate click then lands beside the button (intermittent on loaded runners).
+            app.query_one("#start", Button).press()
+            try:
+                async with asyncio.timeout(5):      # Button.Pressed is delivered asynchronously
+                    while not app.running:
+                        await asyncio.sleep(0.05)
+            except TimeoutError:
+                raise AssertionError(f"start did not begin a run; notifications={notes}") from None
             async with asyncio.timeout(30):
                 while app.running:
                     await asyncio.sleep(.1)

@@ -139,10 +139,18 @@ def test_headless_offline_pipeline_result(project_root, tmp_path, monkeypatch):
             app.query_one("#mode", Select).value = "AUTHORING_DRAFT"
             app.query_one("#request", Composer).load_text("독립항 잠정안 작성")
             app.query_one("#material", Composer).load_text("오프라인 UI 연결 시험용 원자료")
-            await pilot.click("#start")
-            async with asyncio.timeout(5):          # the Button.Pressed message can still be in flight when click() returns
-                while not app.running:
-                    await asyncio.sleep(0.05)
+            notes = []
+            monkeypatch.setattr(app, "notify", lambda message, *a, **k: notes.append(str(message)))
+            await pilot.pause()
+            # Press the widget rather than clicking screen coordinates: after the mode change the compositor map can
+            # lag the re-layout and a coordinate click then lands beside the button (intermittent on loaded runners).
+            app.query_one("#start", Button).press()
+            try:
+                async with asyncio.timeout(5):      # Button.Pressed is delivered asynchronously
+                    while not app.running:
+                        await asyncio.sleep(0.05)
+            except TimeoutError:
+                raise AssertionError(f"start did not begin a run; notifications={notes}") from None
             assert app.query_one("#start", Button).disabled
             async with asyncio.timeout(30):
                 while app.running:
