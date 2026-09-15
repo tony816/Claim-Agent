@@ -29,7 +29,7 @@ from ..provider.base import CallResult, CallSpec, GenParams, LLMProvider, Provid
 from ..roles.prompt import PromptAssembler
 from ..roles.registry import RoleRegistry
 from ..sources.registry import SourceSet
-from ..store.report import render_report
+from ..store.report import render_chat_report, render_report
 from ..store.runstore import RunStore
 from ..store.telemetry import TelemetryRow, TelemetryWriter, estimate_cost, now
 from . import packets
@@ -226,6 +226,7 @@ class PipelineEngine:
             state.outcome = "HALTED_ERROR"
         self.store.save_state(state)
         self.store.write_report(state.run_id, render_report(state))
+        self.store.write_chat_report(state.run_id, render_chat_report(state))
         return state
 
     def resume(self, run_id: str, decision: Decision) -> RunState:

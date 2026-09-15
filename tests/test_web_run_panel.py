@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import json
 import threading
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+
+import pytest
 
 from claim_agent import web
 from claim_agent.provider.scripted import ScriptedProvider
@@ -52,9 +55,17 @@ def test_run_panel_endpoints(rt, request_indep, tmp_path, monkeypatch):
             assert response.headers["Content-Disposition"].startswith("attachment;") and R.ROOT_CLAIM.replace("조임 나사", "조임나사") in body
         with call("/api/export?id=" + sid + "&format=docx&evidence=1", headers) as response:
             assert response.headers["Content-Type"].startswith("application/vnd.openxmlformats") and response.read()[:2] == b"PK"
+        sid2 = workspace.create()["id"]
+        workspace.sessions[sid2]["run_id"] = "panel-run"
+        workspace.sessions[sid2]["messages"] = [dict(id="m1", role="assistant", text="요약", status="complete", pipeline_run_id="panel-run")]
+        with call(f"/api/report?id={sid2}&message=m1", headers) as response:
+            report = json.load(response)["text"]
+            assert "## 성능 요약" in report and "| 단계 | 역할 | record_id |" in report
+        with pytest.raises(HTTPError):                       # a conversation with no pipeline run has no report
+            call(f"/api/report?id={workspace.create()['id']}&message=m1", headers)
         assert "app.js" in (web.ASSETS / "index.html").read_text(encoding="utf-8")
         js = (web.ASSETS / "app.js").read_text(encoding="utf-8")
-        assert "renderRun" in js and "/api/resume" in js and "/api/diff" in js
+        assert "renderRun" in js and "/api/resume" in js and "/api/diff" in js and "/api/report" in js
     finally:
         server.shutdown()
         server.server_close()

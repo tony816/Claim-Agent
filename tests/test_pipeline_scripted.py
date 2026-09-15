@@ -231,3 +231,37 @@ def test_resume_refuses_stale_source_set(rt, request_indep, tmp_path):
         engine2.resume("run-test-15", Decision(text="x", action="style_fix"))
     st = rt.store.load_state("run-test-15")
     assert all(r.stale for r in st.records.values())
+
+
+def test_chat_report_keeps_the_claims_and_drops_what_the_run_panel_shows(rt, request_dep):
+    """The conversation answer repeated the gate table, cost table and revision history the panel already renders."""
+    from claim_agent.store.report import render_chat_report, render_report
+
+    engine = rt.engine(ScriptedProvider(R.happy_script()))
+    state = engine.run(engine.start(request_dep, "chat-report"))
+    full, chat = render_report(state), render_chat_report(state)
+    assert state.outcome == "DRAFT_CLAIM_LOCK+DRAFT_DEPENDENT_SET_LOCK"
+    assert R.ROOT_CLAIM in chat and "DRAFT_CLAIM_LOCK" in chat and "DRAFT_DEPENDENT_SET_LOCK" in chat
+    for claim in R.DEP_CLAIMS:
+        assert claim[3] in chat
+    assert "실행된 모든 단계가 PASS입니다." in chat
+    assert "SPEC_NOT_PROVIDED" in chat and "PRIOR_ART_NOT_PROVIDED" in chat
+    for panel_only in ("## 성능 요약", "## 리비전 이력", "| 단계 | 역할 | record_id |", "추정 비용"):
+        assert panel_only in full and panel_only not in chat
+    assert len(chat) * 3 < len(full)
+    # Both are written; report.md stays the complete record.
+    assert rt.store.chat_report_path("chat-report").name == "report-chat.md"
+    assert (rt.cfg.path("runs_dir") / "chat-report" / "report.md").read_text(encoding="utf-8") == full
+    assert (rt.cfg.path("runs_dir") / "chat-report" / "report-chat.md").read_text(encoding="utf-8") == chat
+
+
+def test_chat_report_of_a_halted_run_keeps_the_stopping_analysis(rt, request_indep):
+    from claim_agent.store.report import render_chat_report
+
+    engine = rt.engine(ScriptedProvider({"claim-architect": [R.architect(locked=False)]}))
+    state = engine.run(engine.start(request_indep, "chat-halt"))
+    chat = render_chat_report(state)
+    assert state.halt and "## 중지" in chat and "## 중지 단계의 검토 내용" in chat
+    assert state.halt.report_markdown in chat                       # the role's own analysis, not a summary
+    assert "ARCHITECT (claim-architect): REVIEW" in chat and "미실행 필수 단계: DRAFT" in chat
+    assert "claim-agent resume chat-halt" in chat

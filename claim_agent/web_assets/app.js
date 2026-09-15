@@ -61,12 +61,14 @@ function render(data){
   for(const m of data.messages){
     let view=state.nodes.get(m.id);
     if(!view){
-      const article=el("article","message "+m.role),body=el("div","body");let logs,pre,summary,routeLabel;
+      const article=el("article","message "+m.role),body=el("div","body");let logs,pre,summary,routeLabel,full,fullBody;
       if(m.role==="assistant"){
         const label=el("div","assistant-label");label.append(el("span","mark","C"),document.createTextNode("Claim-Agent"));article.append(label);
         routeLabel=el("div","route-label");article.append(routeLabel);
         logs=el("details","logs");summary=el("summary","","작업 로그 펼치기");pre=el("pre");logs.append(summary,pre);article.append(logs);
         logs.ontoggle=async()=>{if(logs.open&&view.status!=="running"&&!pre.textContent){try{const value=await api(`/api/log?id=${data.id}&message=${m.id}`);pre.textContent=value.text;}catch(e){pre.textContent=e.message;}}};
+        full=el("details","logs full-report");const fs=el("summary","","전체 보고서 펼치기 (게이트 표·근거·역할별 원 보고서)");fullBody=el("div","body");full.append(fs,fullBody);article.append(full);
+        full.ontoggle=async()=>{if(full.open&&!fullBody.textContent){try{const value=await api(`/api/report?id=${data.id}&message=${m.id}`);markdown(fullBody,value.text);}catch(e){fullBody.textContent=e.message;}}};
       }
       article.append(body);
       if(m.files?.length){const files=el("div","message-files");for(const f of m.files)files.append(el("span","file-tag","▤ "+f.name));article.append(files);}
@@ -75,8 +77,9 @@ function render(data){
         copy.onclick=async()=>{try{await navigator.clipboard.writeText(view.text);copy.textContent="복사됨";setTimeout(()=>copy.textContent="복사",1300);}catch(e){error("텍스트를 선택한 뒤 Ctrl+C로 복사하세요.");}};
         revise.onclick=()=>{$("mode").value=m.mode;$("prompt").focus();controls();};actions.append(copy,revise);article.append(actions);
       }
-      $("messages").append(article);view={article,body,logs,pre,summary,routeLabel,text:null,status:null};state.nodes.set(m.id,view);
+      $("messages").append(article);view={article,body,logs,pre,summary,routeLabel,full,fullBody,text:null,status:null};state.nodes.set(m.id,view);
     }
+    if(view.full)view.full.hidden=!(m.pipeline_run_id&&m.status&&m.status!=="running");
     if(view.routeLabel){view.routeLabel.textContent=m.execution_mode?"자동 분류 · "+(routeNames[m.execution_mode]||m.execution_mode):m.mode==="AUTHORING_DRAFT"?"청구항 작성·수정":"";view.routeLabel.title=m.route_reason||"";}
     if(view.text!==m.text||view.status!==m.status){if(m.role==="user")view.body.textContent=m.text;else if(m.text)markdown(view.body,m.text);else view.body.replaceChildren(el("span","pending",m.mode==="CHAT"?"답변을 작성하고 있어요…":"에이전트가 자료를 검토하고 있어요…"));view.text=m.text;}
     if(view.logs){

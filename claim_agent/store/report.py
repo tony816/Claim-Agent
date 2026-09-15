@@ -63,6 +63,85 @@ def render_performance(state: RunState) -> str:
     return "\n".join(out)
 
 
+def _failed_records(state: RunState) -> list[str]:
+    """Live records that did not come back PASS — the only gate rows worth repeating outside the panel."""
+    out = []
+    for rid, r in state.records.items():
+        if r.superseded or r.stale or r.status not in ("REVIEW", "BLOCK", "UNVERIFIED"):
+            continue        # PASS, PASS-RANGE and the engine's own LOCKED rows are not open items
+        gates = ", ".join(f"{k}: {v}" for k, v in r.gates.items() if v not in ("PASS", "NOT_APPLICABLE"))
+        out.append(f"{r.stage} ({r.role}): {r.status}" + (f" — {gates}" if gates else "") + f" `{rid}`")
+    return out
+
+
+def render_chat_report(state: RunState) -> str:
+    """The conversation answer: claim text, the verdict, and what is still open — nothing the run panel already shows.
+
+    Stage-by-stage gate rows, token and cost tables and the revision diff live in the run panel, and each role's own
+    report is one click away in the full report, so repeating them here only buries the claim text.
+    """
+    c = state.candidate
+    cur = c.current
+    dep = state.dependent
+    reviewing = state.request_mode.value == "REVIEW_ONLY"
+    out: list[str] = []
+    if reviewing:
+        out += ["## 검토 의견", "", "REVIEW_ONLY — 요청된 검수만 수행하며 청구항 작성·수정 또는 LOCK 발급 결과가 아닙니다."]
+        for role, report in state.review_reports.items():
+            out += ["", f"### {role}", "", report]
+        if not state.review_reports:
+            out.append("검토 보고서가 아직 생성되지 않았습니다.")
+    else:
+        root_text = cur.exact_text if cur and cur.exact_text else (cur.meaning_draft_text if cur else None)
+        final_root = bool(c.final_claim_lock)
+        out += ["## 최종안", ""]
+        if root_text:
+            lock = "FINAL_CLAIM_LOCK " + c.final_claim_lock if final_root else ("DRAFT_CLAIM_LOCK " + c.draft_claim_lock if c.draft_claim_lock else "LOCK 없음")
+            label = "출원용 최종안" if final_root else (PROVISIONAL_LABEL if c.draft_claim_lock else "미확정 문언")
+            out += [f"### 독립항 ({lock}; {label})", "", root_text, ""]
+        else:
+            out += ["독립항 문언 없음 (설계 단계에서 중지)", ""]
+        if dep:
+            dl = dep.final_set_lock or dep.draft_set_lock
+            lock = ("FINAL_DEPENDENT_SET_LOCK " if dep.final_set_lock else "DRAFT_DEPENDENT_SET_LOCK ") + dl if dl else "LOCK 없음"
+            label = "출원용 최종 종속항 세트" if dep.final_set_lock else PROVISIONAL_LABEL
+            out += [f"### 종속항 세트 ({lock}; {label})", "",
+                    (dep.current.exact_text if dep.current and dep.current.exact_text else None) or "종속항 문언 없음", ""]
+    out += ["## 핵심 판단", "",
+            f"- 결과: **{state.outcome}** (revision {c.revision} / design_revision {c.design_revision})"]
+    failed = _failed_records(state)
+    if failed:
+        out.append("- 미통과 단계:")
+        out += [f"  - {line}" for line in failed]
+    elif not reviewing:
+        out.append("- 실행된 모든 단계가 PASS입니다.")
+    pending = _pending_stages(state)
+    if pending.startswith("미실행"):
+        out.append("- " + pending)
+    out.append("")
+    if state.halt:
+        h = state.halt
+        out += ["## 중지", "", f"- {h.kind} @ {h.stage} ({h.role}) — {h.reason_code or ''} {h.message}".rstrip()]
+        for issue in h.open_issues[:6]:
+            out.append(f"  - [{issue.get('kind')}] {issue.get('code', '')} {issue.get('text', '')}".rstrip())
+        out += ["", "재개: 작업 상태 패널의 재개 칸을 쓰거나 `claim-agent resume " + state.run_id + " --decide \"<결정>\"`", ""]
+        if h.report_markdown and not reviewing:
+            # The stopping role's own analysis is the substance of a halted run, so it stays in the answer.
+            out += ["## 중지 단계의 검토 내용", "",
+                    "아래는 해당 역할의 원 보고서입니다. 제시된 방향·예시 문언은 후속 검수를 통과한 확정안이 아닙니다.", "",
+                    h.report_markdown, ""]
+    out += ["## 남은 REVIEW/BLOCK/UNVERIFIED", ""]
+    if not state.spec_present:
+        out.append("- OA_FINAL_GATE / DEPENDENT_OA_FINAL_GATE: UNVERIFIED — SPEC_NOT_PROVIDED (정식 명세서 미제공)")
+    if not state.prior_art_present:
+        out.append("- 신규성·진보성: UNVERIFIED — PRIOR_ART_NOT_PROVIDED (등록 가능성을 단정하지 않음)")
+    if not out[-1].startswith("- ") and not state.halt:
+        out.append("- 없음")
+    out += ["", "단계별 게이트 표, 호출·토큰·비용, 리비전 대조는 아래 **작업 상태 패널**에 있습니다. "
+            "역할별 원 보고서와 근거표 전문은 **전체 보고서**(`runs/" + state.run_id + "/report.md`)에 있습니다.", ""]
+    return "\n".join(out)
+
+
 def render_report(state: RunState, claims_only: bool = False) -> str:
     c = state.candidate
     cur = c.current
