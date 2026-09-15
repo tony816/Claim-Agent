@@ -1,0 +1,9 @@
+# 9항만 '제8항에 있어서, …' 형태로 산출되고, 독립항 파이프라인·design_revision 증가 없이 나머지 항은 원문 그대로.
+outcome: BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK
+design_revision: "N/A"
+independent_stages_run: false
+dependent_claim_nos: [9]
+baseline_unchanged: true
+must_contain: ["【청구항 9】\n제8항에 있어서,"]
+max_calls: 7                          # 종속항 설계 1 + 작성 1 + 스타일 2(도구 단계 포함) + 통합 검수(success·syntax·OA) 1 + blind·picture 2
+max_loops: 0

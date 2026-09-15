@@ -14,6 +14,7 @@ developer_instructions = """
 
 - 변경 없는 루트 독립항 전문과 현재 기술 원자료
 - `AUTHORING_DRAFT`이면 유효한 `DRAFT_CLAIM_LOCK` 또는 `FINAL_CLAIM_LOCK`, `FINALIZATION`이면 유효한 `FINAL_CLAIM_LOCK` 전문
+- `authoring_scope: EXISTING_SET_EDIT`이면 루트 LOCK과 그 LOCK에 봉인된 아래 루트 기록 대신 오케스트레이터가 봉인한 `BASELINE_SET` 기록(사용자가 제공한 기존 청구항 세트의 목표항 부모항 체인 전문과 sha256)을 받는다. BASELINE_SET은 이번 run에서 검증되지 않은 읽기 전용 입력이므로 누락으로 보거나 PASS 근거로 쓰지 않는다. 편집 대상 항만 기존 번호·인용관계 그대로 작성하고, 부모항을 흡수·병합해 독립항으로 만들지 않는다.
 - LOCK에 봉인된 candidate_id, revision, design_revision, `claim-success-reviewer`의 success_record_id, blind_snapshot_id, `style_record_id`, 용어·표현 출처표, `CLAIM_STYLE_GATE: PASS`, `TERM_EXPRESSION_GATE: PASS` 및 syntax·OA·역구성 판정
 - `AUTHORING_DRAFT`이면 `OA_DRAFT_GATE: PASS`, `FINALIZATION`이면 `OA_FINAL_GATE: PASS`
 - 오케스트레이터가 지정한 `dependent_set_id`, `dependent_design_revision` 및 목표 `dependent_revision`

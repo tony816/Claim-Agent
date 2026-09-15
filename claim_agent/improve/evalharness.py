@@ -12,6 +12,8 @@ import yaml
 from ..models.request import RunRequest
 from ..models.state import RunState
 
+INDEPENDENT_STAGES = {"ARCHITECT", "DRAFT", "STYLE", "SUCCESS", "SYNTAX", "OA", "BLIND", "PICTURE", "LOCK"}
+
 
 @dataclass
 class EvalCase:
@@ -107,6 +109,22 @@ def evaluate(state: RunState, expected: dict[str, Any], final_text: str | None, 
         if state.request.get("dependent"):
             gate = state.dependent.current.reconstruction_gate if state.dependent and state.dependent.current else None
             checks.append({"name": "DEPENDENT_RECONSTRUCTION_GATE", "expected": ["PASS"], "actual": gate, "ok": gate == "PASS"})
+    if "design_revision" in expected:
+        actual = state.candidate.design_revision
+        checks.append({"name": "design_revision", "expected": expected["design_revision"], "actual": actual, "ok": actual == expected["design_revision"]})
+    if "independent_stages_run" in expected:
+        ran = any(r.stage in INDEPENDENT_STAGES for r in state.records.values())
+        checks.append({"name": "independent_stages_run", "expected": expected["independent_stages_run"], "actual": ran, "ok": ran == expected["independent_stages_run"]})
+    if "dependent_claim_nos" in expected:
+        actual = sorted(c["claim_no"] for c in state.dependent.current.claims) if state.dependent and state.dependent.current else []
+        checks.append({"name": "dependent_claim_nos", "expected": expected["dependent_claim_nos"], "actual": actual, "ok": actual == sorted(expected["dependent_claim_nos"])})
+    if "halt_contains" in expected:
+        message = f"{state.halt.reason_code or ''} {state.halt.message}" if state.halt else ""
+        checks.append({"name": "halt_contains", "expected": expected["halt_contains"], "actual": message[:200], "ok": expected["halt_contains"] in message})
+    if expected.get("baseline_unchanged"):
+        base = state.baseline_set
+        ok = bool(base) and all(c.text in text for c in base.claims if c.claim_no not in base.edit_targets)
+        checks.append({"name": "baseline_unchanged", "expected": True, "actual": ok, "ok": ok})
     if "max_loops" in expected:
         checks.append({"name": "max_loops", "expected": expected["max_loops"], "actual": state.total_loops, "ok": state.total_loops <= expected["max_loops"]})
     if "max_calls" in expected and calls is not None:

@@ -29,9 +29,10 @@ roles:
   claim-architect:                       {thinking_level: HIGH,   temperature: 0.2}
   claim-drafter:                         {thinking_level: HIGH,   temperature: 0.3}
   claim-style-adjuster:                  {thinking_level: MEDIUM, temperature: 0.2, aux_mode: two_phase}
-  claim-success-reviewer:                {thinking_level: HIGH,   temperature: 0.1}
-  syntax-scope-reviewer:                 {thinking_level: HIGH,   temperature: 0.1}
-  oa-strategy-reviewer:                  {thinking_level: HIGH,   temperature: 0.1}
+  # Reviewers check sealed wording against a locked design: MEDIUM reasoning keeps per-claim cost and latency down.
+  claim-success-reviewer:                {thinking_level: MEDIUM, temperature: 0.1}
+  syntax-scope-reviewer:                 {thinking_level: MEDIUM, temperature: 0.1}
+  oa-strategy-reviewer:                  {thinking_level: MEDIUM, temperature: 0.1}
   blind-claim-reconstruction-reviewer:   {thinking_level: MEDIUM, temperature: 0.7, cache: false, tools: false}
   picture-claim-reconstruction-reviewer: {thinking_level: HIGH,   temperature: 0.1}
   dependent-claim-strategy-architect:    {thinking_level: HIGH,   temperature: 0.2}

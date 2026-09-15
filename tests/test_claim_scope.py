@@ -23,14 +23,17 @@ def test_current_question_overrides_stale_full_set_option(project_root):
 
 def test_out_of_scope_design_cannot_issue_lock_or_call_drafter(rt, request_dep):
     request_dep.dependent_target = "2"
-    provider = ScriptedProvider(R.happy_script())  # Deliberately proposes 2~4.
+    script = R.happy_script()
+    script["dependent-claim-strategy-architect"] = [R.dep_architect()] * 2   # Deliberately proposes 2~4, also on the repair call.
+    provider = ScriptedProvider(script)
     engine = rt.engine(provider)
     state = engine.run(engine.start(request_dep, "oversized-design"))
     assert state.halt and "REQUEST_SCOPE_MISMATCH" in state.halt.message
+    assert f"독립항 {state.candidate.draft_claim_lock}은 변경하지 않았습니다" in state.halt.message
     assert not state.dependent.draft_set_lock
     assert not any(c.role == "claim-drafter" and c.scope == "DEPENDENT_SET" for c in provider.calls)
     refs = [r for r in state.records.values() if r.role == "dependent-claim-strategy-architect"]
-    assert len(refs) == 1 and not refs[0].issued
+    assert len(refs) == 2 and not any(r.issued for r in refs)          # one repair call, then the stop
 
 
 def test_single_requested_claim_completes_all_required_gates(rt, request_dep, monkeypatch):

@@ -9,12 +9,14 @@ from typing import Any
 
 from ..claim_scope import parse_target
 from ..config import AppConfig
-from ..models.contracts import contract_for
+from ..models.contracts import COMBINED_REVIEW, combined_contract, contract_for
 from ..models.enums import ExecStatus, NextStep, RequestMode, Scope, Status, StyleChangeMode
 from ..models.envelope import ENVELOPE_JSON_SCHEMA, RoleEnvelope
 from ..models.ids import Identifiers, bump_dependent_design_revision, bump_dependent_revision, bump_design_revision, bump_revision, input_revision_id, record_id
-from ..models.request import MaterialBundle, RunRequest
+from ..models.request import EXISTING_SET_EDIT, MaterialBundle, RunRequest
 from ..models.state import (
+    BaselineClaim,
+    BaselineSet,
     CandidateState,
     DependentRevisionState,
     DependentSetState,
@@ -34,9 +36,22 @@ from ..store.runstore import RunStore
 from ..store.telemetry import TelemetryRow, TelemetryWriter, estimate_cost, now, usage_row
 from . import packets
 from .blind_guard import BlindPacket
-from .claimtext import ClaimParseError, MultiDependentChain, contains_user_lock, exact_sha256, parent_chain, parent_chain_text, parse_claim_set, validate_parent_refs
+from .claimtext import (
+    ClaimParseError,
+    MultiDependentChain,
+    ancestor_nos,
+    baseline_digest,
+    claim_set_text,
+    contains_user_lock,
+    exact_sha256,
+    ordered_claims,
+    parent_chain,
+    parent_chain_text,
+    parse_claim_set,
+    validate_parent_refs,
+)
 from .corpus_tool import ToolLog, make_tools
-from .locks import build_claim_lock, build_dependent_set_lock
+from .locks import build_baseline_record, build_claim_lock, build_dependent_set_lock
 from .transitions import LOOP_KEY, Transition, decide
 
 ROLE_BY_STAGE = {
@@ -146,10 +161,59 @@ class PipelineEngine:
         )
         if request.request_mode == RequestMode.REVIEW_ONLY:
             state.stage = Stage.REVIEW_ONLY
+        elif request.authoring_scope == EXISTING_SET_EDIT:
+            # No independent claim is authored: the user's set is the root, so the run starts at the dependent design.
+            state.stage = Stage.DEP_ARCHITECT
+            state.candidate.design_revision = "N/A"
         self.store.save_materials(rid, bundle)
         self.store.save_state(state)
         self._bundle = bundle
         return state
+
+    def _ensure_baseline(self, state: RunState, bundle: MaterialBundle, req: RunRequest) -> None:
+        """Seal the user's numbered set as the read-only root of an EXISTING_SET_EDIT run, before any model call.
+
+        Only the named dependent claims are rewritten; their parent chains go to every role verbatim and are never
+        absorbed into a new independent claim. Nothing in the set is gated by this run, so its record is UNVERIFIED.
+        """
+        def halt(code: str, message: str, issues: list[str] | None = None) -> None:
+            raise PipelineHalt(Halt(stage=Stage.DEP_ARCHITECT.value, role="engine", kind="BLOCK", reason_code=code, message=message,
+                                    open_issues=[{"kind": "SCOPE", "code": code, "text": t} for t in issues or []]))
+
+        if req.request_mode != RequestMode.AUTHORING_DRAFT:
+            halt("EDIT_SCOPE_DRAFT_ONLY", "기존 청구항 세트 편집(EXISTING_SET_EDIT)은 AUTHORING_DRAFT에서만 실행합니다. "
+                                          "부모항 체인이 이번 run에서 검증되지 않아 FINAL LOCK의 근거가 될 수 없습니다.")
+        text = bundle.claim_file_text() or ""
+        try:
+            claims = parse_claim_set(text)
+        except ClaimParseError as exc:
+            halt("BASELINE_SET_INVALID", f"편집할 기존 청구항 세트를 읽을 수 없습니다: {exc}")
+        problems = validate_parent_refs(claims)
+        if problems:
+            halt("BASELINE_SET_INVALID", "기존 청구항 세트의 번호·인용관계가 올바르지 않아 편집 대상의 부모항 체인을 정할 수 없습니다.", problems)
+        targets = parse_target(req.dependent_target) or set()
+        by_no = {c.claim_no: c for c in claims}
+        wrong = [f"제{n}항: 세트에 없음" for n in sorted(targets) if n not in by_no]
+        wrong += [f"제{n}항: 독립항" for n in sorted(targets) if n in by_no and by_no[n].is_independent]
+        if not targets or wrong:
+            halt("EDIT_TARGET_INVALID", "편집 대상은 제공된 세트에 있는 종속항 번호여야 합니다.", wrong or ["편집 대상 번호 없음"])
+        digest = baseline_digest(text)
+        if state.baseline_set and state.baseline_set.sha256 == digest and state.baseline_set.edit_targets == sorted(targets):
+            return
+        chain = sorted(set().union(*(ancestor_nos(claims, n) for n in targets)) - targets)
+        ids = Identifiers(state.candidate.candidate_id, "r1", "N/A", input_revision=state.input_revision)
+        rid = record_id("baseline_set", ids)
+        state.baseline_set = BaselineSet(
+            record_id=rid, source_path=req.claim_file or "", sha256=digest,
+            claims=[BaselineClaim(claim_no=c.claim_no, parent_nos=c.parent_nos, text=c.text) for c in claims],
+            edit_targets=sorted(targets), chain_nos=chain, chain_text=claim_set_text([by_no[n] for n in chain]),
+        )
+        record, md = build_baseline_record(state)
+        self.store.write_record(state.run_id, rid, {**record, "report_markdown": md}, md)
+        state.records[rid] = RecordRef(record_id=rid, kind="baseline_set", role="engine", scope=Scope.DEPENDENT_SET.value, stage="BASELINE",
+                                       status="BASELINE", gates={}, text_sha256=digest, ids=ids.as_dict(), source_set_id=state.source_set_id)
+        state.notes.append(f"기존 청구항 세트 편집: {', '.join(f'제{n}항' for n in sorted(targets))}만 작성 — 부모항 체인 "
+                           f"{', '.join(f'제{n}항' for n in chain)}은 읽기 전용(BASELINE_SET {rid}, 미검증)")
 
     def scope_guard(self, state: RunState, bundle: MaterialBundle) -> None:
         """Refuse a dependent-claim request that has no independent claim to hang it on — before any model call.
@@ -161,6 +225,9 @@ class PipelineEngine:
         """
         req = RunRequest.model_validate(state.request)
         c = state.candidate
+        if req.authoring_scope == EXISTING_SET_EDIT and req.request_mode != RequestMode.REVIEW_ONLY:
+            self._ensure_baseline(state, bundle, req)
+            return
         if req.request_mode == RequestMode.REVIEW_ONLY or not req.dependent:
             return
         if c.draft_claim_lock or c.final_claim_lock:
@@ -272,11 +339,17 @@ class PipelineEngine:
             decision.action = "redesign" if decision.action in ("none", "add_source") else decision.action
         self._bundle = self._load_bundle(req)
         halted_stage = Stage(state.halt.stage) if state.halt else state.stage
-        in_dependent = halted_stage.value.startswith("DEP_")
+        # An edit of an existing set has no independent claim of its own: every decision applies to its dependent revision.
+        in_dependent = halted_stage.value.startswith("DEP_") or state.baseline_set is not None
         if decision.scope:
             if decision.scope == "DEPENDENT" and not (state.dependent and state.dependent.current and not state.dependent.stale):
                 raise ProviderError("종속항 세트가 없거나 무효화되어 DEPENDENT 범위의 수정을 적용할 수 없다")
-            in_dependent = decision.scope == "DEPENDENT"
+            in_dependent = decision.scope == "DEPENDENT" or state.baseline_set is not None
+        if decision.action in ("style_fix", "meaning_fix"):
+            cur = (state.dependent.current if state.dependent else None) if in_dependent else state.candidate.current
+            if not (cur and (cur.exact_text or (decision.action == "meaning_fix" and cur.meaning_draft_text))):
+                raise ProviderError(("종속항" if in_dependent else "독립항") + " 문언이 아직 없어 스타일·의미 수정을 적용할 수 없습니다"
+                                    "(문언이 정해지기 전 단계에서 중지된 작업). 재설계(--redesign)로 재개하거나 원하는 방향을 새 요청으로 보내 주세요.")
         if decision.text:
             state.notes.append(f"사용자 결정 ({halted_stage.value}): {decision.text}")
         if decision.restart_from:
@@ -351,11 +424,20 @@ class PipelineEngine:
         blind: bool = False,
         loop_index: int = 0,
         expected_reuse: int = 1,
+        combined: tuple[str, ...] = (),
     ) -> tuple[RoleEnvelope, RecordRef]:
         spec_role = self.roles.get(role)
-        prompt = self.assembler.assemble(spec_role, scope)
         rc = self.cfg.role(role)
-        contract = contract_for(role, scope)
+        if combined:
+            # One call applying several role files in order; model, provider and reasoning follow `role`'s settings.
+            prompt = self.assembler.assemble_combined([self.roles.get(r) for r in combined], scope, packets.COMBINED_REVIEW_HEADER)
+            contract = combined_contract(combined, scope)
+        else:
+            prompt = self.assembler.assemble(spec_role, scope)
+            contract = contract_for(role, scope)
+            if role in ("claim-style-adjuster", "syntax-scope-reviewer", "oa-strategy-reviewer") and stage != Stage.REVIEW_ONLY:
+                packet = packets.text_only(packet)   # wording checks use the design's geometry contract, not the drawings
+        record_role = "+".join(combined) if combined else role
         self._guard_budget(state, stage)
         with self._lock:
             state.call_seq += 1
@@ -394,25 +476,35 @@ class PipelineEngine:
 
         scope_problem = None
         requested = parse_target(state.request.get("dependent_target")) if scope == Scope.DEPENDENT_SET else None
+        # In an edit of an existing set, the targets keep the citations they have there (no absorbed parent chain).
+        base_parents = {b.claim_no: b.parent_nos for b in state.baseline_set.claims} if state.baseline_set else {}
+        moved: list[str] = []
         if requested and env.status in (Status.PASS, Status.PASS_RANGE):
             actual = None
             if stage == Stage.DEP_ARCHITECT:
-                planned = [x.planned_claim_no for x in env.candidates if x.classification.value == "TECHNICAL_SOLUTION_CANDIDATE"]
+                tsc = [x for x in env.candidates if x.classification.value == "TECHNICAL_SOLUTION_CANDIDATE"]
+                planned = [x.planned_claim_no for x in tsc]
                 actual = set(planned)
                 if len(planned) != len(actual):
                     scope_problem = "종속항 설계 번호가 중복되었습니다."
+                moved = [f"{x.dc_id} 제{x.planned_claim_no}항의 부모 제{x.parent_claim_no}항 (기존 제{', '.join(map(str, base_parents[x.planned_claim_no]))}항)"
+                         for x in tsc if x.planned_claim_no in base_parents and x.parent_claim_no is not None and x.parent_claim_no not in base_parents[x.planned_claim_no]]
             elif stage in (Stage.DEP_DRAFT, Stage.DEP_STYLE):
                 actual = {x.claim_no for x in env.claims}
                 if len(actual) != len(env.claims):
                     scope_problem = "종속항 산출 번호가 중복되었습니다."
                 try:
-                    parsed_numbers = {x.claim_no for x in parse_claim_set(env.exact_claim_text or "")}
+                    parsed = parse_claim_set(env.exact_claim_text or "")
                 except ClaimParseError:
-                    parsed_numbers = set()
-                if parsed_numbers != actual:
+                    parsed = []
+                if {x.claim_no for x in parsed} != actual:
                     scope_problem = "종속항 구조화 목록과 exact 문언의 항 번호가 다릅니다."
+                moved = [f"제{x.claim_no}항의 인용 {('제' + ', '.join(map(str, x.parent_nos)) + '항') if x.parent_nos else '없음(독립항)'} (기존 제{', '.join(map(str, base_parents[x.claim_no]))}항)"
+                         for x in parsed if x.claim_no in base_parents and x.parent_nos != base_parents[x.claim_no]]
             if actual is not None and actual != requested:
                 scope_problem = f"요청한 종속항 {sorted(requested)}와 산출 항 번호 {sorted(str(x) for x in actual)}가 다릅니다. 임의 범위 확대/누락을 허용하지 않습니다."
+            elif moved and not scope_problem:
+                scope_problem = "기존 세트 편집에서 편집 대상 항의 인용관계를 바꾸거나 부모항을 흡수해 독립항으로 만들 수 없습니다: " + "; ".join(moved)
         issued = contract.passes(env, state.request_mode) if role in REVIEWER_ROLES or role == "blind-claim-reconstruction-reviewer" else env.status in (Status.PASS, Status.PASS_RANGE)
         evidence_problem = None
         unconfirmed = env.unconfirmed_evidence()
@@ -424,7 +516,7 @@ class PipelineEngine:
             issued = False
         text_for_hash = env.exact_claim_text if env.exact_claim_text else expected_exact
         ref = RecordRef(
-            record_id=rid, kind=kind, role=role, scope=scope.value, stage=stage.value, status=env.status.value,
+            record_id=rid, kind=kind, role=record_role, scope=scope.value, stage=stage.value, status=env.status.value,
             execution_status=env.execution_status.value, gates=env.gates.present(), issued=issued,
             text_sha256=exact_sha256(text_for_hash.strip()) if text_for_hash else None, ids=ids.as_dict(), source_set_id=state.source_set_id,
             invention_primary=env.invention_type.primary.value if env.invention_type else None,
@@ -467,7 +559,10 @@ class PipelineEngine:
                     state.notes.append(f"shadow 실패 ({role}): {exc}")
             self.store.save_state(state)
         if scope_problem:
-            raise PipelineHalt(Halt(stage=stage.value, role=role, kind="REVIEW", reason_code="OTHER", message="REQUEST_SCOPE_MISMATCH: " + scope_problem, record_id=rid))
+            root_lock = state.candidate.final_claim_lock or state.candidate.draft_claim_lock
+            kept = (f" 기존 청구항 세트(BASELINE_SET {state.baseline_set.record_id})는 변경하지 않았습니다." if state.baseline_set
+                    else f" 이미 확정된 독립항 {root_lock}은 변경하지 않았습니다." if root_lock else "")
+            raise PipelineHalt(Halt(stage=stage.value, role=role, kind="REVIEW", reason_code="OTHER", message="REQUEST_SCOPE_MISMATCH: " + scope_problem + kept, record_id=rid))
         if evidence_problem:
             raise PipelineHalt(Halt(stage=stage.value, role=role, kind="REVIEW", reason_code="OTHER", message=evidence_problem, record_id=rid,
                                     open_issues=[{"kind": "EVIDENCE_UNCONFIRMED", "code": "COND4", "text": lim, "return_to": None} for lim in unconfirmed]))
@@ -616,8 +711,8 @@ class PipelineEngine:
             )
         )
 
-    def _decide(self, state: RunState, env: RoleEnvelope, role: str, scope: Scope, stage: Stage, rid: str, loop_counts: dict[str, int]) -> Transition:
-        tr = decide(env, contract_for(role, scope), state.request_mode, loop_counts, self.cfg.pipeline.max_return_loops)
+    def _decide(self, state: RunState, env: RoleEnvelope, role: str, scope: Scope, stage: Stage, rid: str, loop_counts: dict[str, int], contract=None) -> Transition:
+        tr = decide(env, contract or contract_for(role, scope), state.request_mode, loop_counts, self.cfg.pipeline.max_return_loops)
         if tr.kind == "HALT":
             self._halt(state, stage, role, tr, env, rid)
         return tr
@@ -642,6 +737,14 @@ class PipelineEngine:
         state.stage = Stage.STYLE if mode == StyleChangeMode.STYLE_ONLY_REVISION else Stage.DRAFT
 
     def _bump_design(self, state: RunState, goal: str, full_reset: bool) -> None:
+        if state.baseline_set:
+            # An edit of an existing set has no independent claim to redesign: restart its dependent design instead.
+            if state.dependent:
+                self._bump_dependent_design(state, goal)
+            else:
+                state.notes.append(f"종속항 설계 재시작: {goal}")
+                state.stage = Stage.DEP_ARCHITECT
+            return
         c = state.candidate
         if c.current:
             c.history.append(c.current)
@@ -666,6 +769,14 @@ class PipelineEngine:
         counts = state.dependent.loop_counts if dependent and state.dependent else state.candidate.loop_counts
         counts[key] = counts.get(key, 0) + 1
         fb = self._feedback(env, rid)
+        if tr.return_to == NextStep.RETURN_TO_ARCHITECT and state.baseline_set:
+            ref = state.records.get(rid)
+            raise PipelineHalt(Halt(
+                stage=state.stage.value, role=ref.role if ref else "engine", kind="REVIEW", reason_code="EDIT_SCOPE_PARENT_CHANGE_REQUIRED",
+                message="검수 역할이 부모항 체인을 바꿔야 한다고 반환했습니다. 기존 세트 편집에서는 부모항을 흡수·재설계하지 않고 여기서 멈춥니다. "
+                        "부모항도 고치려면 그 항 번호를 지정해 요청하거나, 편집 대상 항의 방향을 새로 알려 주세요.",
+                open_issues=[o.model_dump() for o in env.open_issues], record_id=rid, report_markdown=env.report_markdown,
+            ))
         if tr.return_to == NextStep.RETURN_TO_ARCHITECT:
             self._bump_design(state, fb, full_reset=True)
         elif tr.return_to == NextStep.RETURN_TO_DEPENDENT_ARCHITECT:
@@ -859,14 +970,19 @@ class PipelineEngine:
     def _ensure_dependent(self, state: RunState) -> DependentSetState:
         c = state.candidate
         req = RunRequest.model_validate(state.request)
-        root_lock = c.final_claim_lock or c.draft_claim_lock
-        if not root_lock or not c.current or not c.current.exact_text:
-            raise PipelineHalt(Halt(stage=state.stage.value, role="engine", kind="BLOCK", reason_code="ROOT_LOCK_MISSING_OR_STALE", message="유효한 루트 독립항 LOCK이 없다"))
+        if state.baseline_set:
+            # The root of an edit is the sealed baseline chain; it is read-only and not a LOCK of this run.
+            root_lock, root_revision, root_design_revision = state.baseline_set.record_id, c.revision, c.design_revision
+        else:
+            root_lock = c.final_claim_lock or c.draft_claim_lock
+            if not root_lock or not c.current or not c.current.exact_text:
+                raise PipelineHalt(Halt(stage=state.stage.value, role="engine", kind="BLOCK", reason_code="ROOT_LOCK_MISSING_OR_STALE", message="유효한 루트 독립항 LOCK이 없다"))
+            root_revision, root_design_revision = c.current.revision, c.current.design_revision
         d = state.dependent
         if d is None or d.stale or d.root_lock_id != root_lock:
             d = DependentSetState(
                 dependent_set_id=req.dependent_set_id or f"{c.candidate_id}-dep", root_lock_id=root_lock, root_candidate_id=c.candidate_id,
-                root_revision=c.current.revision, root_design_revision=c.current.design_revision,
+                root_revision=root_revision, root_design_revision=root_design_revision,
             )
             state.dependent = d
         return d
@@ -929,16 +1045,28 @@ class PipelineEngine:
         c = state.candidate
         req = RunRequest.model_validate(state.request)
         d = self._ensure_dependent(state)
-        root_text = c.current.exact_text or ""  # type: ignore[union-attr]
+        root_text = state.baseline_set.chain_text if state.baseline_set else (c.current.exact_text or "")  # type: ignore[union-attr]
         if st == Stage.DEP_ARCHITECT:
             ids = self._ids(state)
             ids.dependent_design_revision = d.dependent_design_revision
             ids.dependent_revision = d.dependent_revision
             rid = record_id("dependent_design", ids)
             goal = next((n.split(": ", 1)[1] for n in reversed(state.notes) if n.startswith(f"종속항 설계 변경 목표 ({d.dependent_design_revision})")), None)
-            req_text = req.request_text + (f"\n\n종속항 목표 범위: {req.dependent_target}" if req.dependent_target else "")
-            pk = packets.dep_architect(state, self.store, bundle, ids, rid, d.root_lock_id, c.design_record_id or "", root_text, req_text, goal)
-            env, ref = self._call(state, "dependent-claim-strategy-architect", Scope.DEPENDENT_SET, st, "dependent_design", pk, ids, rid, loop_index=d.loop_counts.get("DEPENDENT_ARCHITECT", 0))
+            targets = parse_target(req.dependent_target)
+            loop = d.loop_counts.get("DEPENDENT_ARCHITECT", 0)
+            pk = packets.dep_architect(state, self.store, bundle, ids, rid, d.root_lock_id, c.design_record_id or "", root_text, req.request_text, goal, targets)
+            try:
+                env, ref = self._call(state, "dependent-claim-strategy-architect", Scope.DEPENDENT_SET, st, "dependent_design", pk, ids, rid, loop_index=loop)
+            except PipelineHalt as ph:
+                if not (targets and ph.halt.message.startswith("REQUEST_SCOPE_MISMATCH")):
+                    raise
+                # Fail fast on numbering: one repair call that restates the number contract; a second miss stops here,
+                # before any drafting, instead of after the rest of the pipeline has run.
+                state.records[rid].superseded = True
+                rid = record_id("dependent_design", ids, seq=2)
+                pk = packets.dep_architect(state, self.store, bundle, ids, rid, d.root_lock_id, c.design_record_id or "", root_text, req.request_text, goal, targets,
+                                           scope_repair=ph.halt.message)
+                env, ref = self._call(state, "dependent-claim-strategy-architect", Scope.DEPENDENT_SET, st, "dependent_design", pk, ids, rid, loop_index=loop)
             tr = self._decide(state, env, "dependent-claim-strategy-architect", Scope.DEPENDENT_SET, st, rid, d.loop_counts)
             if tr.kind == "RETURN":
                 self._apply_return(state, tr, env, rid, dependent=True)
@@ -977,7 +1105,9 @@ class PipelineEngine:
                 return
             set_text = (env.exact_claim_text or "\n\n".join(cl.text for cl in env.claims)).strip()
             try:
-                all_claims = parse_claim_set(root_text + "\n\n" + set_text)
+                # Merged by number: an edit's baseline chain (1, 5, 8) and its targets (9) interleave.
+                all_claims = ordered_claims(root_text, set_text)
+                set_nos = {cl.claim_no for cl in parse_claim_set(set_text)}
             except ClaimParseError as exc:
                 raise PipelineHalt(Halt(stage=st.value, role="engine", kind="BLOCK", reason_code="OTHER", message=f"CLAIM_PARSE_FAILED: {exc}", record_id=rid)) from exc
             problems = validate_parent_refs(all_claims)
@@ -988,12 +1118,28 @@ class PipelineEngine:
             dc_by_no = {cl.claim_no: cl.dc_id for cl in env.claims}
             cur.exact_text = set_text
             cur.exact_sha256 = exact_sha256(set_text)
-            cur.claims = [{"claim_no": cl.claim_no, "parent_claim_no": cl.parent_no, "dc_id": dc_by_no.get(cl.claim_no), "text": cl.text} for cl in all_claims if not cl.is_independent]
+            cur.claims = [{"claim_no": cl.claim_no, "parent_claim_no": cl.parent_no, "dc_id": dc_by_no.get(cl.claim_no), "text": cl.text} for cl in all_claims if cl.claim_no in set_nos and not cl.is_independent]
             cur.records["dependent_style"] = rid
             state.stage = Stage.DEP_SUCCESS
             return
 
         set_text = cur.exact_text or ""
+        if st == Stage.DEP_SUCCESS and state.baseline_set:
+            # A single-claim edit is reviewed once: the success, syntax and OA role files applied in order in one call.
+            rid = record_id("dependent_success", ids)
+            baseline = self._dep_prior_text(state) if cur.style_change_mode != StyleChangeMode.INITIAL_FROM_DRAFTER else cur.meaning_draft_text
+            pk = packets.review_dependent_combined(state, self.store, bundle, ids, rid, d.root_lock_id, root_text, d.design_record_id or "", cur.records.get("dependent_meaning_draft"),
+                                                   cur.records.get("dependent_style", ""), set_text, self._corpus_fragments(cur.records.get("dependent_style")), baseline, cur.style_change_mode)
+            env, ref = self._call(state, "claim-success-reviewer", Scope.DEPENDENT_SET, st, "dependent_success", pk, ids, rid, expected_exact=set_text, combined=COMBINED_REVIEW)
+            tr = self._decide(state, env, "claim-success-reviewer", Scope.DEPENDENT_SET, st, rid, d.loop_counts, combined_contract(COMBINED_REVIEW, Scope.DEPENDENT_SET))
+            if tr.kind == "RETURN":
+                self._apply_return(state, tr, env, rid, dependent=True)
+                return
+            for kind in ("dependent_success", "dependent_syntax", "dependent_oa"):
+                cur.records[kind] = rid
+            state.stage = Stage.DEP_RECON
+            return
+
         if st == Stage.DEP_SUCCESS:
             rid = record_id("dependent_success", ids)
             pk = packets.success_dependent(state, self.store, bundle, ids, rid, d.root_lock_id, root_text, d.design_record_id or "", cur.records.get("dependent_meaning_draft"), cur.records.get("dependent_style", ""), set_text, self._corpus_fragments(cur.records.get("dependent_style")))
@@ -1037,7 +1183,9 @@ class PipelineEngine:
 
         if st == Stage.DEP_LOCK:
             oa_ref = state.record(cur.records.get("dependent_oa"))
-            final = state.request_mode == RequestMode.FINALIZATION and oa_ref is not None and oa_ref.gates.get("DEPENDENT_OA_FINAL_GATE") == "PASS"
+            # An edit's parent chain was never gated in this run, so it never yields a FINAL set lock.
+            final = (not state.baseline_set and state.request_mode == RequestMode.FINALIZATION
+                     and oa_ref is not None and oa_ref.gates.get("DEPENDENT_OA_FINAL_GATE") == "PASS")
             kind = "final_dependent_set_lock" if final else "draft_dependent_set_lock"
             lock_id = record_id(kind, ids)
             lock, md = build_dependent_set_lock(state, lock_id, final, root_text, set_text, [m["name"] for m in state.material_meta])
@@ -1049,13 +1197,15 @@ class PipelineEngine:
             else:
                 d.draft_set_lock = lock_id
             state.stage = Stage.DONE
-            state.outcome = ("FINAL_CLAIM_LOCK+" if c.final_claim_lock else "DRAFT_CLAIM_LOCK+") + ("FINAL_DEPENDENT_SET_LOCK" if final else "DRAFT_DEPENDENT_SET_LOCK")
+            root = "BASELINE_SET+" if state.baseline_set else ("FINAL_CLAIM_LOCK+" if c.final_claim_lock else "DRAFT_CLAIM_LOCK+")
+            state.outcome = root + ("FINAL_DEPENDENT_SET_LOCK" if final else "DRAFT_DEPENDENT_SET_LOCK")
             return
 
     def _dependent_reconstruction(self, state: RunState, bundle: MaterialBundle, d: DependentSetState, cur: DependentRevisionState, root_text: str, set_text: str) -> None:
         st = Stage.DEP_RECON
-        all_claims = parse_claim_set(root_text + "\n\n" + set_text)
-        targets = [cl for cl in all_claims if not cl.is_independent]
+        all_claims = ordered_claims(root_text, set_text)
+        set_nos = {cl.claim_no for cl in parse_claim_set(set_text)}
+        targets = [cl for cl in all_claims if cl.claim_no in set_nos and not cl.is_independent]   # an edit's parent chain is not re-reviewed
         jobs: list[tuple[str, str, str, str | None]] = []
         for cl in targets:
             try:

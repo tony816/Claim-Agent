@@ -1,0 +1,7 @@
+# 9항은 종속항으로 남고(제8항 인용 유지) 독립항 단계는 실행되지 않으며, 부모항 체인 1·5·8항 원문은 그대로다.
+outcome: BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK
+independent_stages_run: false
+design_revision: "N/A"
+dependent_claim_nos: [9]
+baseline_unchanged: true
+must_contain: ["【청구항 9】\n제8항에 있어서,"]

@@ -654,6 +654,9 @@ class Server(ThreadingHTTPServer):
     def __init__(self, workspace: Workspace, port: int = 0):
         self.workspace = workspace
         self.token = secrets.token_urlsafe(32)
+        # The code this process loaded. Computing the fingerprint per request would report the checkout on disk, so a
+        # server started before `git pull` looked current to the launcher and kept serving old routes to new app.js.
+        self.code_version = code_fingerprint()
         super().__init__(("127.0.0.1", port), Handler)
         self.origin = f"http://127.0.0.1:{self.server_port}"
 
@@ -726,7 +729,7 @@ class Handler(BaseHTTPRequestHandler):
                 with workspace.lock:
                     sessions = sorted(workspace.sessions.values(), key=lambda x: x["updated"], reverse=True)
                     projects = sorted(workspace.projects.values(), key=lambda x: x["updated"], reverse=True)
-                    self.json(dict(model=workspace.cfg.default_model, code_version=code_fingerprint(), busy=workspace.running_count(),
+                    self.json(dict(model=workspace.cfg.default_model, code_version=self.server.code_version, busy=workspace.running_count(),
                                    sessions=[dict(id=s["id"], title=s["title"], project_id=s.get("project_id")) for s in sessions],
                                    projects=[dict(id=p["id"], name=p["name"], files=len(p["files"]),
                                                   sessions=sum(1 for s in sessions if s.get("project_id") == p["id"])) for p in projects]))
@@ -780,7 +783,11 @@ class Handler(BaseHTTPRequestHandler):
                     path = workspace.root / ".tui" / "requests" / message["log_id"] / "display.log"
                     self.json({"text": workspace.redact(path.read_text(encoding="utf-8")) if path.exists() else "작업 중입니다."})
             else:
-                self.json({"error": "페이지를 찾을 수 없습니다."}, 404)
+                # A process started before a code update keeps its old routes while app.js is read fresh from disk, so a
+                # new screen can call an endpoint this process never loaded: say that instead of a bare 404.
+                stale = url.path.startswith("/api/") and self.server.code_version != code_fingerprint()
+                self.json({"error": "실행 중인 웹 서버가 이전 코드로 시작되어 이 기능이 없습니다. 진행 중인 응답이 끝난 뒤 '프로그램 종료'를 누르고 실행기를 다시 실행해 주세요."
+                           if stale else "페이지를 찾을 수 없습니다."}, 404)
         except (ValueError, OSError, KeyError) as exc:
             self.json({"error": self.server.workspace.redact(str(exc))}, 400)
 
@@ -855,7 +862,7 @@ def main(argv=None) -> int:
     workspace = Workspace(args.project_root, args.config)
     server = Server(workspace)
     metadata = workspace.folder / "server.json"
-    save_json(metadata, dict(pid=os.getpid(), origin=server.origin, token=server.token, code_version=code_fingerprint()))
+    save_json(metadata, dict(pid=os.getpid(), origin=server.origin, token=server.token, code_version=server.code_version))
     if not args.no_browser:
         webbrowser.open(server.origin + "/?token=" + server.token)
     try:

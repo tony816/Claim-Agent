@@ -482,6 +482,25 @@ def test_sessions_endpoint_reports_code_version_busy_and_delete(workspace):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_a_server_from_older_code_reports_that_version_and_explains_a_missing_route(workspace):
+    """The '전체 보고서 펼치기' 404: new app.js from disk called /api/report on a process started before that route existed,
+    and the process reported the checkout's fingerprint, so the launcher kept reusing it."""
+    server = web.Server(workspace)
+    server.code_version = "0000000000000000"          # as if the checkout changed after this process started
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    headers = {"X-Claim-Token": server.token, "X-Claim-Request": "1"}
+    try:
+        with urlopen(Request(server.origin + "/api/sessions", headers=headers), timeout=3) as response:
+            assert json.load(response)["code_version"] == "0000000000000000"
+        with pytest.raises(HTTPError) as err:
+            urlopen(Request(server.origin + "/api/not-in-this-build", headers=headers), timeout=3)
+        assert err.value.code == 404 and "이전 코드" in json.load(err.value)["error"]
+    finally:
+        server.shutdown()
+        server.server_close()
         thread.join()
 
 

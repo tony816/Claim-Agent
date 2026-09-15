@@ -227,7 +227,7 @@ def test_role_contract_change_restarts_and_stamps_new_source_set(rt, request_ind
     assert all(ref.source_set_id == updated.source_set_id for rid, ref in current.records.items() if rid not in old_records)
 
 
-def test_project_instructions_reach_router_chat_and_pipeline_but_not_materials(project_root, rt, request_indep, tmp_path, monkeypatch):
+def test_project_instructions_reach_router_chat_and_pipeline_as_user_material(project_root, rt, request_indep, tmp_path, monkeypatch):
     from claim_agent.conversation_pipeline import effective_request_text
 
     provider = ScriptedProvider({"request-router": [{"mode": "META", "reason": "설정 질문"}]})
@@ -235,7 +235,7 @@ def test_project_instructions_reach_router_chat_and_pipeline_but_not_materials(p
     packet = json.loads(provider.calls[0].packet_text)
     assert packet["project_instructions"] == "청구항만 출력한다." and "project_instructions" in provider.calls[0].system_instruction
     spec = chat._chat_spec("m", [], {"role": "user", "parts": [{"text": "안녕"}]}, "  존댓말로 답한다.  ")
-    assert spec.system_instruction.startswith(chat.SYSTEM) and "존댓말로 답한다." in spec.system_instruction and "기술적 사실로 취급" in spec.system_instruction
+    assert spec.system_instruction.startswith(chat.SYSTEM) and "존댓말로 답한다." in spec.system_instruction and "사용자 제공 자료로 인용" in spec.system_instruction
     assert chat._chat_spec("m", [], {"role": "user", "parts": [{"text": "안녕"}]}, "").system_instruction == chat.SYSTEM
     request = {**request_data(request_indep), "instructions": "종속항은 2~4항까지.", "user_lock": "제1항 문언 유지",
                "attachments": [dict(path=p, category="invention", name="x", project_file_id="f") for p in request_indep.invention_sources]}
@@ -244,13 +244,17 @@ def test_project_instructions_reach_router_chat_and_pipeline_but_not_materials(p
     folder = tmp_path / "proj-draft"
     folder.mkdir()
     blocks, paths = intake(request, folder)
-    assert not any("종속항은 2~4항까지" in b["text"] for b in blocks)          # instructions are never a material block
+    block = next(b for b in blocks if "종속항은 2~4항까지" in b["text"])      # instructions are user material
+    assert block["origin"] == "user" and block["category"] == "invention" and "project-instructions-" in block["path"]
+    assert block["path"] in paths["invention_sources"]
     roles = ScriptedProvider({"claim-architect": [R.architect(locked=False)]})
     result = run_pipeline(rt, roles, request, RouteDecision(mode="AUTHORING_DRAFT", reason="작성"), blocks, paths, folder)
     state = rt.store.load_state(result["run_id"])
     assert state.request["user_lock"] == "제1항 문언 유지"
     assert "## 프로젝트 지침" in roles.calls[0].packet_text and "종속항은 2~4항까지." in roles.calls[0].packet_text
-    assert "<<<MATERIAL" in roles.calls[0].packet_text and "종속항은 2~4항까지" not in roles.calls[0].packet_text.split("## RUN_HEADER")[0]
+    materials = roles.calls[0].packet_text.split("## RUN_HEADER")[0]
+    assert "<<<MATERIAL [invention] project-instructions-" in materials and "종속항은 2~4항까지." in materials
+    assert any(m["name"].startswith("project-instructions-") and m["category"] == "invention" for m in state.material_meta)
 
 
 def test_single_claim_picked_in_composer_limits_the_dependent_work(rt, request_indep, tmp_path, monkeypatch):

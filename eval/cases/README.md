@@ -33,5 +33,12 @@ claim-agent eval run --case my-invention          # 이후는 fixtures 리플레
 | `must_contain` | 문자열 포함 |
 | `user_lock_preserved: true` | USER_LOCK 문언이 최종 문언에 그대로 있음 |
 | `max_loops`, `max_calls`, `max_output_tokens_total` | 상한 |
+| `design_revision` | 독립항 design_revision 값 (기존 세트 편집은 `"N/A"`) |
+| `independent_stages_run: false` | 독립항 단계(ARCHITECT~LOCK) 기록이 하나도 없음 |
+| `dependent_claim_nos: [9]` | 산출 종속항 번호 집합이 정확히 일치 |
+| `baseline_unchanged: true` | 기존 세트 편집에서 편집 대상 외의 항이 원문 그대로 반환됨 |
+| `halt_contains` | 중지 사유 코드·메시지에 포함될 문자열 |
+
+`authoring_scope: EXISTING_SET_EDIT` 케이스(`existing-set-edit-9`, `dep-target-single-9`, `no-merge-guard`)는 `claim_file`의 번호 세트에서 `dependent_target` 항만 고친다. fixtures가 없어 CI 리플레이에서는 SKIP되며, `tests/test_existing_set_edit.py`가 scripted 역할로 같은 기대값을 검사한다.
 
 fixtures는 `--record` 시점의 프롬프트·소스 해시를 담고 있으며, 프롬프트가 바뀌어도 느슨한 리플레이(역할·scope·phase 순서)로 엔진 회귀를 검사한다. 프롬프트 품질 자체는 `eval live`로 주기적으로 다시 측정한다.

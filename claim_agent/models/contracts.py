@@ -209,3 +209,18 @@ def contract_for(role: str, scope: Scope) -> GateContract:
         return CONTRACTS[(role, scope)]
     except KeyError as exc:  # pragma: no cover - programming error
         raise KeyError(f"no gate contract for {role} / {scope}") from exc
+
+
+# An EXISTING_SET_EDIT reviews its one edited claim in a single call that applies these role files in order.
+COMBINED_REVIEW = ("claim-success-reviewer", "syntax-scope-reviewer", "oa-strategy-reviewer")
+
+
+def combined_contract(roles: tuple[str, ...], scope: Scope) -> GateContract:
+    """Every member contract must pass on the one envelope; required gates and report lines are their union."""
+    members = [contract_for(r, scope) for r in roles]
+    return GateContract(
+        "+".join(roles),
+        list(dict.fromkeys(g for c in members for g in c.required_gates)),
+        lambda env, mode: all(c.predicate(env, mode) for c in members),
+        list(dict.fromkeys(g for c in members for g in c.report_tokens)),
+    )

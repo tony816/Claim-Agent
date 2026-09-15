@@ -1,0 +1,5 @@
+# 산출 종속항 번호는 요청한 {9}뿐이다. 다른 번호가 설계되면 이 케이스는 실패한다.
+outcome: BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK
+dependent_claim_nos: [9]
+independent_stages_run: false
+max_calls: 7

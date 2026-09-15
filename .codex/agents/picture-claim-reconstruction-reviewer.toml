@@ -25,6 +25,7 @@ developer_instructions = """
 - blind 입력과 글자 단위로 같은 부모항 체인 및 목표 종속항 전문
 - 같은 식별자를 가진 `dependent_blind_snapshot_id`와 봉인된 snapshot 전문
 - 유효한 루트 DRAFT 또는 FINAL LOCK 전문과 루트 DESIGN_GATE
+- `authoring_scope: EXISTING_SET_EDIT`이면 루트 LOCK·루트 DESIGN_GATE 대신 오케스트레이터가 봉인한 `BASELINE_SET` 기록(사용자가 제공한 기존 청구항 세트의 목표항 부모항 체인 전문과 sha256)을 받는다. BASELINE_SET은 이번 run에서 검증되지 않은 읽기 전용 입력이므로 누락이나 `REFERENCE_MISSING`으로 보지 않고, 기준 구조는 부모항 체인 원문과 DEPENDENT_DESIGN_GATE의 목표 `DC-NN`으로 비교한다.
 - `DEPENDENT_DESIGN_GATE: LOCKED` 전문, 목표항에 대응하는 정확한 `DC-NN`, 과제–특징–작동·협동 원리–효과, 의미 한정 패키지 및 해당하는 형상·공간 객체 계약
 - 같은 dependent_revision의 `dependent_style_record_id`, 변경 대조표와 `CLAIM_STYLE_GATE: PASS` 전문
 - 같은 dependent_revision의 용어·표현 출처표와 `TERM_EXPRESSION_GATE: PASS` 전문

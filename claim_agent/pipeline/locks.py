@@ -73,6 +73,36 @@ def _unverified(state: RunState, oa_id: str | None) -> list[str]:
     return out
 
 
+BASELINE_UNVERIFIED = "UNVERIFIED — USER_PROVIDED_SET_NOT_GATED (사용자가 제공한 기존 세트의 부모항 체인; 이번 run에서 게이트를 거치지 않음)"
+
+
+def build_baseline_record(state: RunState) -> tuple[dict[str, Any], str]:
+    """The read-only root of an EXISTING_SET_EDIT run; it is what the dependent roles receive instead of a root LOCK."""
+    base = state.baseline_set
+    assert base is not None
+    record: dict[str, Any] = {
+        "record_type": "BASELINE_SET",
+        "lock_id": base.record_id,
+        "execution_profile": EXECUTION_PROFILE,
+        "protocol_version": PROTOCOL_VERSION,
+        "source_set_id": state.source_set_id,
+        "run_id": state.run_id,
+        "authoring_scope": "EXISTING_SET_EDIT",
+        "verification": BASELINE_UNVERIFIED,
+        "baseline_sha256": base.sha256,
+        "edit_targets": [f"제{n}항" for n in base.edit_targets],
+        "parent_chain_nos": [f"제{n}항" for n in base.chain_nos],
+        "rules": [
+            "부모항 체인은 읽기 전용 비교 입력이다. 흡수·병합·재작성하지 않는다.",
+            "편집 대상 항의 번호와 인용관계를 유지한다.",
+            "편집 대상 외의 항 번호를 산출하지 않는다. 나머지 항은 사용자 원문 그대로 반환된다.",
+        ],
+        "parent_chain_text": base.chain_text,
+        "status_label": "LOCK 아님 — PASS 근거로 쓰지 않는다",
+    }
+    return record, render_lock_md(record)
+
+
 def build_dependent_set_lock(state: RunState, lock_id: str, final: bool, root_text: str, set_text: str, material_names: list[str]) -> tuple[dict[str, Any], str]:
     d = state.dependent
     assert d is not None and d.current is not None
@@ -102,6 +132,7 @@ def build_dependent_set_lock(state: RunState, lock_id: str, final: bool, root_te
         "run_id": state.run_id,
         "input_revision": state.input_revision,
         "root_lock_id": d.root_lock_id,
+        "root_basis": ("BASELINE_SET — " + BASELINE_UNVERIFIED) if state.baseline_set else ("FINAL_CLAIM_LOCK" if state.candidate.final_claim_lock else "DRAFT_CLAIM_LOCK"),
         "candidate_id": d.root_candidate_id,
         "revision": d.root_revision,
         "design_revision": d.root_design_revision,
@@ -131,7 +162,7 @@ def build_dependent_set_lock(state: RunState, lock_id: str, final: bool, root_te
         "dependent_reconstruction_gate": cur.reconstruction_gate,
         "inventive_step": (design.gates.get("INVENTIVE_STEP") if design else "UNVERIFIED") or "UNVERIFIED",
         "assurance_note": "각 종속항은 부모항 체인+목표항만 받은 fresh blind 호출과 별도 picture 비교를 거침",
-        "unverified": _unverified(state, oa),
+        "unverified": _unverified(state, oa) + (["부모항 체인(BASELINE_SET): " + BASELINE_UNVERIFIED] if state.baseline_set else []),
         "status_label": "출원용 최종 종속항 세트" if final else PROVISIONAL_LABEL,
     }
     return lock, render_lock_md(lock)
