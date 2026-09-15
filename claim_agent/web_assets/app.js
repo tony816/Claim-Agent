@@ -28,7 +28,31 @@ function markdown(node,text){
   }
 }
 function resize(){const p=$("prompt");p.style.height="auto";p.style.height=Math.min(p.scrollHeight,180)+"px";}
-function controls(){const running=!!state.data?.running;$("send").hidden=running;$("stop").hidden=!running;$("send").disabled=state.busy||state.uploading>0||!$("prompt").value.trim();$("attach").disabled=state.uploading>0;$("mode").disabled=running||state.busy;$("options").hidden=$("mode").value!=="AUTHORING_DRAFT";$("prompt").placeholder=$("mode").value==="CHAT"?"무엇이든 물어보세요":state.data?.run_id?"수정하고 싶은 내용을 알려주세요":"발명을 설명하거나 자료를 첨부해 주세요";}
+function controls(){const running=!!state.data?.running;$("send").hidden=running;$("stop").hidden=!running;$("send").disabled=state.busy||state.uploading>0||!$("prompt").value.trim()||!claimTarget().ok;$("attach").disabled=state.uploading>0;$("mode").disabled=running||state.busy;$("options").hidden=$("mode").value!=="AUTHORING_DRAFT";$("prompt").placeholder=$("mode").value==="CHAT"?"무엇이든 물어보세요":state.data?.run_id?"수정하고 싶은 내용을 알려주세요":"발명을 설명하거나 자료를 첨부해 주세요";}
+// ---- 작성 대상: 독립항만 / 특정 항 1개 / 종속항 범위. 서버의 resolve_claim_target와 같은 정규형(2~4,6)을 미리 보여 준다.
+const target={segments:[{from:2,to:8}]};
+function formatTarget(numbers){const a=[...numbers].sort((x,y)=>x-y);if(!a.length)return "";const parts=[];let start=a[0],prev=a[0];for(const n of a.slice(1).concat([null])){if(n!==null&&n===prev+1){prev=n;continue;}parts.push(start===prev?String(start):start+"~"+prev);if(n!==null)start=prev=n;}return parts.join(",");}
+function targetMode(){return document.querySelector("input[name=target-mode]:checked")?.value||"independent";}
+function claimTarget(){
+  const mode=targetMode();const out={target_mode:mode,target_claim:null,target_segments:[],dependent:false,target:null,ok:true,label:"독립항만",error:""};
+  if(mode==="single"){const n=parseInt($("target-claim").value,10);if(!(n>=1&&n<=1000)){out.ok=false;out.error="항 번호는 1~1000 사이 숫자여야 합니다.";}else{out.target_claim=n;if(n>1){out.dependent=true;out.target=String(n);}out.label=n===1?"1항(독립항)만":n+"항만";}}
+  else if(mode==="range"){const numbers=new Set();for(const seg of target.segments){const lo=parseInt(seg.from,10),hi=parseInt(seg.to===""||seg.to===undefined?seg.from:seg.to,10);if(!(lo>=2&&hi>=lo&&hi<=1000)){out.ok=false;out.error=lo===1||hi===1?"종속항 범위에는 2항 이상만 넣을 수 있습니다.":"구간은 시작 항 ≤ 끝 항, 2~1000 사이여야 합니다.";break;}for(let n=lo;n<=hi;n++)numbers.add(n);}
+    if(out.ok&&!numbers.size){out.ok=false;out.error="구간을 하나 이상 추가하세요.";}
+    if(out.ok){out.dependent=true;out.target=formatTarget(numbers);out.target_segments=target.segments.map(s=>({from:parseInt(s.from,10),to:parseInt(s.to===""||s.to===undefined?s.from:s.to,10)}));out.label=out.target+"항";}}
+  return out;
+}
+function renderSegments(){
+  const box=$("target-segments");box.replaceChildren();const mode=targetMode();
+  target.segments.forEach((seg,i)=>{const row=el("div","target-row");const from=el("input");from.type="number";from.min="2";from.max="1000";from.value=seg.from;from.setAttribute("aria-label","시작 항");const to=el("input");to.type="number";to.min="2";to.max="1000";to.value=seg.to;to.setAttribute("aria-label","끝 항");to.placeholder=String(seg.from);
+    from.oninput=()=>{seg.from=from.value;updateTarget();};to.oninput=()=>{seg.to=to.value;updateTarget();};from.disabled=to.disabled=mode!=="range";
+    const remove=el("button","","×");remove.type="button";remove.setAttribute("aria-label","구간 제거");remove.disabled=mode!=="range"||target.segments.length<2;remove.onclick=()=>{target.segments.splice(i,1);renderSegments();updateTarget();};
+    row.append(document.createTextNode("제 "),from,document.createTextNode(" ~ "),to,document.createTextNode(" 항"),remove);box.append(row);});
+  $("target-add").disabled=mode!=="range";$("target-claim").disabled=mode!=="single";
+}
+function updateTarget(){const t=claimTarget();$("target-preview").textContent=t.ok?(t.dependent?t.target:"독립항만"):"—";$("target-preview").className=t.ok?"":"invalid";$("target-preview").title=t.error;$("options-summary").textContent="작성 옵션 · "+(t.ok?t.label:"입력 확인");controls();}
+for(const radio of document.querySelectorAll("input[name=target-mode]"))radio.onchange=()=>{renderSegments();updateTarget();};
+$("target-claim").oninput=updateTarget;$("target-add").onclick=()=>{const last=target.segments.at(-1);const next=(parseInt(last?.to||last?.from,10)||1)+1;target.segments.push({from:next,to:next});renderSegments();updateTarget();};
+renderSegments();updateTarget();
 function pending(){const container=$("attachments");container.replaceChildren();for(const file of state.pending){const chip=el("div","attachment");chip.append(el("span","","▤ "+file.name));const remove=el("button","","×");remove.type="button";remove.setAttribute("aria-label",file.name+" 첨부 취소");remove.onclick=()=>{state.pending=state.pending.filter(x=>x.id!==file.id);pending();};chip.append(remove);container.append(chip);}controls();}
 function render(data){
   const box=$("conversation"),follow=box.scrollHeight-box.scrollTop-box.clientHeight<100;
@@ -72,7 +96,7 @@ async function list(){
   for(const p of data.projects){const b=el("button",p.id===state.project?"active":"");b.append(el("span","","▣ "+p.name),el("span","count",String(p.sessions)));b.title=p.name+" · 대화 "+p.sessions+"개 · 파일 "+p.files+"개";b.onclick=()=>openProject(p.id).catch(e=>error(e.message));projects.append(b);}
   const sessions=$("sessions");sessions.replaceChildren();
   const visible=data.sessions.filter(s=>!state.project||s.project_id===state.project);
-  for(const s of visible){const b=el("button",s.id===state.id&&state.view==="chat"?"active":"");b.append(document.createTextNode(s.title));if(!state.project&&s.project_id&&names.has(s.project_id))b.append(el("span","tag",names.get(s.project_id)));b.onclick=()=>open(s.id).catch(e=>error(e.message));sessions.append(b);}
+  for(const s of visible){const row=el("div","session-row"+(s.id===state.id&&state.view==="chat"?" active":""));const b=el("button","session-open");b.append(document.createTextNode(s.title));if(!state.project&&s.project_id&&names.has(s.project_id))b.append(el("span","tag",names.get(s.project_id)));b.onclick=()=>open(s.id).catch(e=>error(e.message));const del=el("button","session-delete","×");del.title="대화 삭제";del.setAttribute("aria-label",s.title+" 삭제");del.onclick=()=>deleteSession(s.id,s.title).catch(e=>error(e.message));row.append(b,del);sessions.append(row);}
   if(!visible.length)sessions.append(el("p","side-empty",state.project?"아직 대화가 없습니다.":"대화가 없습니다."));
   $("new-chat").textContent=state.project&&names.has(state.project)?"＋ 새 대화 · "+names.get(state.project):"＋ 새 대화";
   return data.sessions;
@@ -88,6 +112,16 @@ async function open(id){
   state.project=data.project?data.project.id:null;if(state.project)localStorage.setItem("claim-project",state.project);else localStorage.removeItem("claim-project");
   showChat();localStorage.setItem("claim-session",id);document.body.classList.remove("sidebar-open");error("");render(data);pending();resize();await list();$("conversation").scrollTop=$("conversation").scrollHeight;$("prompt").focus();
 }
+async function deleteSession(id,title){
+  if(state.busy||state.uploading)return;
+  if(!confirm(`"${title}" 대화와 첨부 파일을 삭제할까요? 청구항 작업 기록(runs/)은 남습니다.`))return;
+  await api("/api/delete",{id});drafts.delete(id);localStorage.removeItem("draft-"+id);
+  if(state.view==="project"&&state.projectData){await openProject(state.projectData.id);return;}
+  if(id!==state.id){await list();return;}
+  state.id=null;state.data=null;state.nodes.clear();$("messages").replaceChildren();localStorage.removeItem("claim-session");
+  const sessions=await list();const next=sessions.find(s=>!state.project||s.project_id===state.project);
+  if(next)await open(next.id);else await create();
+}
 async function create(projectId){if(state.busy||state.uploading)return;const data=await api("/api/new",{project_id:projectId===undefined?state.project:projectId});await open(data.id);}
 async function refresh(){const id=state.id,version=state.generation;if(!id)return;const data=await api("/api/session?id="+id);if(id===state.id&&version===state.generation){const wasRunning=state.data?.running;render(data);if(wasRunning&&!data.running)await list();}}
 async function upload(files){
@@ -98,7 +132,8 @@ async function upload(files){
 async function send(event){
   event.preventDefault();if(state.composing||state.busy||state.uploading||state.data?.running||!$("prompt").value.trim())return;
   state.busy=true;controls();error("");const id=state.id,text=$("prompt").value;
-  try{await api("/api/send",{id,text,mode:$("mode").value,files:state.pending.map(f=>f.id),dependent:$("dependent").checked,target:$("target").value});$("prompt").value="";localStorage.removeItem("draft-"+id);state.pending=[];drafts.delete(id);pending();resize();await refresh();await list();$("conversation").scrollTop=$("conversation").scrollHeight;}
+  const t=claimTarget();if(!t.ok){error(t.error);return;}
+  try{await api("/api/send",{id,text,mode:$("mode").value,files:state.pending.map(f=>f.id),target_mode:t.target_mode,target_claim:t.target_claim,target_segments:t.target_segments,dependent:t.dependent,target:t.target});$("prompt").value="";localStorage.removeItem("draft-"+id);state.pending=[];drafts.delete(id);pending();resize();await refresh();await list();$("conversation").scrollTop=$("conversation").scrollHeight;}
   catch(e){error(e.message);}finally{state.busy=false;controls();$("prompt").focus();}
 }
 $("composer").onsubmit=send;
@@ -133,7 +168,7 @@ function renderProject(p){
   for(const f of p.files){const li=el("li");li.append(el("span","cat",CATEGORY_LABEL[f.category]||f.category),el("span","name","▤ "+f.name),el("span","size",fmtSize(f.size)));const remove=el("button","","제거");remove.type="button";remove.onclick=async()=>{if(!confirm(f.name+" 파일을 프로젝트에서 제거할까요? 이미 실행된 작업의 기록은 유지됩니다."))return;try{await api("/api/project/remove-file",{id:p.id,file:f.id});await openProject(p.id);}catch(e){error(e.message);}};li.append(remove);files.append(li);}
   if(!p.files.length)files.append(el("li","empty","등록된 소스 파일이 없습니다. 발명 설명·도면·선행기술을 추가해 두면 이 프로젝트의 모든 대화에서 사용됩니다."));
   const sessions=$("project-session-list");sessions.replaceChildren();
-  for(const s of p.sessions){const li=el("li");const b=el("button","",s.title);b.type="button";b.onclick=()=>open(s.id).catch(e=>error(e.message));li.append(b);sessions.append(li);}
+  for(const s of p.sessions){const li=el("li");const b=el("button","",s.title);b.type="button";b.onclick=()=>open(s.id).catch(e=>error(e.message));const del=el("button","session-delete","×");del.type="button";del.title="대화 삭제";del.setAttribute("aria-label",s.title+" 삭제");del.onclick=()=>deleteSession(s.id,s.title).catch(e=>error(e.message));li.append(b,del);sessions.append(li);}
   if(!p.sessions.length)sessions.append(el("li","empty","아직 대화가 없습니다. 위의 버튼으로 이 프로젝트의 첫 대화를 시작하세요."));
 }
 async function openProject(id){

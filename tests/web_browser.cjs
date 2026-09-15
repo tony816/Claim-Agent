@@ -9,7 +9,7 @@ const assert=require('assert/strict');
   const page=await browser.newPage({viewport:{width:1440,height:980}});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(info.origin+'/?token='+info.token);
-  await page.locator('#sessions button').first().waitFor();
+  await page.locator('#sessions .session-open').first().waitFor();
   const out=path.dirname(process.argv[2]);
   await page.screenshot({path:path.join(out,'welcome.png'),fullPage:true});
   const prompt=page.locator('#prompt');
@@ -43,10 +43,10 @@ const assert=require('assert/strict');
   await page.reload();
   await page.waitForFunction(()=>document.querySelectorAll('.message.user').length===2);
   await page.screenshot({path:path.join(out,'conversation.png'),fullPage:true});
-  const count=await page.locator('#sessions button').count();
+  const count=await page.locator('#sessions .session-open').count();
   await page.locator('#new-chat').click();
   await page.waitForFunction(()=>!document.querySelector('#welcome').hidden);
-  assert.equal(await page.locator('#sessions button').count(),count+1);
+  assert.equal(await page.locator('#sessions .session-open').count(),count+1);
   // Browser-native paste and file drag/drop use the same upload route.
   await prompt.evaluate(node=>{
     const dt=new DataTransfer();dt.items.add(new File(['image-bytes'],'붙여넣기.png',{type:'image/png'}));
