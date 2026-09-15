@@ -80,7 +80,8 @@ def test_hwpx_paragraphs():
 def _hwp_section(paragraphs: list[str]) -> bytes:
     out = b""
     for p in paragraphs:
-        payload = b"".join(struct.pack("<H", 11) + b"\0" * 14 if ch == "￼" else ch.encode("utf-16-le") for ch in p)   # 11 = drawing control, 8 wchars
+        # 11 = drawing control and 9 = tab are 8-wchar controls in HWP 5.0 paragraph text
+        payload = b"".join(struct.pack("<H", 11) + b"\0" * 14 if ch == "\ufffc" else struct.pack("<H", 9) + b"\0" * 14 if ch == "\t" else ch.encode("utf-16-le") for ch in p)
         payload += struct.pack("<H", 13)
         header = (X._HWPTAG_PARA_TEXT & 0x3FF) | (1 << 10) | (len(payload) << 20)
         out += struct.pack("<I", header) + payload
