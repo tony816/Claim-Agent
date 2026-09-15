@@ -115,6 +115,27 @@ def run_command(root: Path, request_path: Path, run_id: str, model: str) -> list
             "run", "--request-yaml", str(request_path), "--run-id", run_id, "--model", model]
 
 
+RESUME_KINDS = {
+    "none": [],                                  # re-run the halted stage with the decision text
+    "style": ["--apply-style-fix"],              # STYLE_ONLY_REVISION, r+1
+    "meaning": ["--apply-meaning-fix"],          # drafter PRE_STYLE revision, r+1
+    "redesign": ["--redesign"],                  # design_revision d+1, architect first
+    "restart": ["--restart-from", "ARCHITECT"],  # full restart (materials changed)
+    "accept_unverified": ["--accept-unverified"],
+}
+
+
+def resume_command(root: Path, run_id: str, decision_path: Path, kind: str, model: str, add_sources: list[str] | None = None, scope: str | None = None) -> list[str]:
+    if kind not in RESUME_KINDS:
+        raise ValueError("지원하지 않는 재개 종류입니다.")
+    command = [sys.executable, "-u", "-m", "claim_agent.cli", "--project-root", str(root), "resume", run_id, "--decision-file", str(decision_path), *RESUME_KINDS[kind], "--model", model]
+    for src in add_sources or []:
+        command += ["--add-source", src]
+    if scope:
+        command += ["--scope", scope]
+    return command
+
+
 def feedback_command(root: Path, folder: Path, state: dict, feedback: str, material: str,
                      attachments: list[Attachment], model: str) -> list[str]:
     """Keep the existing run and USER_LOCK; invalidate dependent gates via redesign."""
@@ -126,9 +147,7 @@ def feedback_command(root: Path, folder: Path, state: dict, feedback: str, mater
     folder.mkdir(parents=True, exist_ok=False)
     decision = folder / "feedback.txt"
     decision.write_text(feedback, encoding="utf-8")
-    command = [sys.executable, "-u", "-m", "claim_agent.cli", "--project-root", str(root),
-               "resume", state["run_id"], "--decision-file", str(decision),
-               "--restart-from", "ARCHITECT", "--model", model]
+    command = resume_command(root, state["run_id"], decision, "restart", model)
     known = {str(Path(item["path"]).resolve()) for item in state.get("material_meta", [])}
     for item in checked:
         if str(item.path.resolve()) not in known:

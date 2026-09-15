@@ -92,6 +92,7 @@ class Decision:
     add_sources: list[str] | None = None
     restart_from: str | None = None
     request_update: RunRequest | None = None  # conversational scope/source update; always redesign
+    scope: str | None = None                  # INDEPENDENT | DEPENDENT: which revision a style/meaning fix targets on a finished run
 
 
 class PipelineEngine:
@@ -213,6 +214,10 @@ class PipelineEngine:
         self._bundle = self._load_bundle(req)
         halted_stage = Stage(state.halt.stage) if state.halt else state.stage
         in_dependent = halted_stage.value.startswith("DEP_")
+        if decision.scope:
+            if decision.scope == "DEPENDENT" and not (state.dependent and state.dependent.current and not state.dependent.stale):
+                raise ProviderError("종속항 세트가 없거나 무효화되어 DEPENDENT 범위의 수정을 적용할 수 없다")
+            in_dependent = decision.scope == "DEPENDENT"
         if decision.text:
             state.notes.append(f"사용자 결정 ({halted_stage.value}): {decision.text}")
         if decision.restart_from:

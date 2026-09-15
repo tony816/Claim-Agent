@@ -22,7 +22,7 @@ def intake(request: dict, folder: Path, previous=None) -> tuple[list[dict], dict
     paths = {"invention_sources": [], "drawings": [], "prior_art": [], "spec_path": None}
     seen = set()
 
-    def add_text(text, origin, category="invention", path=None):
+    def add_text(text, origin, category="invention", path=None, is_request=False):
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
         key = (origin, category, digest)
         if not text.strip() or key in seen:
@@ -32,7 +32,7 @@ def intake(request: dict, folder: Path, previous=None) -> tuple[list[dict], dict
         p = Path(path) if path else directory / f"{bid}-{digest[:12]}.txt"
         if not path:
             p.write_text(text, encoding="utf-8")
-        blocks.append(dict(id=bid, text=text, origin=origin, category=category, path=str(p)))
+        blocks.append(dict(id=bid, text=text, origin=origin, category=category, path=str(p), is_request=is_request))
         if origin == "user":
             field = {"spec": "spec_path", "prior_art": "prior_art"}.get(category, "invention_sources")
             if field == "spec_path":
@@ -79,9 +79,44 @@ def intake(request: dict, folder: Path, previous=None) -> tuple[list[dict], dict
     categories = {a["path"]: a.get("category", "invention") for a in request.get("attachments", [])}
     for name in request.get("files", []):
         add_file(name, categories.get(name, "invention"))
-    add_text(request["text"], "user")
+    add_text(request["text"], "user", is_request=True)
     paths["drawings"] = list(dict.fromkeys(paths["drawings"]))
     return blocks, paths
+
+
+def revision_path(route: RouteDecision, request: dict, blocks: list[dict], paths: dict, previous) -> tuple[str, str | None]:
+    """Deterministic guard for follow-up edits: (kind, scope).
+
+    kind ∈ restart | style | meaning. The router may only narrow the path: any new material (files, drawings,
+    prior art, spec, pasted description) or a changed USER_LOCK forces a full restart from the architect, because
+    the contract ties design_revision to the raw-material set. scope is DEPENDENT when the request names only
+    dependent claims and the previous run has a live dependent set.
+    """
+    from .claim_scope import explicit_mentions
+
+    if previous is None or route.revision_kind in ("NONE", "DESIGN"):
+        return "restart", None
+    known = {str(Path(m["path"]).resolve()) for m in previous.material_meta}
+    known_sha = {m.get("sha256") for m in previous.material_meta}
+    request_paths = {str(Path(b["path"]).resolve()) for b in blocks if b.get("is_request")}
+    new_material = []
+    for key in ("invention_sources", "drawings", "prior_art"):
+        for p in paths.get(key) or []:
+            rp = str(Path(p).resolve())
+            if rp in request_paths:
+                continue
+            if rp not in known and hashlib.sha256(Path(p).read_bytes()).hexdigest() not in known_sha:
+                new_material.append(rp)
+    if paths.get("spec_path") and str(Path(paths["spec_path"]).resolve()) not in known:
+        new_material.append(paths["spec_path"])
+    if new_material or request.get("files"):
+        return "restart", None
+    kind = "style" if route.revision_kind == "STYLE_ONLY" else "meaning"
+    scope = None
+    mentioned = explicit_mentions(request["text"])
+    if mentioned and previous.dependent and previous.dependent.current and not previous.dependent.stale:
+        scope = "DEPENDENT"
+    return kind, scope
 
 
 def previous_state(cfg, request):
@@ -115,13 +150,18 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
     # new technical facts. The packet builder passes claim_file separately.
     engine = rt.engine(provider)
     resume = previous and previous.request_mode.value == route.mode and route.mode in {"AUTHORING_DRAFT", "FINALIZATION"}
+    applied = "new"
     if resume:
-        state = engine.resume(previous.run_id, Decision(
-            text=request["text"], restart_from="ARCHITECT", request_update=req,
-        ))
+        kind, scope = revision_path(route, request, blocks, paths, previous)
+        applied = kind + (f"/{scope}" if scope else "")
+        if kind == "restart":
+            state = engine.resume(previous.run_id, Decision(text=request["text"], restart_from="ARCHITECT", request_update=req))
+        else:
+            # Same materials, same USER_LOCK: only the wording changes, so the cheaper revision path applies.
+            state = engine.resume(previous.run_id, Decision(text=request["text"], action="style_fix" if kind == "style" else "meaning_fix", scope=scope))
     else:
         state = engine.run(engine.start(req, folder.name))
-    state.notes.append("자동 요청 분류: " + route.mode + " — " + route.reason)
+    state.notes.append("자동 요청 분류: " + route.mode + " — " + route.reason + (f" (revision 경로: {applied})" if resume else ""))
     from .store.report import render_report
     rt.store.save_state(state)
     answer = render_report(state)
@@ -131,6 +171,6 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
         **route.model_dump(), "run_id": state.run_id,
         "contract_sha256": hashlib.sha256((rt.cfg.project_root / "CLAUDE.md").read_bytes()).hexdigest(),
     }, ensure_ascii=False, indent=2), encoding="utf-8")
-    return dict(answer=answer, run_id=state.run_id, effective_mode=route.mode,
+    return dict(answer=answer, run_id=state.run_id, effective_mode=route.mode, revision_path=applied,
                 status="review" if state.halt else "complete", outcome=state.outcome,
                 route=route.model_dump(), finish_reason="PIPELINE_COMPLETED" if not state.halt else "PIPELINE_HALTED")

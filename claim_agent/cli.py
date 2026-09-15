@@ -113,7 +113,7 @@ def cmd_resume(args) -> int:
         if getattr(args, flag, False):
             action = name
     text = Path(args.decision_file).read_text(encoding="utf-8") if args.decision_file else (args.decide or "")
-    decision = Decision(text=text, action=action, add_sources=args.add_source or None, restart_from=args.restart_from)
+    decision = Decision(text=text, action=action, add_sources=args.add_source or None, restart_from=args.restart_from, scope=args.scope)
     state = engine.resume(args.run_id, decision)
     _print_summary(state)
     return _exit_code(state.outcome)
@@ -123,11 +123,11 @@ def cmd_revise(args) -> int:
     rt = _rt(args, args.variant)
     engine = rt.engine(_provider(rt, args))
     if args.style_only:
-        d = Decision(text=args.style_only, action="style_fix")
+        d = Decision(text=args.style_only, action="style_fix", scope=args.scope)
     elif args.meaning:
-        d = Decision(text=args.meaning, action="meaning_fix")
+        d = Decision(text=args.meaning, action="meaning_fix", scope=args.scope)
     else:
-        d = Decision(text=args.design or "", action="redesign")
+        d = Decision(text=args.design or "", action="redesign", scope=args.scope)
     state = engine.resume(args.run_id, d)
     _print_summary(state)
     return _exit_code(state.outcome)
@@ -478,6 +478,7 @@ def build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--add-source", action="append")
     rs.add_argument("--accept-unverified", action="store_true")
     rs.add_argument("--restart-from", choices=["ARCHITECT", "DEP_ARCHITECT"])
+    rs.add_argument("--scope", choices=["INDEPENDENT", "DEPENDENT"], help="which revision a style/meaning fix targets on a finished run")
     rs.set_defaults(func=cmd_resume)
 
     rv = sub.add_parser("revise", help="user-initiated new revision of a finished run")
@@ -487,6 +488,7 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--style-only")
     g.add_argument("--meaning")
     g.add_argument("--design")
+    rv.add_argument("--scope", choices=["INDEPENDENT", "DEPENDENT"])
     rv.set_defaults(func=cmd_revise)
 
     rw = sub.add_parser("review", help="REVIEW_ONLY: run selected reviewers on given claims")

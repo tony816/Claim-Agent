@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from .config import load_config
 from .live_events import EventReader
-from .tui_support import child_options, read_state, validate_attachment
+from .tui_support import RESUME_KINDS, child_options, read_state, resume_command, validate_attachment
 
 ASSETS = Path(__file__).with_name("web_assets")
 MAX_UPLOAD = 20 * 1024 * 1024
@@ -74,6 +74,29 @@ class Workspace:
             self.persist(session)
             return session
 
+    def run_status(self, run_id: str | None) -> dict | None:
+        """Halt/outcome/usage summary of the session's pipeline run (no claim text, no paths)."""
+        if not run_id or not re.fullmatch(r"[A-Za-z0-9_-]+", run_id):
+            return None
+        state = read_state(self.cfg.path("runs_dir") / run_id / "state.json")
+        if not state:
+            return None
+        halt = state.get("halt") or None
+        cand = state.get("candidate") or {}
+        dep = state.get("dependent") or {}
+        return dict(
+            run_id=run_id, outcome=state.get("outcome"), stage=state.get("stage"),
+            revision=cand.get("revision"), design_revision=cand.get("design_revision"),
+            halt=dict(kind=halt.get("kind"), stage=halt.get("stage"), role=halt.get("role"), reason_code=halt.get("reason_code"),
+                      message=self.redact(str(halt.get("message", "")))[:600],
+                      open_issues=[dict(kind=o.get("kind"), code=o.get("code"), text=self.redact(str(o.get("text", "")))[:400]) for o in (halt.get("open_issues") or [])[:5]]) if halt else None,
+            usage=state.get("usage") or {},
+            stages=[dict(stage=r.get("stage"), role=r.get("role"), status=r.get("status"), gates=r.get("gates") or {}, superseded=r.get("superseded"), stale=r.get("stale"))
+                    for r in (state.get("records") or {}).values()],
+            dependent=dict(reconstruction_gate=(dep.get("current") or {}).get("reconstruction_gate"), draft_set_lock=dep.get("draft_set_lock"), final_set_lock=dep.get("final_set_lock")) if dep else None,
+            draft_claim_lock=cand.get("draft_claim_lock"), final_claim_lock=cand.get("final_claim_lock"),
+        )
+
     def snapshot(self, sid: str) -> dict:
         with self.lock:
             self.directory(sid)
@@ -82,6 +105,7 @@ class Workspace:
             job = self.jobs.get(sid)
             result["running"] = bool(job and not job["done"])
             result["live_log"] = job["log"][-300000:] if job else ""
+            result["run"] = self.run_status(self.sessions[sid].get("run_id"))
             return result
 
     def upload(self, sid: str, name: str, data: bytes) -> dict:
@@ -164,6 +188,57 @@ class Workspace:
             job["thread"] = thread
             thread.start()
 
+    def resume(self, sid: str, data: dict) -> None:
+        """Continue the session's halted run with a user decision (same run, same USER_LOCK)."""
+        with self.lock:
+            folder = self.directory(sid)
+            session = self.sessions[sid]
+            if self.jobs.get(sid) and not self.jobs[sid]["done"]:
+                raise ValueError("현재 응답을 완료하거나 중지한 뒤 재개하세요.")
+            run_id = session.get("run_id")
+            status = self.run_status(run_id)
+            if not status:
+                raise ValueError("이 대화에는 재개할 작업이 없습니다.")
+            kind = str(data.get("kind", "none"))
+            if kind not in RESUME_KINDS:
+                raise ValueError("지원하지 않는 재개 종류입니다.")
+            text = str(data.get("text", "")).strip()
+            if kind != "accept_unverified" and not text:
+                raise ValueError("결정 내용을 입력하세요.")
+            if not status["halt"] and kind in ("none", "accept_unverified"):
+                raise ValueError("중지된 작업이 아닙니다. 스타일·의미·재설계 중 하나를 고르세요.")
+            if not (os.environ.get(self.cfg.model.api_key_env) or os.environ.get("GOOGLE_API_KEY")):
+                raise ValueError("프로젝트 .env에 API 키를 저장한 뒤 다시 실행해 주세요.")
+            selected = data.get("files", [])
+            known = {item["id"]: item for item in session["files"]}
+            if not isinstance(selected, list) or any(fid not in known for fid in selected):
+                raise ValueError("이 대화에 첨부된 파일만 사용할 수 있습니다.")
+            add = [str(validate_attachment(folder / "uploads" / fid / known[fid]["name"]).path) for fid in selected]
+            scope = data.get("scope") if data.get("scope") in ("INDEPENDENT", "DEPENDENT") else None
+            rid = "web-" + uuid.uuid4().hex
+            job_dir = self.root / ".tui" / "requests" / rid
+            job_dir.mkdir(parents=True)
+            decision = job_dir / "decision.txt"
+            decision.write_text(text or "비게이팅 UNVERIFIED 수용", encoding="utf-8")
+            command = resume_command(self.root, run_id, decision, kind, self.cfg.model.default, add, scope)
+            if self.config:
+                command += ["--config", str(self.config)]
+            report = self.cfg.path("runs_dir") / run_id / "report.md"
+            mid = uuid.uuid4().hex
+            labels = {"none": "같은 단계 재실행", "style": "스타일만 수정", "meaning": "의미 수정", "redesign": "재설계", "restart": "처음부터", "accept_unverified": "미검증 수용"}
+            session["messages"].extend([
+                dict(id=uuid.uuid4().hex, role="user", text=f"[재개 · {labels[kind]}] {text}".strip(), files=[known[f] for f in selected], mode="AUTHORING_DRAFT"),
+                dict(id=mid, role="assistant", text="", status="running", mode="AUTHORING_DRAFT", log_id=rid, execution_mode="RESUME"),
+            ])
+            session["updated"] = time.time()
+            self.persist(session)
+            job = dict(done=False, stopped=False, process=None, log="", mid=mid, folder=job_dir,
+                       mode="RESUME", run_id=run_id, previous_report=report.stat().st_mtime_ns if report.exists() else 0)
+            self.jobs[sid] = job
+            thread = threading.Thread(target=self.execute, args=(sid, job, command), daemon=True)
+            job["thread"] = thread
+            thread.start()
+
     def consume_events(self, job: dict, message: dict, reader: EventReader) -> None:
         for event in reader.read():
             kind, role = event.get("kind"), event.get("role", "에이전트")
@@ -224,6 +299,8 @@ class Workspace:
                     message["status"] = result.get("status", "complete")
                     message["execution_mode"] = result.get("effective_mode", "CHAT")
                     message["pipeline_run_id"] = result.get("run_id")
+                    if result.get("revision_path"):
+                        message["revision_path"] = result["revision_path"]
                     if result.get("run_id") and result.get("effective_mode") in {"AUTHORING_DRAFT", "FINALIZATION"}:
                         session["run_id"] = result["run_id"]
                 else:
@@ -370,6 +447,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.json(workspace.create())
             elif url.path == "/api/send":
                 workspace.start(data.get("id", ""), data)
+                self.json({"ok": True})
+            elif url.path == "/api/resume":
+                workspace.resume(data.get("id", ""), data)
                 self.json({"ok": True})
             elif url.path == "/api/stop":
                 workspace.stop(data.get("id", ""))

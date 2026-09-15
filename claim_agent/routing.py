@@ -16,6 +16,7 @@ from .claim_scope import constrain_target
 from .provider.base import CallSpec, GenParams, LLMProvider
 
 Reviewer = Literal["syntax-scope-reviewer", "oa-strategy-reviewer", "claim-success-reviewer"]
+RevisionKind = Literal["NONE", "STYLE_ONLY", "MEANING", "DESIGN"]
 
 
 class RouteDecision(BaseModel):
@@ -28,9 +29,16 @@ class RouteDecision(BaseModel):
     dependent_target: str | None = None
     review_scope: Literal["INDEPENDENT", "DEPENDENT_SET"] = "INDEPENDENT"
     claim_source_id: str | None = None
+    # Follow-up edits of an existing run: which revision path the requested change needs.
+    # STYLE_ONLY → claim-style-adjuster STYLE_ONLY_REVISION (r+1); MEANING → drafter PRE_STYLE revision (r+1);
+    # DESIGN → architect redesign (d+1). The deterministic guard in conversation_pipeline forces DESIGN whenever
+    # new material, drawings or a USER_LOCK change arrive, so the model can only narrow the path, never widen it.
+    revision_kind: RevisionKind = "NONE"
 
     @model_validator(mode="after")
     def complete_route(self):
+        if self.revision_kind != "NONE" and self.mode not in {"AUTHORING_DRAFT", "FINALIZATION"}:
+            raise ValueError("revision_kind는 작성 경로에서만 쓸 수 있습니다.")
         if self.mode == "REVIEW_ONLY" and not self.reviewers:
             raise ValueError("의견 검토에는 검수 역할이 필요합니다.")
         if self.dependent and not self.dependent_target:
@@ -65,6 +73,9 @@ ROUTER_SYSTEM = """너는 Claim-Agent 요청 분류기다. 답변, 청구항, �
   REVIEW_ONLY/META/CHAT은 dependent=false, dependent_target=null이다. 1항만 묻는데 첨부에 2~8항이
   있거나 ui_hints.dependent가 true라는 이유로 종속항 작성을 추가하지 않는다.
   작성 요청에 별도 범위 제한이 없을 때만 ui_hints의 종속항 옵션을 작성 범위 보조 정보로 사용한다.
+- 이전 작업(existing_claims 블록)이 있는 후속 수정 요청이면 revision_kind를 고른다. 조사·띄어쓰기·문장부호·범위가 같은 표면
+  용어만 바꾸면 STYLE_ONLY, 절 결속·관계 술어·한정 표현을 바꾸면 MEANING, 주골격·구성 계층·한정 집합·권리범위를 바꾸거나
+  새 기술내용을 반영하면 DESIGN. 처음 작성이거나 판단이 서지 않으면 DESIGN 또는 NONE. 새 자료·도면이 첨부되면 항상 DESIGN이다.
 - claim_source_id는 검토할 기존 청구항이 담긴 입력 블록의 id를 그대로 선택한다. 원문을 생성/요약하지 않는다.
   순수 의견 질문에 검토할 청구항이 없으면 null. 종속항 검토는 부모항을 포함한 원문 블록을 선택한다.
 - assistant_reference는 대화 이해/검토 대상 선택에만 사용하며 발명 원자료가 아니다.
