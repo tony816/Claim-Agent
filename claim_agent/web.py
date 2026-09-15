@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from .config import load_config
 from .live_events import EventReader
+from .sources.extract import DOC_EXT, ExtractionError, extract_text
 from .tui_support import RESUME_KINDS, child_options, read_state, resume_command, validate_attachment
 
 ASSETS = Path(__file__).with_name("web_assets")
@@ -124,11 +125,16 @@ class Workspace:
             path.write_bytes(data)
             try:
                 validate_attachment(path)
-                if path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+                if path.suffix.lower() in DOC_EXT:
+                    extract_text(path)          # rejects scanned/encrypted/corrupt documents at upload time
+                elif path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
                     path.read_text(encoding="utf-8-sig")
+            except ExtractionError as exc:
+                path.unlink()
+                raise ValueError(f"{name}: {exc}") from None
             except (ValueError, UnicodeError):
                 path.unlink()
-                raise ValueError("지원 형식: UTF-8 텍스트, MD, JSON, YAML, CSV, PNG, JPG, WEBP") from None
+                raise ValueError("지원 형식: UTF-8 텍스트, MD, JSON, YAML, CSV, PDF, DOCX, HWPX, HWP, PNG, JPG, WEBP") from None
             item = dict(id=fid, name=name, size=len(data))
             self.sessions[sid]["files"].append(item)
             self.persist(self.sessions[sid])

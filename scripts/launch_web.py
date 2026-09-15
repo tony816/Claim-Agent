@@ -40,7 +40,7 @@ def main() -> int:
     if url:
         webbrowser.open(url)
         return 0
-    modules = ["dotenv", "pydantic", "yaml", "google.genai"] + (["truststore"] if os.name == "nt" else [])
+    modules = ["dotenv", "pydantic", "yaml", "google.genai", "PIL", "pypdf", "docx", "olefile"] + (["truststore"] if os.name == "nt" else [])
     missing = False
     for module in modules:
         try:

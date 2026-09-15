@@ -9,6 +9,7 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field
 
+from ..sources.extract import DOC_EXT, ExtractionError, extract_text
 from ..sources.images import DEFAULT_MAX_SIDE, normalize_image
 from .enums import RequestMode
 
@@ -64,6 +65,7 @@ class MaterialItem:
     category: str = "invention"   # invention | spec | drawing | prior_art | claim_file
     normalized_sha256: str | None = None   # images: sha of the bytes actually sent (after resize)
     image_meta: dict | None = None         # images: original/normalized size, resized flag, note
+    extraction: dict | None = None         # documents (pdf/docx/hwpx/hwp): format, pages, chars, note
 
     @property
     def content_sha256(self) -> str:
@@ -75,6 +77,8 @@ class MaterialItem:
             meta["normalized_sha256"] = self.normalized_sha256
         if self.image_meta:
             meta["image_meta"] = self.image_meta
+        if self.extraction:
+            meta["extraction"] = self.extraction
         return meta
 
 
@@ -140,7 +144,13 @@ def _load_path(p: Path, category: str, max_image_side: int = DEFAULT_MAX_SIDE) -
         return [MaterialItem(str(p), p.name, "image", sha, None, norm.mime_type, norm.data, category, norm.sha256 if norm.resized else None, meta)]
     if ext in TEXT_EXT or ext == "":
         return [MaterialItem(str(p), p.name, "text", sha, raw.decode("utf-8", errors="replace"), None, None, category)]
-    raise ValueError(f"unsupported material type {ext}: {p} (use md/txt or png/jpg)")
+    if ext in DOC_EXT:
+        try:
+            extracted = extract_text(p)
+        except ExtractionError as exc:
+            raise ValueError(f"{p.name}: {exc}") from exc
+        return [MaterialItem(str(p), p.name, "text", sha, extracted.text, None, None, category, extraction=extracted.as_meta())]
+    raise ValueError(f"unsupported material type {ext}: {p} (use md/txt/pdf/docx/hwpx/hwp or png/jpg/webp)")
 
 
 def encode_image(item: MaterialItem) -> str:

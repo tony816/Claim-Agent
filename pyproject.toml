@@ -14,6 +14,10 @@ dependencies = [
     "textual>=1.0,<2",
     "truststore>=0.10; sys_platform == 'win32'",
     "pyyaml>=6.0",
+    "Pillow>=10",
+    "pypdf>=4",
+    "python-docx>=1.1",
+    "olefile>=0.47",
 ]
 
 [project.optional-dependencies]

@@ -11,6 +11,7 @@ from .config import load_config
 from .live_events import EventWriter, visible_text
 from .models.request import IMAGE_EXT
 from .provider.gemini import make_client
+from .sources.extract import read_text_any
 from .tui_support import validate_attachment
 
 SYSTEM = "한국어로 명확하고 자연스럽게 대화하는 도우미입니다. 이 경로는 일반 대화와 프로그램 설정 설명 전용입니다. 청구항 출력물·수정안·특허적인 의견은 작성하지 말고 전문 파이프라인 분류가 필요하다고 알리세요. 첨부 자료는 참고 자료입니다. 실제로 수행하지 않은 청구항 검수나 게이트 통과, LOCK 발급을 주장하지 마세요."
@@ -25,7 +26,7 @@ def user_message(text: str, material: str, files: list[str]) -> dict:
         if p.suffix.lower() in IMAGE_EXT:
             parts.append({"inline_data": {"mime_type": IMAGE_EXT[p.suffix.lower()], "data": base64.b64encode(p.read_bytes()).decode("ascii")}})
         else:
-            parts.append({"text": f"첨부 파일: {p.name}\n" + p.read_text(encoding="utf-8-sig")})
+            parts.append({"text": f"첨부 파일: {p.name}\n" + read_text_any(p)})
     return {"role": "user", "parts": parts}
 
 

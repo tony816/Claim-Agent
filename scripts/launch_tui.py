@@ -15,7 +15,7 @@ def main() -> int:
     root = Path(__file__).resolve().parents[1]
     os.chdir(root)
     sys.path.insert(0, str(root))
-    modules = ["textual", "dotenv", "pydantic", "yaml", "google.genai"]
+    modules = ["textual", "dotenv", "pydantic", "yaml", "google.genai", "PIL", "pypdf", "docx", "olefile"]
     if os.name == "nt":
         modules.append("truststore")
     missing = []

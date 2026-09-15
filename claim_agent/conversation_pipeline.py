@@ -11,6 +11,7 @@ from .claim_scope import constrain_target
 from .models.request import IMAGE_EXT, RunRequest
 from .pipeline.engine import Decision
 from .routing import RouteDecision
+from .sources.extract import DOC_EXT, read_text_any
 from .tui_support import validate_attachment
 
 
@@ -46,6 +47,10 @@ def intake(request: dict, folder: Path, previous=None) -> tuple[list[dict], dict
         item = validate_attachment(Path(name), category)
         if item.path.suffix.lower() in IMAGE_EXT:
             paths["drawings"].append(str(item.path))
+        elif item.path.suffix.lower() in DOC_EXT:
+            # Documents are extracted once here; the block keeps the original file as its path so the
+            # engine re-extracts identically and the material identity stays the original sha256.
+            add_text(read_text_any(item.path), "user", item.category, item.path)
         else:
             add_text(item.path.read_text(encoding="utf-8-sig"), "user", item.category, item.path)
 

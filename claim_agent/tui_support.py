@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from .models.request import IMAGE_EXT, TEXT_EXT, RunRequest
+from .sources.extract import DOC_EXT
 
 CATEGORIES = {"invention": "발명 자료", "drawing": "도면", "prior_art": "선행기술", "spec": "정식 명세서"}
 
@@ -60,8 +61,8 @@ def validate_attachment(path: Path, category: str = "invention") -> Attachment:
         raise ValueError(f"파일을 찾을 수 없습니다: {path.name}")
     if path.name.lower() == ".env" or path.name.lower().startswith(".env."):
         raise ValueError("API 키가 담긴 .env 파일은 첨부할 수 없습니다.")
-    if path.suffix.lower() not in set(TEXT_EXT) | set(IMAGE_EXT):
-        raise ValueError(f"지원하지 않는 형식: {path.name} — TXT, MD, PNG, JPG, WEBP 등을 사용하세요.")
+    if path.suffix.lower() not in set(TEXT_EXT) | set(IMAGE_EXT) | DOC_EXT:
+        raise ValueError(f"지원하지 않는 형식: {path.name} — TXT, MD, PDF, DOCX, HWPX, HWP, PNG, JPG, WEBP를 사용하세요.")
     if category not in CATEGORIES:
         raise ValueError("첨부 자료의 종류를 선택해 주세요.")
     if category == "drawing" and path.suffix.lower() not in IMAGE_EXT:
