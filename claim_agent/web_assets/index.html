@@ -13,6 +13,25 @@
   <div id="conversation" tabindex="-1">
     <section id="welcome"><div class="welcome-mark">C</div><h1>무엇을 도와드릴까요?</h1><p>편하게 질문하고, 자료를 첨부하고, 함께 수정해 보세요.</p><div class="suggestions"><button data-prompt="안녕! 어떤 도움을 줄 수 있어?">자유롭게 대화하기 <span>↗</span></button><button data-prompt="첨부한 자료의 핵심 내용을 정리해 줘.">자료 정리하기 <span>↗</span></button><button data-prompt="발명에 관해 설명할게. 청구항 작성을 도와줘.">발명 이야기하기 <span>↗</span></button></div></section>
     <div id="messages" aria-label="대화 내용"></div>
+    <section id="run-panel" aria-label="작업 상태" hidden>
+      <div class="run-head"><strong>작업 상태</strong> <span id="run-outcome"></span><span id="run-usage" class="run-usage"></span></div>
+      <ol id="run-steps" class="run-steps" aria-label="단계 진행"></ol>
+      <div id="run-halt" class="run-halt" hidden></div>
+      <details id="run-gates"><summary>게이트 표</summary><table id="run-gate-table"></table></details>
+      <details id="run-diff"><summary>리비전 대조 (기존 문언 / 제안 문언 / 변경 이유 / 권리범위 영향 / 근거)</summary><div id="run-diff-body" class="run-diff-body"></div></details>
+      <div class="run-actions"><a id="export-docx" class="run-link" download>DOCX 내보내기</a><a id="export-md" class="run-link" download>MD 내보내기</a><a id="export-evidence" class="run-link" download>근거·판정 부록 포함 DOCX</a></div>
+      <form id="resume-form" class="resume-form">
+        <label class="resume-label">재개·수정 결정</label>
+        <textarea id="resume-text" rows="2" placeholder="결정 내용 또는 수정 지시 (예: 오목면의 주체는 기둥 둘레면)"></textarea>
+        <div class="resume-row">
+          <select id="resume-kind" aria-label="재개 종류"></select>
+          <select id="resume-scope" aria-label="수정 범위" hidden><option value="">독립항 (종속항은 재검수)</option><option value="DEPENDENT">종속항만</option></select>
+          <span id="resume-files" class="resume-files"></span>
+          <button type="submit" id="resume-send">실행</button>
+        </div>
+        <p class="resume-hint">스타일만: 조사·띄어쓰기·표면 용어 (r+1) · 의미: 절 결속·관계 술어 (r+1) · 재설계: 주골격·한정 집합 (d+1). 추가 자료를 첨부하면 항상 재설계로 실행됩니다.</p>
+      </form>
+    </section>
   </div>
   <footer>
     <div id="error" role="alert" hidden></div>

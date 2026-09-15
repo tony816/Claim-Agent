@@ -194,6 +194,13 @@ class Workspace:
             job["thread"] = thread
             thread.start()
 
+    def diff(self, run_id: str, scope: str = "INDEPENDENT") -> str:
+        from .runtime import build_runtime
+        from .store.diff import render_revision_diff
+
+        rt = build_runtime(self.root, self.config)
+        return render_revision_diff(rt.store, rt.store.load_state(run_id), scope=scope if scope in ("INDEPENDENT", "DEPENDENT_SET") else "INDEPENDENT")
+
     def export(self, run_id: str, fmt: str, with_evidence: bool = False) -> tuple[bytes, str, str]:
         from .runtime import build_runtime
         from .store.export import export_run
@@ -427,6 +434,14 @@ class Handler(BaseHTTPRequestHandler):
                     self.json(dict(model=workspace.cfg.model.default, sessions=[dict(id=s["id"], title=s["title"]) for s in sessions]))
             elif url.path == "/api/session":
                 self.json(workspace.snapshot(query.get("id", [""])[0]))
+            elif url.path == "/api/diff":
+                sid = query.get("id", [""])[0]
+                with workspace.lock:
+                    workspace.directory(sid)
+                    run_id = workspace.sessions[sid].get("run_id")
+                    if not run_id or not workspace.run_status(run_id):
+                        raise ValueError("대조할 작업이 없습니다.")
+                    self.json({"text": workspace.redact(workspace.diff(run_id, query.get("scope", ["INDEPENDENT"])[0]))})
             elif url.path == "/api/export":
                 sid = query.get("id", [""])[0]
                 fmt = query.get("format", ["docx"])[0]

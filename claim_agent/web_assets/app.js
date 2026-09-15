@@ -60,7 +60,7 @@ function render(data){
     }
     view.status=m.status;
   }
-  controls();if(follow)box.scrollTop=box.scrollHeight;
+  renderRun(data);controls();if(follow)box.scrollTop=box.scrollHeight;
 }
 async function list(){const data=await api("/api/sessions");$("model").textContent=data.model;$("sessions").replaceChildren();for(const s of data.sessions){const b=el("button",s.id===state.id?"active":"",s.title);b.onclick=()=>open(s.id).catch(e=>error(e.message));$("sessions").append(b);}return data.sessions;}
 async function open(id){
@@ -101,3 +101,50 @@ $("shutdown").onclick=async()=>{if(state.data?.running&&!confirm("진행 중인 
 for(const button of document.querySelectorAll("[data-prompt]"))button.onclick=()=>{$("prompt").value=button.dataset.prompt;resize();controls();$("prompt").focus();};
 const timer=setInterval(()=>{if(!state.busy)refresh().catch(()=>error("프로그램에 연결할 수 없습니다. 실행기를 다시 더블클릭해 주세요."));},700);
 (async()=>{try{const sessions=await list();const saved=localStorage.getItem("claim-session");if(sessions.length)await open(sessions.find(s=>s.id===saved)?.id||sessions[0].id);else await create();}catch(e){error(e.message);}})();
+
+// ---- 작업 상태 패널: 단계 스텝퍼 · 게이트 표 · 중지 사유 · 재개 · 내보내기 · 리비전 대조
+const STAGES_ROOT=["ARCHITECT","DRAFT","STYLE","SUCCESS","SYNTAX","OA","BLIND","PICTURE","LOCK"],STAGES_DEP=["DEP_ARCHITECT","DEP_DRAFT","DEP_STYLE","DEP_SUCCESS","DEP_SYNTAX","DEP_OA","DEP_RECON","DEP_LOCK"];
+const STAGE_LABEL={ARCHITECT:"설계",DRAFT:"의미 초안",STYLE:"문체",SUCCESS:"성공조건",SYNTAX:"통사",OA:"OA",BLIND:"블라인드",PICTURE:"기준 비교",LOCK:"독립항 LOCK",DEP_ARCHITECT:"종속 설계",DEP_DRAFT:"종속 초안",DEP_STYLE:"종속 문체",DEP_SUCCESS:"종속 성공조건",DEP_SYNTAX:"종속 통사",DEP_OA:"종속 OA",DEP_RECON:"종속 역구성",DEP_LOCK:"종속 LOCK"};
+const KIND_LABEL={none:"같은 단계 재실행",accept_unverified:"미검증 수용(명세서·선행기술 부재만)",style:"스타일만 수정 (r+1)",meaning:"의미 수정 (r+1)",redesign:"재설계 (d+1)",restart:"처음부터"};
+let runKey="";
+function renderRun(data){
+  const panel=$("run-panel"),run=data.run;
+  if(!run||data.running){panel.hidden=true;return;}
+  panel.hidden=false;
+  $("run-outcome").textContent=(run.outcome||"")+" · "+(run.revision||"")+"/"+(run.design_revision||"");
+  const u=run.usage||{};
+  $("run-usage").textContent=u.calls?`호출 ${u.calls}회 · ${((u.latency_ms||0)/1000).toFixed(0)}s · 입력 ${Math.round(u.prompt_tokens||0).toLocaleString()} / 출력 ${Math.round((u.output_tokens||0)+(u.thoughts_tokens||0)).toLocaleString()} 토큰 · 비용 ${u.unpriced_calls?"N/A":"$"+(u.cost_usd||0).toFixed(4)}`:"";
+  const seen={};for(const r of run.stages||[]){if(!r.superseded&&!r.stale)seen[r.stage]=r;}
+  const steps=$("run-steps");steps.replaceChildren();
+  const order=STAGES_ROOT.concat(run.dependent?STAGES_DEP:[]);
+  for(const st of order){const li=el("li","",STAGE_LABEL[st]||st);const rec=seen[st];
+    if(run.halt&&run.halt.stage===st)li.className="halt";else if(rec||(st==="LOCK"&&run.draft_claim_lock)||(st==="DEP_LOCK"&&run.dependent&&run.dependent.draft_set_lock))li.className="done";
+    li.title=rec?`${rec.role}: ${rec.status} ${Object.entries(rec.gates||{}).map(([k,v])=>k+"="+v).join(", ")}`:"";steps.append(li);}
+  const halt=$("run-halt");halt.replaceChildren();
+  if(run.halt){halt.hidden=false;halt.append(el("strong","",`${run.halt.kind} @ ${run.halt.stage} (${run.halt.role||""})`),document.createTextNode("\n"+(run.halt.message||"")));
+    if(run.halt.open_issues&&run.halt.open_issues.length){const ul=el("ul");for(const o of run.halt.open_issues)ul.append(el("li","",`[${o.kind||""}] ${o.code||""} ${o.text||""}`));halt.append(ul);}}
+  else halt.hidden=true;
+  const table=$("run-gate-table");table.replaceChildren();
+  const head=el("tr");for(const h of ["단계","역할","상태","게이트","비고"]){head.append(el("th","",h));}table.append(head);
+  for(const r of run.stages||[]){const tr=el("tr");tr.className=r.superseded||r.stale?"superseded":"";for(const v of [r.stage,r.role,r.status,Object.entries(r.gates||{}).map(([k,v])=>k+": "+v).join(", "),(r.superseded?"superseded ":"")+(r.stale?"STALE":"")])tr.append(el("td","",v||""));table.append(tr);}
+  const base=`/api/export?id=${encodeURIComponent(data.id)}`;
+  $("export-docx").href=base+"&format=docx";$("export-md").href=base+"&format=md";$("export-evidence").href=base+"&format=docx&evidence=1";
+  const kinds=run.halt?["none","style","meaning","redesign","accept_unverified"]:["style","meaning","redesign"];
+  const select=$("resume-kind");const current=select.value;select.replaceChildren();
+  for(const k of kinds){const o=el("option","",KIND_LABEL[k]);o.value=k;select.append(o);}
+  if(kinds.includes(current))select.value=current;
+  $("resume-scope").hidden=!(run.dependent&&(run.dependent.draft_set_lock||run.dependent.final_set_lock));
+  $("resume-files").textContent=state.pending.length?`첨부 ${state.pending.length}개 → 재설계로 실행`:"";
+  const key=data.id+"|"+(run.outcome||"")+"|"+(run.revision||"")+"|"+(run.dependent&&run.dependent.draft_set_lock||"");
+  if(key!==runKey){runKey=key;$("run-diff").open=false;$("run-diff-body").textContent="";}
+}
+$("run-diff").ontoggle=async()=>{if($("run-diff").open&&!$("run-diff-body").textContent){try{const r=await api(`/api/diff?id=${encodeURIComponent(state.id)}`);$("run-diff-body").textContent=r.text;}catch(e){$("run-diff-body").textContent=e.message;}}};
+$("resume-form").onsubmit=async event=>{
+  event.preventDefault();if(state.busy||state.data?.running)return;
+  const kind=$("resume-kind").value,text=$("resume-text").value.trim();
+  if(kind!=="accept_unverified"&&!text){error("결정 내용을 입력하세요.");return;}
+  state.busy=true;controls();error("");
+  try{await api("/api/resume",{id:state.id,kind:state.pending.length&&kind!=="none"&&kind!=="accept_unverified"?"restart":kind,text,files:state.pending.map(f=>f.id),scope:$("resume-scope").hidden?"":$("resume-scope").value});
+    $("resume-text").value="";state.pending=[];pending();await refresh();$("conversation").scrollTop=$("conversation").scrollHeight;}
+  catch(e){error(e.message);}finally{state.busy=false;controls();}
+};
