@@ -134,6 +134,11 @@ def render_report(state: RunState, claims_only: bool = False) -> str:
     perf = render_performance(state)
     if perf:
         out.append(perf)
+    from .diff import render_revision_history
+
+    history = render_revision_history(state)
+    if history:
+        out.append(history)
     out.append("## 남은 REVIEW/BLOCK/UNVERIFIED")
     out.append("")
     if state.halt:

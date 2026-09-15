@@ -162,6 +162,21 @@ def cmd_runs(args) -> int:
     elif args.sub == "report":
         st = rt.store.load_state(args.run_id)
         print(render_report(st, claims_only=args.claims_only))
+    elif args.sub == "diff":
+        from .store.diff import render_revision_diff
+
+        st = rt.store.load_state(args.run_id)
+        print(render_revision_diff(rt.store, st, getattr(args, "from_rev", None), getattr(args, "to_rev", None), args.scope))
+    elif args.sub == "purge":
+        from .store.retention import purge_all
+
+        days = args.older_than if args.older_than is not None else rt.cfg.retention.days
+        if days is None:
+            raise SystemExit("--older-than <days> 또는 claim-agent.yaml의 retention.days가 필요하다")
+        keep = not args.include_locks if args.include_locks is not None else rt.cfg.retention.keep_locks
+        result = purge_all(rt, days, keep_locks=keep, dry_run=args.dry_run)
+        for kind, ids in result.items():
+            print(f"{'[dry-run] ' if args.dry_run else ''}{kind}: {len(ids)} removed" + (f" — {', '.join(ids[:10])}{'…' if len(ids) > 10 else ''}" if ids else ""))
     elif args.sub == "rca":
         rep = build_rca(rt.store, args.run_id)
         md = rep.render_md()
@@ -521,6 +536,15 @@ def build_parser() -> argparse.ArgumentParser:
     rp = rus.add_parser("report")
     rp.add_argument("run_id")
     rp.add_argument("--claims-only", action="store_true")
+    rd = rus.add_parser("diff", help="기존 문언 / 제안 문언 / 변경 이유 / 권리범위 영향 / 근거 between two revisions")
+    rd.add_argument("run_id")
+    rd.add_argument("--from", dest="from_rev")
+    rd.add_argument("--to", dest="to_rev")
+    rd.add_argument("--scope", default="INDEPENDENT", choices=["INDEPENDENT", "DEPENDENT_SET"])
+    rpg = rus.add_parser("purge", help="delete runs/ and .tui/requests older than N days (raw material lives there)")
+    rpg.add_argument("--older-than", type=float, help="days; defaults to retention.days")
+    rpg.add_argument("--include-locks", action="store_true", default=None, help="also delete runs that reached a LOCK")
+    rpg.add_argument("--dry-run", action="store_true")
     rr = rus.add_parser("rca", help="root cause analysis of one run: trace, fault, pattern, impact")
     rr.add_argument("run_id")
     rr.add_argument("--out")

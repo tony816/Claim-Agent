@@ -68,6 +68,11 @@ class PathsConfig(BaseModel):
     experiments_dir: str = "experiments"
 
 
+class RetentionConfig(BaseModel):
+    days: float | None = None         # when set, `claim-agent runs purge` (and the web launcher) delete older runs/requests
+    keep_locks: bool = True           # never auto-delete runs that reached a DRAFT/FINAL lock
+
+
 class MaterialsConfig(BaseModel):
     max_image_side: int = 2048        # drawings are resized once at intake to this longest side (0 = never)
     files_api: bool = True            # upload each drawing once per content hash and reference it by URI
@@ -91,6 +96,7 @@ class AppConfig(BaseModel):
     lessons: LessonsConfig = Field(default_factory=LessonsConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     materials: MaterialsConfig = Field(default_factory=MaterialsConfig)
+    retention: RetentionConfig = Field(default_factory=RetentionConfig)
     project_root: Path = Field(default_factory=Path.cwd, exclude=True)
 
     def role(self, name: str) -> RoleConfig:

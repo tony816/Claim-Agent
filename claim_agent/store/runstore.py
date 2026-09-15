@@ -93,3 +93,27 @@ class RunStore:
 
     def telemetry_path(self, run_id: str) -> Path:
         return self.run_dir(run_id) / "telemetry.jsonl"
+
+    # ------------------------------------------------------------ retention
+    def purge(self, older_than_days: float, keep_locks: bool = True, dry_run: bool = False, now: float | None = None) -> list[str]:
+        """Delete run directories not updated within `older_than_days` (raw material and call packets live there).
+
+        keep_locks keeps runs that reached a DRAFT/FINAL lock (their records are the audit trail of a
+        delivered claim); everything else older than the horizon is removed. Returns the run ids affected.
+        """
+        horizon = (now or time.time()) - older_than_days * 86400
+        removed: list[str] = []
+        for run_id in self.list_runs():
+            d = self.run_dir(run_id)
+            try:
+                state = json.loads((d / "state.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if float(state.get("updated_at", 0)) > horizon:
+                continue
+            if keep_locks and str(state.get("outcome", "")).endswith("LOCK"):
+                continue
+            removed.append(run_id)
+            if not dry_run:
+                shutil.rmtree(d, ignore_errors=True)
+        return removed
