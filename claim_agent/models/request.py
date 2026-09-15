@@ -9,6 +9,7 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field
 
+from ..sources.images import DEFAULT_MAX_SIDE, normalize_image
 from .enums import RequestMode
 
 IMAGE_EXT = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
@@ -61,9 +62,20 @@ class MaterialItem:
     mime_type: str | None = None
     data: bytes | None = None
     category: str = "invention"   # invention | spec | drawing | prior_art | claim_file
+    normalized_sha256: str | None = None   # images: sha of the bytes actually sent (after resize)
+    image_meta: dict | None = None         # images: original/normalized size, resized flag, note
+
+    @property
+    def content_sha256(self) -> str:
+        return self.normalized_sha256 or self.sha256
 
     def as_meta(self) -> dict:
-        return {"path": self.path, "name": self.name, "kind": self.kind, "sha256": self.sha256, "category": self.category}
+        meta = {"path": self.path, "name": self.name, "kind": self.kind, "sha256": self.sha256, "category": self.category}
+        if self.normalized_sha256:
+            meta["normalized_sha256"] = self.normalized_sha256
+        if self.image_meta:
+            meta["image_meta"] = self.image_meta
+        return meta
 
 
 @dataclass
@@ -72,7 +84,7 @@ class MaterialBundle:
     user_lock: str | None = None
 
     @classmethod
-    def load(cls, req: RunRequest) -> MaterialBundle:
+    def load(cls, req: RunRequest, max_image_side: int = DEFAULT_MAX_SIDE) -> MaterialBundle:
         items: list[MaterialItem] = []
         for cat, paths in (
             ("invention", req.invention_sources),
@@ -82,7 +94,7 @@ class MaterialBundle:
             ("claim_file", [req.claim_file] if req.claim_file else []),
         ):
             for p in paths:
-                items.extend(_load_path(Path(p), cat))
+                items.extend(_load_path(Path(p), cat, max_image_side))
         return cls(items, req.user_lock)
 
     def by_category(self, *cats: str) -> list[MaterialItem]:
@@ -91,7 +103,7 @@ class MaterialBundle:
     def digest(self) -> str:
         h = hashlib.sha256()
         for i in sorted(self.items, key=lambda x: (x.category, x.name)):
-            h.update(f"{i.category}:{i.name}:{i.sha256}\n".encode())
+            h.update(f"{i.category}:{i.name}:{i.sha256}:{i.normalized_sha256 or ''}\n".encode())
         h.update(("USER_LOCK:" + (self.user_lock or "")).encode())
         return h.hexdigest()
 
@@ -110,12 +122,12 @@ class MaterialBundle:
         return None
 
 
-def _load_path(p: Path, category: str) -> list[MaterialItem]:
+def _load_path(p: Path, category: str, max_image_side: int = DEFAULT_MAX_SIDE) -> list[MaterialItem]:
     if p.is_dir():
         out: list[MaterialItem] = []
         for child in sorted(p.iterdir()):
             if child.is_file():
-                out.extend(_load_path(child, category))
+                out.extend(_load_path(child, category, max_image_side))
         return out
     if not p.exists():
         raise FileNotFoundError(f"material not found: {p}")
@@ -123,7 +135,9 @@ def _load_path(p: Path, category: str) -> list[MaterialItem]:
     sha = hashlib.sha256(raw).hexdigest()
     ext = p.suffix.lower()
     if ext in IMAGE_EXT:
-        return [MaterialItem(str(p), p.name, "image", sha, None, IMAGE_EXT[ext], raw, category)]
+        norm = normalize_image(raw, IMAGE_EXT[ext], max_image_side)
+        meta = {"original_size": norm.original_size, "size": norm.size, "resized": norm.resized, "bytes": len(norm.data), "original_bytes": len(raw), "note": norm.note}
+        return [MaterialItem(str(p), p.name, "image", sha, None, norm.mime_type, norm.data, category, norm.sha256 if norm.resized else None, meta)]
     if ext in TEXT_EXT or ext == "":
         return [MaterialItem(str(p), p.name, "text", sha, raw.decode("utf-8", errors="replace"), None, None, category)]
     raise ValueError(f"unsupported material type {ext}: {p} (use md/txt or png/jpg)")

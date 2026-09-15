@@ -70,7 +70,7 @@ def _materials(bundle: MaterialBundle, cats: tuple[str, ...]) -> tuple[str, list
             parts.append(f"<<<MATERIAL {label}>>>\n{(it.text or '').rstrip()}\n<<<END MATERIAL>>>\n\n")
         else:
             parts.append(f"<<<MATERIAL {label}>>> (이미지 파트로 첨부)\n\n")
-            images.append(ImagePart(it.mime_type or "image/png", it.data or b"", label))
+            images.append(ImagePart(it.mime_type or "image/png", it.data or b"", label, it.content_sha256))
     return "".join(parts), images
 
 

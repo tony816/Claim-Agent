@@ -124,8 +124,11 @@ class PipelineEngine:
         self._pending_repairs: list[tuple[str, str, CallResult]] = []
 
     # ================================================================== run lifecycle
+    def _load_bundle(self, request: RunRequest) -> MaterialBundle:
+        return MaterialBundle.load(request, self.cfg.materials.max_image_side)
+
     def start(self, request: RunRequest, run_id: str | None = None) -> RunState:
-        bundle = MaterialBundle.load(request)
+        bundle = self._load_bundle(request)
         rid = run_id or self.store.new_run_id()
         state = RunState(
             run_id=rid,
@@ -148,7 +151,7 @@ class PipelineEngine:
         return state
 
     def run(self, state: RunState) -> RunState:
-        bundle = self._bundle or MaterialBundle.load(RunRequest.model_validate(state.request))
+        bundle = self._bundle or self._load_bundle(RunRequest.model_validate(state.request))
         self._bundle = bundle
         state.halt = None
         state.outcome = "RUNNING"
@@ -180,7 +183,7 @@ class PipelineEngine:
                 raise ProviderError("요청 갱신으로 candidate_id 또는 USER_LOCK을 변경할 수 없습니다.")
             req = updated
             state.request = req.model_dump(mode="json")
-            bundle = MaterialBundle.load(req)
+            bundle = self._load_bundle(req)
             self.store.save_materials(run_id, bundle)
             state.input_revision = input_revision_id(bundle.digest())
             state.material_meta = [i.as_meta() for i in bundle.items]
@@ -200,14 +203,14 @@ class PipelineEngine:
         if decision.add_sources:
             req.invention_sources = list(req.invention_sources) + list(decision.add_sources)
             state.request = req.model_dump(mode="json")
-            bundle = MaterialBundle.load(req)
+            bundle = self._load_bundle(req)
             self.store.save_materials(run_id, bundle)
             state.input_revision = input_revision_id(bundle.digest())
             state.material_meta = [i.as_meta() for i in bundle.items]
             state.spec_present = bundle.spec_present
             state.prior_art_present = bundle.prior_art_present
             decision.action = "redesign" if decision.action in ("none", "add_source") else decision.action
-        self._bundle = MaterialBundle.load(req)
+        self._bundle = self._load_bundle(req)
         halted_stage = Stage(state.halt.stage) if state.halt else state.stage
         in_dependent = halted_stage.value.startswith("DEP_")
         if decision.text:
@@ -358,7 +361,10 @@ class PipelineEngine:
         )
         call_payload = {
             "seq": seq, "role": role, "scope": scope.value, "stage": stage.value, "record_id": rid, "model": spec.model,
-            "context_transport": {"shared_chars": len(spec.cache_packet_text), "packet_chars": len(spec.packet_text), "shared_images": len(spec.images) if spec.cache_images else 0},
+            "context_transport": {
+                "shared_chars": len(spec.cache_packet_text), "packet_chars": len(spec.packet_text), "shared_images": len(spec.images) if spec.cache_images else 0,
+                "images": len(spec.images), "image_transport": result.raw.get("image_transport"), "inline_image_bytes": result.raw.get("inline_image_bytes", sum(len(i.data) for i in spec.images)),
+            },
             "scope_problem": scope_problem,
             "system_sha": spec.system_sha, "sources_sha": spec.sources_sha, "packet_sha": spec.packet_sha, "packet_text": packet_text,
             "preloaded_sources": prompt.source_paths, "tool_log": tool_log.calls, "response": result.as_dict(), "repair_used": repair_used,

@@ -68,6 +68,11 @@ class PathsConfig(BaseModel):
     experiments_dir: str = "experiments"
 
 
+class MaterialsConfig(BaseModel):
+    max_image_side: int = 2048        # drawings are resized once at intake to this longest side (0 = never)
+    files_api: bool = True            # upload each drawing once per content hash and reference it by URI
+
+
 class LessonsConfig(BaseModel):
     inject: str = "approved_only"     # approved_only | none
 
@@ -85,6 +90,7 @@ class AppConfig(BaseModel):
     paths: PathsConfig = Field(default_factory=PathsConfig)
     lessons: LessonsConfig = Field(default_factory=LessonsConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
+    materials: MaterialsConfig = Field(default_factory=MaterialsConfig)
     project_root: Path = Field(default_factory=Path.cwd, exclude=True)
 
     def role(self, name: str) -> RoleConfig:

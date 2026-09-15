@@ -70,8 +70,11 @@ def make_provider(rt: Runtime, mode: str = "gemini", fixtures: Path | None = Non
 
     client = make_client(rt.cfg.model.api_key_env, api_key)
     cache = CacheManager(client, rt.cfg.path("runs_dir") / ".cache-registry.json", rt.cfg.cache.ttl, rt.cfg.cache.enabled, warm=rt.cfg.cache.warm, min_expected_reuse=rt.cfg.cache.min_expected_reuse)
+    from .provider.files import FileStore
+
+    files = FileStore(client, rt.cfg.path("runs_dir") / ".files-registry.json", rt.cfg.materials.files_api)
     gp = GeminiProvider(client, cache, rt.cfg.pipeline.retry.max_attempts, rt.cfg.pipeline.retry.backoff_s,
-                        events=EventWriter.from_env(rt.cfg.model.api_key_env))
+                        events=EventWriter.from_env(rt.cfg.model.api_key_env), files=files)
     if mode == "record":
         if fixtures is None:
             raise ValueError("--record requires a fixtures directory")

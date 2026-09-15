@@ -14,6 +14,7 @@ class ImagePart:
     mime_type: str
     data: bytes
     label: str = ""
+    sha256: str = ""       # content hash of `data` (Files API registry key)
 
 
 @dataclass

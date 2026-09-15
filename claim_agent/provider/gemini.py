@@ -10,8 +10,9 @@ from types import SimpleNamespace
 from typing import Any
 
 from ..live_events import EventWriter, visible_text
-from .base import CallResult, CallSpec, ProviderError, parse_json_text
+from .base import CallResult, CallSpec, ImagePart, ProviderError, parse_json_text
 from .cache import CacheManager
+from .files import FileStore
 
 THINKING_BUDGET_FALLBACK = {"MINIMAL": 512, "LOW": 1024, "MEDIUM": 8192, "HIGH": -1}
 
@@ -36,9 +37,11 @@ def make_client(api_key_env: str = "GEMINI_API_KEY", api_key: str | None = None)
 class GeminiProvider:
     name = "gemini"
 
-    def __init__(self, client: Any, cache: CacheManager | None = None, retry_attempts: int = 3, backoff_s: list[float] | None = None, events: EventWriter | None = None):
+    def __init__(self, client: Any, cache: CacheManager | None = None, retry_attempts: int = 3, backoff_s: list[float] | None = None, events: EventWriter | None = None, files: FileStore | None = None):
         self.client = client
         self.cache = cache
+        self.files = files
+        self._last_image_transport: tuple[str, int] = ("none", 0)
         self.retry_attempts = retry_attempts
         self.backoff_s = backoff_s or [2, 8, 20]
         self._thinking_level_unsupported: set[str] = set()
@@ -81,9 +84,24 @@ class GeminiProvider:
         if shared_cached:
             packet = packet.replace(spec.cache_packet_text, "", 1)
         parts.append(types.Part.from_text(text=packet))
+        inline_bytes, via_uri = 0, 0
         for img in ([] if shared_cached and spec.cache_images else spec.images):
-            parts.append(types.Part.from_bytes(data=img.data, mime_type=img.mime_type))
+            part, inline = self._image_part(img)
+            parts.append(part)
+            inline_bytes += inline
+            via_uri += 0 if inline else 1
+        self._last_image_transport = ("files_api" if via_uri and not inline_bytes else "mixed" if via_uri else "inline" if inline_bytes else "none", inline_bytes)
         return [types.Content(role="user", parts=parts)]
+
+    def _image_part(self, img: ImagePart) -> tuple[Any, int]:
+        """Files API reference when available (uploaded once per content hash), else inline bytes."""
+        from google.genai import types
+
+        if self.files is not None and img.sha256:
+            entry = self.files.get(img.sha256, img.data, img.mime_type, img.label)
+            if entry is not None:
+                return types.Part.from_uri(file_uri=entry.uri, mime_type=img.mime_type), 0
+        return types.Part.from_bytes(data=img.data, mime_type=img.mime_type), len(img.data)
 
     def _config(self, spec: CallSpec, cache_name: str | None, json_mode: bool) -> Any:
         from google.genai import types
@@ -205,6 +223,7 @@ class GeminiProvider:
                 finish_reason=self._finish_reason(resp),
                 model=spec.model,
                 provider=self.name,
+                raw={"image_transport": self._last_image_transport[0], "inline_image_bytes": self._last_image_transport[1]},
             )
         raise ProviderError(f"Gemini call failed after retries for {spec.role}: {last_exc}")
 
