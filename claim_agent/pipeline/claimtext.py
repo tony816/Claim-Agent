@@ -178,6 +178,26 @@ def parent_chain(claims: list[Claim], target_no: int, expand_multi: bool = False
     return chains_for(target_no)
 
 
+def ordered_claims(*texts: str | None) -> list[Claim]:
+    """Parse several claim texts into one list ordered by claim number (stable; duplicates stay for validation).
+
+    A baseline parent chain and edited targets interleave by number (1, 5, 8 + 9, or 1, 8 + 5, 9), so they are merged
+    by number rather than concatenated.
+    """
+    claims = [c for t in texts if t and t.strip() for c in parse_claim_set(t)]
+    return sorted(claims, key=lambda c: c.claim_no)
+
+
+def ancestor_nos(claims: list[Claim], target_no: int) -> set[int]:
+    """Every claim the target cites directly or indirectly, over all alternatives of multi-dependent claims."""
+    return {c.claim_no for chain in parent_chain(claims, target_no, expand_multi=True) for c in chain}
+
+
+def baseline_digest(text: str) -> str:
+    """Identity of a claim set independent of header spelling and line endings."""
+    return exact_sha256(claim_set_text(parse_claim_set(text.replace("\r\n", "\n"))))
+
+
 def parent_chain_text(chain: list[Claim]) -> str:
     return "\n\n".join(c.text for c in chain)
 

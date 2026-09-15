@@ -123,6 +123,26 @@ class DependentSetState(BaseModel):
     stale: bool = False
 
 
+class BaselineClaim(BaseModel):
+    claim_no: int
+    parent_nos: list[int] = Field(default_factory=list)
+    text: str
+
+
+class BaselineSet(BaseModel):
+    """The user's numbered claim set that an EXISTING_SET_EDIT run edits in place.
+
+    Read-only and never gated by the run: it stands where a root LOCK would, but is not a PASS of anything.
+    """
+    record_id: str
+    source_path: str
+    sha256: str                     # claimtext.baseline_digest of the parsed set
+    claims: list[BaselineClaim]
+    edit_targets: list[int]
+    chain_nos: list[int]            # every claim the targets cite, directly or not (targets excluded), ascending
+    chain_text: str
+
+
 class Halt(BaseModel):
     stage: str
     role: str
@@ -149,6 +169,7 @@ class RunState(BaseModel):
     stage: Stage = Stage.ARCHITECT
     candidate: CandidateState
     dependent: DependentSetState | None = None
+    baseline_set: BaselineSet | None = None      # EXISTING_SET_EDIT only
     records: dict[str, RecordRef] = Field(default_factory=dict)
     halt: Halt | None = None
     outcome: str = "RUNNING"

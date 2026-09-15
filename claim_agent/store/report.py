@@ -27,9 +27,11 @@ def _pending_list(state: RunState) -> list[str]:
         expected = state.request.get("reviewers") or ["syntax-scope-reviewer"]
         seen = {r.role for r in state.records.values() if not r.stale and not r.superseded}
     else:
-        expected = ["ARCHITECT", "DRAFT", "STYLE", "SUCCESS", "SYNTAX", "OA", "BLIND", "PICTURE"]
+        # An edit of an existing set has no independent stages: its root is the user's baseline chain.
+        expected = [] if state.baseline_set else ["ARCHITECT", "DRAFT", "STYLE", "SUCCESS", "SYNTAX", "OA", "BLIND", "PICTURE"]
         if state.request.get("dependent"):
-            expected += ["DEP_ARCHITECT", "DEP_DRAFT", "DEP_STYLE", "DEP_SUCCESS", "DEP_SYNTAX", "DEP_OA", "DEP_RECON"]
+            # An edit's combined review records success, syntax and OA under DEP_SUCCESS.
+            expected += ["DEP_ARCHITECT", "DEP_DRAFT", "DEP_STYLE", "DEP_SUCCESS"] + ([] if state.baseline_set else ["DEP_SYNTAX", "DEP_OA"]) + ["DEP_RECON"]
         seen = {r.stage for r in state.records.values() if not r.stale and not r.superseded}
     return [stage for stage in expected if stage not in seen]
 
@@ -88,7 +90,10 @@ def _clip(text: str, limit: int) -> str:
 
 def _lock_phrase(state: RunState) -> str:
     c, dep = state.candidate, state.dependent
-    out = "독립항 " + ("FINAL_CLAIM_LOCK" if c.final_claim_lock else "DRAFT_CLAIM_LOCK(잠정안)" if c.draft_claim_lock else "LOCK 없음")
+    if state.baseline_set:
+        out = "기존 세트 편집(부모항 체인 원문 유지·미검증)"
+    else:
+        out = "독립항 " + ("FINAL_CLAIM_LOCK" if c.final_claim_lock else "DRAFT_CLAIM_LOCK(잠정안)" if c.draft_claim_lock else "LOCK 없음")
     if dep:
         out += " · 종속항 " + ("FINAL_DEPENDENT_SET_LOCK" if dep.final_set_lock else "DRAFT_DEPENDENT_SET_LOCK(잠정안)" if dep.draft_set_lock else "LOCK 없음")
     return out
@@ -168,6 +173,29 @@ def turn_usage(state: RunState) -> tuple[dict[str, float], float | None]:
     return state.usage, (state.updated_at - state.created_at) if state.usage else None
 
 
+def edited_set_text(state: RunState) -> str | None:
+    """The user's set with only the edit targets replaced — what an EXISTING_SET_EDIT run hands back."""
+    base, dep = state.baseline_set, state.dependent
+    if not base or not dep or not dep.current or not dep.current.exact_text:
+        return None
+    edited = {c["claim_no"]: c["text"] for c in dep.current.claims}
+    return "\n\n".join(edited.get(c.claim_no, c.text) for c in base.claims)
+
+
+def _edit_section(state: RunState) -> list[str]:
+    base, dep = state.baseline_set, state.dependent
+    assert base is not None
+    nos = ", ".join(f"제{n}항" for n in base.edit_targets)
+    lock = dep.draft_set_lock if dep else None
+    text = dep.current.exact_text if dep and dep.current and dep.current.exact_text else None
+    out = [f"### 편집한 항: {nos} ({'DRAFT_DEPENDENT_SET_LOCK ' + lock if lock else 'LOCK 없음'}; {PROVISIONAL_LABEL if lock else '미확정 문언'})", "",
+           text or "편집 문언 없음 (종속항 단계에서 중지)", ""]
+    full = edited_set_text(state)
+    if full:
+        out += [f"### 전체 청구항 세트 ({nos}만 교체 · 나머지 항은 제공된 원문 그대로 · 부모항 체인 미검증)", "", full, ""]
+    return out
+
+
 def render_chat_report(state: RunState) -> str:
     """The conversation answer: the deliverable first, then a summary of at most 500 characters and a usage footnote.
 
@@ -184,6 +212,8 @@ def render_chat_report(state: RunState) -> str:
             out += [f"### {role}", "", report, ""]
         if not state.review_reports:
             out += ["검토 의견 없음 (검토 역할이 보고서를 남기기 전에 중지)", ""]
+    elif state.baseline_set:
+        out += ["## 최종안", ""] + _edit_section(state)
     else:
         root_text = cur.exact_text if cur and cur.exact_text else (cur.meaning_draft_text if cur else None)
         final_root = bool(c.final_claim_lock)
@@ -217,6 +247,8 @@ def render_report(state: RunState, claims_only: bool = False) -> str:
     root_label = "출원용 최종안" if final_root else PROVISIONAL_LABEL
 
     if claims_only:
+        if state.baseline_set:
+            return f"<!-- {PROVISIONAL_LABEL} · 기존 세트 편집 -->\n\n" + (edited_set_text(state) or dep_text or "") + "\n"
         parts = [f"<!-- {root_label} -->"]
         if root_text:
             parts.append(root_text)
@@ -240,6 +272,8 @@ def render_report(state: RunState, claims_only: bool = False) -> str:
         if not state.review_reports:
             out.append("검토 보고서가 아직 생성되지 않았습니다.")
         out.append("")
+    elif state.baseline_set:
+        out.extend(_edit_section(state))
     elif root_text:
         lock_state = "FINAL_CLAIM_LOCK " + c.final_claim_lock if final_root else ("DRAFT_CLAIM_LOCK " + c.draft_claim_lock if c.draft_claim_lock else "LOCK 없음")
         out.append(f"### 독립항 ({lock_state}; {root_label if c.draft_claim_lock or c.final_claim_lock else '미확정 문언'})")
@@ -253,7 +287,7 @@ def render_report(state: RunState, claims_only: bool = False) -> str:
         out.extend(["## 중지 단계의 검토 내용", "",
                     "아래는 해당 역할의 원 보고서입니다. 제시된 방향·예시 문언은 후속 검수를 통과한 확정안이 아닙니다.", "",
                     state.halt.report_markdown, ""])
-    if dep:
+    if dep and not state.baseline_set:
         dl = dep.final_set_lock or dep.draft_set_lock
         label = ("FINAL_DEPENDENT_SET_LOCK " if dep.final_set_lock else "DRAFT_DEPENDENT_SET_LOCK ") + dl if dl else "LOCK 없음"
         out.append(f"### 종속항 세트 ({label}; {'출원용 최종 종속항 세트' if dep.final_set_lock else PROVISIONAL_LABEL})")

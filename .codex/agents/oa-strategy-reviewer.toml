@@ -13,6 +13,7 @@ developer_instructions = """
 `review_scope: DEPENDENT_SET`인 `AUTHORING_DRAFT`와 `FINALIZATION`에는 다음 자료가 모두 필요하다.
 
 - `AUTHORING_DRAFT`이면 유효한 루트 `DRAFT_CLAIM_LOCK` 또는 `FINAL_CLAIM_LOCK`, `FINALIZATION`이면 유효한 루트 `FINAL_CLAIM_LOCK` 전문
+- `authoring_scope: EXISTING_SET_EDIT`이면 루트 LOCK 대신 오케스트레이터가 봉인한 `BASELINE_SET` 기록(사용자가 제공한 기존 청구항 세트의 목표항 부모항 체인 전문과 sha256)을 받는다. BASELINE_SET은 이번 run에서 검증되지 않은 읽기 전용 입력이므로 누락으로 보거나 PASS 근거로 쓰지 않으며, 부모항 체인 자체의 OA 위험은 이번 판정 범위 밖의 `UNVERIFIED`로 기록한다. 이 범위의 검수는 `review_mode: COMBINED_SUCCESS_SYNTAX_OA`로 한 호출에서 수행되므로, success record·syntax PASS 보고서 전문 대신 같은 보고서의 앞 두 절 판정을 입력으로 쓰고, 그중 PASS가 아닌 것이 있으면 `DEPENDENT_UPSTREAM_GATE_NOT_PASS`로 둔다. 두 OA 게이트는 이 경우에도 분리해 적는다.
 - `dependent_set_id`, `dependent_design_revision`, `dependent_revision`과 정확한 종속항 세트 전문
 - `dependent-claim-strategy-architect`의 `상태: PASS`, `DEPENDENT_DESIGN_GATE: LOCKED` 보고서 전문과 후보별 과제–특징–원리–효과·의미 한정 패키지
 - 같은 dependent_revision에 대해 `claim-success-reviewer`가 봉인한 `dependent_success_record_id`와 `상태: PASS` 기록 전문 및 그 기록의 `NON_PATENT_TECHNICAL_READER_GATE`·해당하는 `GEOMETRIC_OBJECT_GATE`

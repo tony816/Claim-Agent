@@ -70,6 +70,7 @@ RECORD_PREFIX = {
     "final_claim_lock": "fcl",
     "draft_dependent_set_lock": "ddsl",
     "final_dependent_set_lock": "fdsl",
+    "baseline_set": "bl",
 }
 
 

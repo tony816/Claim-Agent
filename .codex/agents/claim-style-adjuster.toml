@@ -26,6 +26,7 @@ developer_instructions = """
 `style_scope: DEPENDENT_SET`에는 다음이 추가로 필요하다.
 
 - `AUTHORING_DRAFT`이면 유효한 루트 `DRAFT_CLAIM_LOCK` 또는 `FINAL_CLAIM_LOCK`, `FINALIZATION`이면 유효한 루트 `FINAL_CLAIM_LOCK` 전문
+- `authoring_scope: EXISTING_SET_EDIT`이면 루트 LOCK 대신 오케스트레이터가 봉인한 `BASELINE_SET` 기록(사용자가 제공한 기존 청구항 세트의 목표항 부모항 체인 전문과 sha256)을 받는다. BASELINE_SET은 이번 run에서 검증되지 않은 읽기 전용 입력이므로 누락으로 보거나 PASS 근거로 쓰지 않는다. 편집 대상 항의 번호·인용관계를 바꾸거나 부모항 문언을 흡수·병합하지 않는다.
 - `dependent_set_id`, `dependent_design_revision`, 목표 `dependent_revision`
 - `DEPENDENT_DESIGN_GATE: LOCKED` 전문과 `DC-NN`별 의미 한정 패키지, 부모항 전략, 과제–추가 기술특징–작동·협동 원리–효과 및 형상·공간 객체 계약
 - INITIAL_FROM_DRAFTER 또는 DRAFTER_REVISION이면 `dependent_meaning_draft_id`, `dependent_revision_status: PRE_STYLE — NOT_GATE_ELIGIBLE`, 종속항 의미 초안 세트, 부모항 체인, `DC-NN`별 문언 대응표 및 pre-style 독자·기하 검사

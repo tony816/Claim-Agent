@@ -7,7 +7,7 @@ import json
 import re
 from pathlib import Path
 
-from .claim_scope import apply_ui_target, constrain_target, ui_target_set
+from .claim_scope import apply_ui_target, constrain_target, find_existing_set, parse_target, ui_target_set
 from .models.request import IMAGE_EXT, RunRequest
 from .pipeline.engine import Decision
 from .routing import RouteDecision
@@ -23,14 +23,14 @@ def intake(request: dict, folder: Path, previous=None) -> tuple[list[dict], dict
     paths = {"invention_sources": [], "drawings": [], "prior_art": [], "spec_path": None}
     seen = set()
 
-    def add_text(text, origin, category="invention", path=None, is_request=False):
+    def add_text(text, origin, category="invention", path=None, is_request=False, name=None):
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
         key = (origin, category, digest)
         if not text.strip() or key in seen:
             return
         seen.add(key)
         bid = f"input-{len(blocks) + 1}"
-        p = Path(path) if path else directory / f"{bid}-{digest[:12]}.txt"
+        p = Path(path) if path else directory / f"{name or bid}-{digest[:12]}.txt"
         if not path:
             p.write_text(text, encoding="utf-8", newline="")     # no CRLF translation on Windows: the file is the exact text
         blocks.append(dict(id=bid, text=text, origin=origin, category=category, path=str(p), is_request=is_request))
@@ -81,6 +81,9 @@ def intake(request: dict, folder: Path, previous=None) -> tuple[list[dict], dict
                 paths["drawings"].append(str(path))
     add_text(request.get("material", ""), "user")
     add_text(request.get("reference", ""), "assistant_reference")
+    # Project instructions are text the user wrote: technical descriptions and claims there are user material like a
+    # pasted note. They also stay in 현재 요청 as standing directives; an unchanged text dedupes on follow-ups.
+    add_text(str(request.get("instructions") or "").strip(), "user", name="project-instructions")
     categories = {a["path"]: a.get("category", "invention") for a in request.get("attachments", [])}
     for name in request.get("files", []):
         add_file(name, categories.get(name, "invention"))
@@ -89,18 +92,73 @@ def intake(request: dict, folder: Path, previous=None) -> tuple[list[dict], dict
     return blocks, paths
 
 
-def revision_path(route: RouteDecision, request: dict, blocks: list[dict], paths: dict, previous) -> tuple[str, str | None]:
+def resolve_edit_scope(route: RouteDecision, request: dict, blocks: list[dict], folder: Path, previous=None) -> tuple[str, str] | None:
+    """Set route.authoring_scope from the parsed input; returns (claim_file path, baseline digest) for EXISTING_SET_EDIT.
+
+    An authoring request that names dependent claims (in its text or the composer pick, already narrowed onto
+    route.dependent_target) is an in-place edit when a user-provided numbered set — a pasted or attached block, or the
+    project instructions — holds every named claim as a dependent claim. The work then stays inside that set: no new
+    independent claim, no renumbering. A previous run's own dependent set keeps the ordinary follow-up path, because
+    those claims are this harness's output, not a set the user supplied.
+    """
+    from .pipeline.claimtext import baseline_digest
+
+    targets = parse_target(route.dependent_target) if route.dependent else None
+    route.authoring_scope, route.edit_targets = ("NEW_DEPENDENT_SET" if route.dependent else "NEW_INDEPENDENT"), []
+    if route.mode != "AUTHORING_DRAFT" or not targets:
+        return None
+    own = previous.dependent.current if previous and previous.dependent and not previous.baseline_set else None
+    if own and targets <= {c["claim_no"] for c in own.claims}:
+        return None
+    # User blocks include the project instructions (intake turns them into a material block), so a set kept there is found.
+    ordered = sorted(reversed(blocks), key=lambda b: b["id"] != route.claim_source_id)   # the router's pick first, then newest
+    found = find_existing_set(targets, [(b["id"], b["text"]) for b in ordered if b["origin"] == "user"])
+    if not found:
+        return None
+    source_id, text = found
+    route.authoring_scope, route.edit_targets = "EXISTING_SET_EDIT", sorted(targets)
+    return next(b["path"] for b in blocks if b["id"] == source_id), baseline_digest(text)
+
+
+def revision_path(route: RouteDecision, request: dict, blocks: list[dict], paths: dict, previous,
+                  baseline_digest: str | None = None) -> tuple[str, str | None]:
     """Deterministic guard for follow-up edits: (kind, scope).
 
-    kind ∈ restart | style | meaning. The router may only narrow the path: any new material (files, drawings,
-    prior art, spec, pasted description) or a changed USER_LOCK forces a full restart from the architect, because
-    the contract ties design_revision to the raw-material set. scope is DEPENDENT when the request names only
+    kind ∈ restart | style | meaning | redesign | new. The router may only narrow the path: any new material (files,
+    drawings, prior art, spec, pasted description) or a changed USER_LOCK forces a full restart from the architect,
+    because the contract ties design_revision to the raw-material set. scope is DEPENDENT when the request names only
     dependent claims and the previous run has a live dependent set.
+
+    An EXISTING_SET_EDIT never falls back to the architect: a follow-up on the same set and targets continues the
+    dependent revision path (redesign = new dependent_design_revision), and anything else — another set, other
+    targets, new material, or switching into or out of the edit scope — starts a new run.
     """
     from .claim_scope import explicit_mentions
 
+    if previous is not None and (route.authoring_scope == "EXISTING_SET_EDIT" or previous.baseline_set is not None):
+        base = previous.baseline_set
+        same_set = (route.authoring_scope == "EXISTING_SET_EDIT" and base is not None
+                    and base.sha256 == baseline_digest and base.edit_targets == route.edit_targets)
+        if not same_set or _new_material(request, blocks, paths, previous):
+            return "new", None
+        dep = previous.dependent
+        live = bool(dep and dep.current and dep.current.exact_text and not dep.stale)
+        if route.revision_kind in ("STYLE_ONLY", "MEANING") and live:
+            return ("style" if route.revision_kind == "STYLE_ONLY" else "meaning"), "DEPENDENT"
+        return "redesign", "DEPENDENT"
     if previous is None or route.revision_kind in ("NONE", "DESIGN"):
         return "restart", None
+    if _new_material(request, blocks, paths, previous):
+        return "restart", None
+    kind = "style" if route.revision_kind == "STYLE_ONLY" else "meaning"
+    scope = None
+    mentioned = explicit_mentions(request["text"]) or ui_target_set(request.get("ui_hints"))
+    if mentioned and previous.dependent and previous.dependent.current and not previous.dependent.stale:
+        scope = "DEPENDENT"
+    return kind, scope
+
+
+def _new_material(request: dict, blocks: list[dict], paths: dict, previous) -> bool:
     known = {str(Path(m["path"]).resolve()) for m in previous.material_meta}
     known_sha = {m.get("sha256") for m in previous.material_meta}
     request_paths = {str(Path(b["path"]).resolve()) for b in blocks if b.get("is_request")}
@@ -117,14 +175,7 @@ def revision_path(route: RouteDecision, request: dict, blocks: list[dict], paths
     # Files attached in this turn are new material by intent even when their bytes match; a project's preset
     # files ride along with every turn and are already part of the run, so they never force a restart by themselves.
     preset = {a["path"] for a in request.get("attachments", []) if a.get("project_file_id")}
-    if new_material or [f for f in request.get("files", []) if f not in preset]:
-        return "restart", None
-    kind = "style" if route.revision_kind == "STYLE_ONLY" else "meaning"
-    scope = None
-    mentioned = explicit_mentions(request["text"]) or ui_target_set(request.get("ui_hints"))
-    if mentioned and previous.dependent and previous.dependent.current and not previous.dependent.stale:
-        scope = "DEPENDENT"
-    return kind, scope
+    return bool(new_material or [f for f in request.get("files", []) if f not in preset])
 
 
 def effective_request_text(request: dict) -> str:
@@ -136,7 +187,7 @@ def effective_request_text(request: dict) -> str:
     instructions = str(request.get("instructions") or "").strip()
     if not instructions:
         return request["text"]
-    return ("## 프로젝트 지침 (사용자가 프로젝트 폴더에 미리 설정한 지시 — 발명 원자료가 아님)\n\n" + instructions
+    return ("## 프로젝트 지침 (사용자가 프로젝트 폴더에 미리 설정한 지시 — 같은 전문이 `project-instructions` 원자료로도 전달됨)\n\n" + instructions
             + "\n\n## 현재 요청\n\n" + request["text"])
 
 
@@ -153,11 +204,14 @@ def previous_state(cfg, request):
 def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list[dict],
                  paths: dict, folder: Path, previous=None, turn: dict | None = None):
     """`turn` carries what the conversation spent before the engine started: `started_at` plus the routing usage."""
-    if route.mode in {"AUTHORING_DRAFT", "FINALIZATION"}:
+    authoring = route.mode in {"AUTHORING_DRAFT", "FINALIZATION"}
+    baseline = None
+    if authoring:
         route.dependent, route.dependent_target = constrain_target(request["text"], route.dependent, route.dependent_target)
         route.dependent, route.dependent_target = apply_ui_target(route.mode, route.dependent, route.dependent_target, request["text"], request.get("ui_hints"))
+        baseline = resolve_edit_scope(route, request, blocks, folder, previous)
     source = next((b for b in blocks if b["id"] == route.claim_source_id), None)
-    if source is None and previous and route.mode in {"AUTHORING_DRAFT", "FINALIZATION"}:
+    if source is None and previous and authoring:
         source = next((b for b in blocks if b["category"] == "existing_claims"), None)
     text = effective_request_text(request)
     req = RunRequest(
@@ -168,18 +222,24 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
         dependent_target=route.dependent_target if route.mode != "REVIEW_ONLY" else None,
         dependent_set_id=previous.request.get("dependent_set_id") if previous else None,
         reviewers=list(dict.fromkeys(route.reviewers)), review_scope=route.review_scope,
-        claim_file=source["path"] if source else None, **paths,
+        claim_file=baseline[0] if baseline else (source["path"] if source else None),
+        authoring_scope=route.authoring_scope if authoring else None, **paths,
     )
     # Existing model claims can be a review/edit target, but are not evidence of
     # new technical facts. The packet builder passes claim_file separately.
     engine = rt.engine(provider)
-    resume = previous and previous.request_mode.value == route.mode and route.mode in {"AUTHORING_DRAFT", "FINALIZATION"}
+    resume = previous and previous.request_mode.value == route.mode and authoring
     applied = "new"
     if resume:
-        kind, scope = revision_path(route, request, blocks, paths, previous)
+        kind, scope = revision_path(route, request, blocks, paths, previous, baseline[1] if baseline else None)
         applied = kind + (f"/{scope}" if scope else "")
-        if kind == "restart":
+        if kind == "new":
+            state = engine.run(engine.start(req, folder.name))
+        elif kind == "restart":
             state = engine.resume(previous.run_id, Decision(text=text, restart_from="ARCHITECT", request_update=req))
+        elif kind == "redesign":
+            # Same set and targets: a new dependent_design_revision of the edit, never the independent architect.
+            state = engine.resume(previous.run_id, Decision(text=text, action="redesign"))
         else:
             # Same materials, same USER_LOCK: only the wording changes, so the cheaper revision path applies.
             state = engine.resume(previous.run_id, Decision(text=text, action="style_fix" if kind == "style" else "meaning_fix", scope=scope))

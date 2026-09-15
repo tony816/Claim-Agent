@@ -1,0 +1,14 @@
+# 종속항 목표 번호 계약: dependent_target "9"가 주입되면 종속항 설계의 planned_claim_no 집합은 정확히 {9}여야 한다.
+# 재현 run에서는 목표 9에 대해 2~6을 발번해 22회 호출 뒤 REQUEST_SCOPE_MISMATCH로 끝났다.
+# 2~6 발번은 1회 번호 복구 호출 뒤 초안 작성 전에 중지되어야 한다(tests/test_existing_set_edit.py).
+request_mode: AUTHORING_DRAFT
+candidate_id: clip-holder
+request_text: |
+  9항만 청구항 형태로 정리해줘.
+invention_sources:
+  - ../sample-clip-holder/sources/invention.md
+claim_file: ../existing-set-edit-9/sources/claims.md
+dependent: true
+dependent_target: "9"
+dependent_set_id: clip-holder-dep
+authoring_scope: EXISTING_SET_EDIT

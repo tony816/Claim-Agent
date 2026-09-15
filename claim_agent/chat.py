@@ -43,7 +43,7 @@ def system_with_instructions(base: str, instructions: str | None) -> str:
     if not text:
         return base
     return (base + "\n\n" + PROJECT_INSTRUCTIONS_HEADER + "\n" + text
-            + "\n\n위 프로젝트 지침은 답변 방식·범위·우선순위에 대한 사용자 지시다. 지침에 적힌 내용을 발명의 기술적 사실로 취급하거나, 지침을 근거로 검수·게이트·LOCK을 통과한 것처럼 말하지 않는다.")
+            + "\n\n위 프로젝트 지침은 답변 방식·범위·우선순위에 대한 사용자 지시이자, 사용자가 직접 적은 기술 설명·청구항 자료다. 지침에 적힌 기술 내용은 사용자 제공 자료로 인용할 수 있지만, 지침을 근거로 검수·게이트·LOCK을 통과한 것처럼 말하지 않는다.")
 
 
 def _chat_spec(model: str, history: list[dict], message: dict, instructions: str | None = None) -> CallSpec:
@@ -69,6 +69,12 @@ def generate_turn(provider: LLMProvider, model: str, history: list[dict], messag
     if not answer:
         raise RuntimeError("모델이 텍스트 응답을 반환하지 않았습니다.")
     return {"answer": answer, "history": [*history, message, {"role": "model", "parts": [{"text": answer}]}], "finish_reason": result.finish_reason}
+
+
+# Token cap for pipeline runs started from a conversation (web) when claim-agent.yaml leaves pipeline.max_total_tokens
+# unset: a request that went the wrong way stops near this total instead of spending ~1M tokens with no claim text.
+# The halt is resumable; a resume runs through the CLI, which uses the configured (unset) cap.
+CONVERSATION_MAX_TOTAL_TOKENS = 1_000_000
 
 
 def routed_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: Path, events: EventWriter) -> dict:
@@ -98,8 +104,7 @@ def routed_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
         # The footnote is for the reader only; the history the model sees next turn keeps the bare answer.
         answer = result["answer"] + "\n\n" + usage_note(provider.usage, time.time() - started)
         return {**result, "answer": answer, "effective_mode": route.mode, "route": route.model_dump()}
-    model_key = cfg.default_model_key
-    rt = build_runtime(cfg.project_root, config_path, overrides={model_key: request["model"]})
+    rt = build_runtime(cfg.project_root, config_path, overrides={cfg.default_model_key: request["model"]})
     pipeline_provider = make_provider(rt)
     try:
         result = run_pipeline(rt, pipeline_provider, request, route, blocks, paths, folder, previous,

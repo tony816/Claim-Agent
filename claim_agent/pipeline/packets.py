@@ -45,6 +45,9 @@ def _hdr(state: RunState, ids: Identifiers, record_id: str, extra: dict[str, str
         f"PRIOR_ART_SET: {'제공됨(아래 원자료 참조)' if state.prior_art_present else 'NONE'}",
         f"정식 명세서 상태: {'PRESENT' if state.spec_present else 'MISSING'}",
     ]
+    if state.baseline_set:
+        lines.append(f"authoring_scope: EXISTING_SET_EDIT (루트 기준: BASELINE_SET {state.baseline_set.record_id} — LOCK 아님, 이번 run 미검증)")
+        lines.append("edit_targets: " + ", ".join(f"제{n}항" for n in state.baseline_set.edit_targets))
     for k, v in (extra or {}).items():
         lines.append(f"{k}: {v}")
     return "\n".join(lines) + "\n\n"
@@ -83,7 +86,7 @@ def _report(state: RunState, store, record_id: str | None, title: str) -> str:
 def _output_contract(extra: str = "") -> str:
     return (
         "### 출력 계약\n\n"
-        "제공된 JSON 스키마를 따르는 JSON 객체 하나만 반환한다. `report_markdown`에는 역할 파일의 출력 형식 전문을 담고, "
+        "제공된 JSON 스키마를 따르는 JSON 객체 하나만 반환한다. `report_markdown`에는 역할 파일의 출력 형식 항목을 어댑터 규칙 5의 압축형(목표 3,000자 이내)으로 담고, "
         "`status`·`gates`·`next_step`·`handoff_ready`·`exact_claim_text`는 보고서와 글자 단위로 일치시킨다. "
         "입력으로 받은 다른 역할의 보고서·원자료 전문을 출력 보고서에 통째로 재첨부하지 않는다. "
         "상위 기록은 record_id와 검증 위치로 참조하고, 이번 역할의 필수 출력 형식·exact 문언·근거표·판정 이유는 빠짐없이 작성한다. "
@@ -206,24 +209,59 @@ def picture_independent(state: RunState, store, bundle: MaterialBundle, ids: Ide
 
 
 # --------------------------------------------------------------------------- dependent
+def _root_label(state: RunState) -> tuple[str, str]:
+    """(root record title, root text title). An edit run's root is the user's baseline chain, not a gated LOCK."""
+    if state.baseline_set:
+        return ("기존 청구항 세트 BASELINE_SET 전문 (LOCK 아님 — 이번 run에서 검증하지 않은 읽기 전용 부모항 체인)",
+                "변경 금지 부모항 체인 전문 (BASELINE_SET — 흡수·병합·재작성 금지)")
+    return "루트 독립항 LOCK 전문", "변경 없는 루트 독립항 전문"
+
+
+def _number_contract(state: RunState, target_nos: set[int] | None) -> str:
+    if not target_nos:
+        return ""
+    nos = ", ".join(map(str, sorted(target_nos)))
+    text = (f" 요청된 종속항 번호 집합은 [{nos}]이다. `TECHNICAL_SOLUTION_CANDIDATE`인 `candidates[].planned_claim_no` 집합은 이 집합과 정확히 "
+            "일치해야 하며 임의 발번·범위 확대·누락은 계약 위반이다. 해당 번호로 낼 기술기여 후보가 없으면 후보를 만들지 말고 `status: REVIEW`로 사유를 보고한다.")
+    if state.baseline_set:
+        parents = {c.claim_no: c.parent_nos for c in state.baseline_set.claims}
+        fixed = "; ".join(f"제{n}항의 부모항 제{', '.join(map(str, parents[n]))}항" for n in sorted(target_nos) if n in parents)
+        text += f" EXISTING_SET_EDIT이므로 기존 인용관계({fixed})를 `parent_claim_no`로 유지하고, 부모항 체인을 흡수·병합해 독립항으로 설계하지 않는다."
+    return text
+
+
+def _edit_contract(state: RunState) -> str:
+    base = state.baseline_set
+    if not base:
+        return ""
+    nos = ", ".join(f"제{n}항" for n in base.edit_targets)
+    return (f" EXISTING_SET_EDIT: `claims[]`와 `exact_claim_text`에는 편집 대상 {nos}만 넣고 기존 세트의 번호·인용관계를 그대로 유지한다. "
+            "부모항 체인은 읽기 전용이며 흡수·병합·재작성하지 않는다.")
+
+
 def _dependent_stable(state: RunState, store, bundle: MaterialBundle, root_lock_id: str, root_design_record_id: str | None, cats: tuple[str, ...]) -> tuple[str, list[ImagePart]]:
     """Run-invariant part shared by every dependent-stage packet: USER_LOCK, 원자료, root lock (+ root design)."""
     mats, imgs = _materials(bundle, cats)
     txt = _user_lock(bundle) + mats
-    txt += _report(state, store, root_lock_id, "루트 독립항 LOCK 전문")
+    txt += _report(state, store, root_lock_id, _root_label(state)[0])
     if root_design_record_id:
         txt += _report(state, store, root_design_record_id, "루트 DESIGN_GATE 전문 (기술 개념표)")
     return txt, imgs
 
 
-def dep_architect(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_design_record_id: str, root_text: str, request_text: str, redesign_goal: str | None) -> Packet:
+def dep_architect(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_design_record_id: str, root_text: str, request_text: str, redesign_goal: str | None,
+                  target_nos: set[int] | None = None, scope_repair: str | None = None) -> Packet:
     txt, imgs = _dependent_stable(state, store, bundle, root_lock_id, root_design_record_id, ("invention", "drawing", "spec", "prior_art"))
-    txt += _hdr(state, ids, record_id)
+    txt += _hdr(state, ids, record_id, {"dependent_target_claim_nos": ", ".join(map(str, sorted(target_nos)))} if target_nos else None)
     txt += _section("현재 요청 (종속항 세트)", request_text)
     if redesign_goal:
         txt += _section("종속항 설계 변경 목표", redesign_goal)
-    txt += _section("변경 없는 루트 독립항 전문", root_text)
-    txt += _output_contract("`gates.DEPENDENT_DESIGN_GATE`, `gates.INVENTIVE_STEP`, `candidates[]`(DC-NN별 분류·세 게이트·예정 항·부모항)를 채운다.")
+    if scope_repair:
+        txt += _section("번호 계약 위반 복구 (1회)", f"직전 설계가 번호 계약을 어겨 중지되었다: {scope_repair}\n"
+                        "예정 항 번호와 부모항을 아래 출력 계약의 번호 집합·인용관계와 정확히 일치시켜 다시 설계한다.")
+    txt += _section(_root_label(state)[1], root_text)
+    txt += _output_contract("`gates.DEPENDENT_DESIGN_GATE`, `gates.INVENTIVE_STEP`, `candidates[]`(DC-NN별 분류·세 게이트·예정 항·부모항)를 채운다."
+                            + _number_contract(state, target_nos))
     return Packet(txt, imgs)
 
 
@@ -231,11 +269,11 @@ def drafter_dependent(state: RunState, store, bundle: MaterialBundle, ids: Ident
     txt, imgs = _dependent_stable(state, store, bundle, root_lock_id, None, ("invention", "drawing", "spec"))
     txt += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE: LOCKED 전문")
     txt += _hdr(state, ids, record_id, {"draft_scope": "DEPENDENT_SET", "dependent_meaning_draft_id": record_id})
-    txt += _section("변경 없는 루트 독립항 전문", root_text)
+    txt += _section(_root_label(state)[1], root_text)
     if prior_set_text:
         txt += _section("직전 확정 dependent_revision 세트 전문", prior_set_text)
         txt += _section("이번 의미 변경 목표", change_goal or "")
-    txt += _output_contract("`claims[]`에 각 종속항의 claim_no·parent_claim_no·dc_id·text(【청구항 N】 헤더 포함 전문)를, `exact_claim_text`에 세트 전문을 넣는다.")
+    txt += _output_contract("`claims[]`에 각 종속항의 claim_no·parent_claim_no·dc_id·text(【청구항 N】 헤더 포함 전문)를, `exact_claim_text`에 세트 전문을 넣는다." + _edit_contract(state))
     return Packet(txt, imgs)
 
 
@@ -243,7 +281,7 @@ def style_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identif
     txt, imgs = _dependent_stable(state, store, bundle, root_lock_id, None, ("invention", "drawing", "spec"))
     txt += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE: LOCKED 전문")
     txt += _hdr(state, ids, record_id, {"style_scope": "DEPENDENT_SET", "style_change_mode": mode.value, "dependent_style_record_id": record_id})
-    txt += _section("변경 없는 루트 독립항 전문", root_text)
+    txt += _section(_root_label(state)[1], root_text)
     if mode == StyleChangeMode.STYLE_ONLY_REVISION:
         txt += _section("직전 확정 dependent_revision 세트 전문", prior_set_text)
         txt += _report(state, store, prior_style_record_id, "직전 dependent style record 전문")
@@ -253,7 +291,7 @@ def style_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identif
         if mode == StyleChangeMode.DRAFTER_REVISION and prior_set_text:
             txt += _section("직전 확정 dependent_revision 세트 전문", prior_set_text)
             txt += _section("이번 의미 수정 목표", feedback or "")
-    txt += _output_contract("`claims[]`에 최종 종속항 세트(항별 전문)를, `exact_claim_text`에 세트 전문을, `per_claim_gates[]`에 목표항별 독자·기하 판정을 넣는다.")
+    txt += _output_contract("`claims[]`에 최종 종속항 세트(항별 전문)를, `exact_claim_text`에 세트 전문을, `per_claim_gates[]`에 목표항별 독자·기하 판정을 넣는다." + _edit_contract(state))
     return Packet(txt, imgs)
 
 
@@ -261,7 +299,7 @@ def success_dependent(state: RunState, store, bundle: MaterialBundle, ids: Ident
     txt, imgs = _dependent_stable(state, store, bundle, root_lock_id, None, ("invention", "drawing", "spec", "prior_art"))
     txt += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE: LOCKED 전문")
     txt += _hdr(state, ids, record_id, {"success_scope": "DEPENDENT_SET", "dependent_success_record_id (예정)": record_id})
-    txt += _section("루트 독립항 전문", root_text)
+    txt += _section(_root_label(state)[1], root_text)
     txt += _section("검수 대상 exact 종속항 세트 전문", set_text)
     txt += _report(state, store, dep_meaning_draft_id, "종속항 PRE_STYLE 의미 초안 보고서 전문")
     txt += _report(state, store, dep_style_record_id, "dependent style record 전문")
@@ -275,7 +313,7 @@ def syntax_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identi
     txt, imgs = _dependent_stable(state, store, bundle, root_lock_id, None, ("invention", "drawing", "spec"))
     txt += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE 전문")
     txt += _hdr(state, ids, record_id, {"review_scope": "DEPENDENT_SET"})
-    txt += _section("루트 독립항 전문", root_text)
+    txt += _section(_root_label(state)[1], root_text)
     txt += _section("검수 대상 종속항 세트 전문", set_text)
     txt += _report(state, store, dep_style_record_id, "dependent style record 전문")
     txt += _report(state, store, dep_success_record_id, "dependent success record 전문")
@@ -288,7 +326,7 @@ def oa_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identifier
     txt, imgs = _dependent_stable(state, store, bundle, root_lock_id, None, ("invention", "drawing", "spec", "prior_art"))
     txt += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE 전문")
     txt += _hdr(state, ids, record_id, {"review_scope": "DEPENDENT_SET"})
-    txt += _section("루트 독립항 전문", root_text)
+    txt += _section(_root_label(state)[1], root_text)
     txt += _section("검수 대상 종속항 세트 전문", set_text)
     txt += _report(state, store, dep_style_record_id, "dependent style record 전문")
     txt += _report(state, store, dep_success_record_id, "dependent success record 전문")
@@ -304,7 +342,7 @@ def picture_dependent(state: RunState, store, bundle: MaterialBundle, ids: Ident
     # then the per-target part.
     mats, imgs = _materials(bundle, ("invention", "drawing"))
     shared = mats
-    shared += _report(state, store, root_lock_id, "루트 독립항 LOCK 전문")
+    shared += _report(state, store, root_lock_id, _root_label(state)[0])
     shared += _report(state, store, root_design_record_id, "루트 DESIGN_GATE 전문")
     shared += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE 전문 (목표 DC-NN 포함)")
     shared += _report(state, store, dep_style_record_id, "dependent style record 전문")
@@ -316,6 +354,55 @@ def picture_dependent(state: RunState, store, bundle: MaterialBundle, ids: Ident
     txt += _report(state, store, blind_record_id, "봉인된 dependent blind snapshot 전문")
     txt += _output_contract("`status`는 목표항의 최종 판정이다.")
     return Packet(txt, imgs, cache_text=shared, cache_images=True)
+
+
+# --------------------------------------------------------------------------- per-claim cost
+def text_only(packet: Packet) -> Packet:
+    """The packet without image parts, for the text review stages (style·syntax·OA).
+
+    Those stages check sealed wording against the design contract's geometry/space object contract; re-sending every
+    drawing made each of their calls tens of thousands of tokens heavier. The packet states what was withheld.
+    """
+    if not packet.images:
+        return packet
+    kept = [part for part in packet.text.split("\n\n") if not (part.startswith("<<<MATERIAL ") and part.endswith("(이미지 파트로 첨부)"))]
+    note = (f"### 도면 전달 생략\n\n이 문언 검수 단계에는 도면 이미지 {len(packet.images)}장을 전달하지 않는다. 형상·배치 판단은 설계 계약"
+            "(DESIGN_GATE·DEPENDENT_DESIGN_GATE)의 형상·공간 객체 계약과 텍스트 원자료로 한다. 도면이 없다는 이유만으로 판정을 낮추지 않고, "
+            "설계 계약에 필요한 형상 계약이 없어 판정할 수 없을 때만 그 사유를 REVIEW로 적는다.\n\n")
+    return Packet(note + "\n\n".join(kept))
+
+
+COMBINED_REVIEW_HEADER = (
+    "# 통합 검수 호출 (review_mode: COMBINED_SUCCESS_SYNTAX_OA)\n\n"
+    "기존 청구항 세트의 한 항 편집(EXISTING_SET_EDIT)에서는 성공조건·통사·OA 검수를 이 한 호출에서 수행한다. 아래 세 역할 파일을 "
+    "claim-success-reviewer → syntax-scope-reviewer → oa-strategy-reviewer 순서로 모두 적용하고, 각 역할의 판정 기준을 서로 섞거나 완화하지 않는다."
+)
+
+
+def review_dependent_combined(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_text: str, dep_design_record_id: str,
+                              dep_meaning_draft_id: str | None, dep_style_record_id: str, set_text: str, corpus_fragments: str | None, baseline_text: str | None, mode: StyleChangeMode) -> Packet:
+    txt, imgs = _dependent_stable(state, store, bundle, root_lock_id, None, ("invention", "drawing", "spec", "prior_art"))
+    txt += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE: LOCKED 전문")
+    txt += _hdr(state, ids, record_id, {"review_mode": "COMBINED_SUCCESS_SYNTAX_OA", "success_scope": "DEPENDENT_SET", "review_scope": "DEPENDENT_SET",
+                                        "dependent_success_record_id (예정)": record_id, "dependent_syntax_record_id (예정)": record_id, "dependent_oa_record_id (예정)": record_id})
+    txt += _section(_root_label(state)[1], root_text)
+    txt += _section("검수 대상 exact 종속항 세트 전문", set_text)
+    txt += _report(state, store, dep_meaning_draft_id, "종속항 PRE_STYLE 의미 초안 보고서 전문")
+    txt += _report(state, store, dep_style_record_id, "dependent style record 전문")
+    if corpus_fragments:
+        txt += _section("style record가 사용한 코퍼스 정확 조각과 라우팅 인덱스", corpus_fragments)
+    txt += _section(f"범위 불변 비교 기준 ({mode.value})", baseline_text or "dependent style record의 PRE_STYLE 세트 참조")
+    txt += _section("통합 검수 규칙", "`report_markdown`을 `### 1. 성공조건 (claim-success-reviewer)`, `### 2. 통사·범위 (syntax-scope-reviewer)`, "
+                    "`### 3. OA (oa-strategy-reviewer)` 세 절로 나누고 각 절에 그 역할의 게이트 줄을 적는다. 뒤 절이 요구하는 앞 역할의 기록 전문"
+                    "(success record, syntax PASS 보고서)은 이 보고서의 앞 절 판정으로 대신한다. 앞 절이 PASS가 아니면 뒤 절은 판정하지 않고 역할 파일의 "
+                    "upstream 미통과 사유로 UNVERIFIED를 적는다.")
+    txt += _output_contract(
+        "`gates`에 CLAIM_STYLE_GATE·TERM_EXPRESSION_GATE(성공조건 재검사), NON_PATENT_TECHNICAL_READER_GATE·GEOMETRIC_OBJECT_GATE(통사), "
+        "DEPENDENT_OA_DRAFT_GATE·DEPENDENT_OA_FINAL_GATE(OA, 분리)를 모두 채운다. 정식 명세서가 없으면 DEPENDENT_OA_FINAL_GATE는 UNVERIFIED이고 "
+        "`gate_reasons`에 SPEC_NOT_PROVIDED를 적는다. `status`는 세 절 중 가장 낮은 판정, `handoff_ready`는 세 절이 모두 다음 단계로 진행 가능할 때만 true다. "
+        "`checks[].name`에는 `success:`·`syntax:`·`oa:` 접두어를 붙이고, `per_claim_gates[]`에 목표항별 독자·기하 판정을, `exact_claim_text`에는 검수 대상 전문을 그대로 echo한다."
+    )
+    return Packet(txt, imgs)
 
 
 # --------------------------------------------------------------------------- review only

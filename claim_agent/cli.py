@@ -355,6 +355,10 @@ def cmd_eval(args) -> int:
             final_text = (cur.exact_text if cur else None) or ""
             if state.dependent and state.dependent.current and state.dependent.current.exact_text:
                 final_text += "\n" + state.dependent.current.exact_text
+            if state.baseline_set:
+                from .store.report import edited_set_text
+
+                final_text = edited_set_text(state) or final_text   # the user's set with only the edit targets replaced
             tokens, calls = summarize(state, read_telemetry(vrt.store.telemetry_path(run_id)))
             checks = evaluate(state, case.expected, final_text, tokens, calls)
             results.append(EvalResult(case.case_id, variant.variant_id, run_id, state.outcome, checks, tokens, calls, state.total_loops))

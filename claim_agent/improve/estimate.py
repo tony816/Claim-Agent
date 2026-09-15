@@ -31,6 +31,12 @@ def expected_calls(req: RunRequest, n_targets_default: int = 3) -> dict[str, int
     """Planned main-phase calls for a clean run (no returns): mirrors CLAUDE.md steps 1-19."""
     if req.request_mode.value == "REVIEW_ONLY":
         return {r: 1 for r in (req.reviewers or ["syntax-scope-reviewer"])}
+    if req.authoring_scope == "EXISTING_SET_EDIT":
+        n = len(parse_target(req.dependent_target) or ()) or 1
+        return {   # one combined success+syntax+OA review call
+            "dependent-claim-strategy-architect": 1, "claim-drafter": 1, "claim-style-adjuster": 2, "claim-success-reviewer": 1,
+            "blind-claim-reconstruction-reviewer": n, "picture-claim-reconstruction-reviewer": n,
+        }
     calls = {
         "claim-architect": 1, "claim-drafter": 1, "claim-style-adjuster": 2,  # tool phase + main
         "claim-success-reviewer": 1, "syntax-scope-reviewer": 1, "oa-strategy-reviewer": 1,

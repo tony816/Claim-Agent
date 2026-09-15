@@ -15,6 +15,7 @@ from .enums import RequestMode
 
 IMAGE_EXT = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 TEXT_EXT = {".md", ".txt", ".yaml", ".yml", ".json", ".csv"}
+EXISTING_SET_EDIT = "EXISTING_SET_EDIT"
 
 
 class RunRequest(BaseModel):
@@ -32,6 +33,9 @@ class RunRequest(BaseModel):
     claim_file: str | None = None          # REVIEW_ONLY / FINALIZATION input claims
     reviewers: list[str] = Field(default_factory=list)   # REVIEW_ONLY
     review_scope: str = "INDEPENDENT"
+    # EXISTING_SET_EDIT rewrites only the dependent claims in dependent_target inside the numbered set in claim_file;
+    # the rest of that set is a read-only baseline. NEW_INDEPENDENT / NEW_DEPENDENT_SET (or None) keep the authoring paths.
+    authoring_scope: str | None = None
 
     @classmethod
     def from_yaml(cls, path: Path) -> RunRequest:

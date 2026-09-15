@@ -1,0 +1,14 @@
+# 번호가 매겨진 기존 세트(1~9)에서 정리되지 않은 9항만 그 자리에서 청구항 형태로 고치는 편집 (EXISTING_SET_EDIT).
+# 재현 run web-51c7555474e845629bbd4082383687d0의 요청 형태를 공개용 합성 발명(케이블 클립 홀더)으로 옮겼다.
+# 9항의 부모항 체인은 1 → 5 → 8. fixtures가 없으므로 CI 리플레이에서는 SKIP되고, tests/test_existing_set_edit.py가 scripted로 검사한다.
+request_mode: AUTHORING_DRAFT
+candidate_id: clip-holder
+request_text: |
+  정리되지 않은 9항을 청구항 형태로 작성해줘. 오목면의 곡률반경이 케이블이 구속부에 중간 끼워맞춤됨을 만드는구나라고 해석될 수 있는 형태가 목적.
+invention_sources:
+  - ../sample-clip-holder/sources/invention.md
+claim_file: sources/claims.md
+dependent: true
+dependent_target: "9"
+dependent_set_id: clip-holder-dep
+authoring_scope: EXISTING_SET_EDIT

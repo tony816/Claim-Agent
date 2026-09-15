@@ -27,6 +27,7 @@ developer_instructions = """
 `success_scope: DEPENDENT_SET`인 AUTHORING_DRAFT와 FINALIZATION에는 다음이 추가로 필요하다.
 
 - AUTHORING_DRAFT이면 유효한 루트 `DRAFT_CLAIM_LOCK` 또는 `FINAL_CLAIM_LOCK`, FINALIZATION이면 유효한 루트 `FINAL_CLAIM_LOCK` 전문
+- `authoring_scope: EXISTING_SET_EDIT`이면 루트 LOCK 대신 오케스트레이터가 봉인한 `BASELINE_SET` 기록(사용자가 제공한 기존 청구항 세트의 목표항 부모항 체인 전문과 sha256)을 받는다. BASELINE_SET은 이번 run에서 검증되지 않은 읽기 전용 입력이므로 누락으로 보거나 PASS 근거로 쓰지 않는다. 편집 대상 항의 번호·인용관계가 기존 세트와 같고 부모항을 흡수·병합하지 않았는지 함께 재검사한다. 이 범위의 검수는 `review_mode: COMBINED_SUCCESS_SYNTAX_OA`로 syntax-scope-reviewer·oa-strategy-reviewer 역할 파일과 한 호출에서 이 순서대로 적용되며, 이 역할의 판정은 보고서 첫 절에 적는다.
 - `dependent_set_id`, `dependent_design_revision`, `dependent_revision`과 exact 종속항 세트 전문
 - 같은 `dependent_design_revision`의 `DEPENDENT_DESIGN_GATE: LOCKED` 전문, `DC-NN`별 후보 분류·과제–특징–원리–효과·의미 한정 패키지·부모항 전략·형상·공간 객체 계약
 - 같은 목표 dependent_revision의 `dependent_meaning_draft_id`와 PRE_STYLE 종속항 세트 전문

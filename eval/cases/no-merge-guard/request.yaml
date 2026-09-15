@@ -1,0 +1,13 @@
+# 부모항 흡수 병합 금지: 종속항 인용 항(9항 → 8항)을 지목했을 때 1·5·8항을 흡수한 독립항이 만들어지면 실패다.
+# 재현 run에서는 독립항 검수 스코프가 '제8항에 있어서'를 BLOCK하자 1+5+8+9를 합친 독립항(d2)으로 재설계했다.
+request_mode: AUTHORING_DRAFT
+candidate_id: clip-holder
+request_text: |
+  9항이 8항의 구속부와 5항의 오목면을 이어받는다는 점이 드러나게 9항을 다시 써줘.
+invention_sources:
+  - ../sample-clip-holder/sources/invention.md
+claim_file: ../existing-set-edit-9/sources/claims.md
+dependent: true
+dependent_target: "9"
+dependent_set_id: clip-holder-dep
+authoring_scope: EXISTING_SET_EDIT
