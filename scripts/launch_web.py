@@ -13,20 +13,66 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 
-def existing_server(metadata: Path) -> str | None:
+def existing_server(metadata: Path, code_version: str | None = None) -> str | None:
+    """URL of a live server started from this metadata file.
+
+    With `code_version` given, a live server built from different code is asked to shut down (unless it is still
+    answering a request) so the launcher starts a fresh one; otherwise a stale checkout would keep serving old
+    screens after `git pull`.
+    """
     try:
         data = json.loads(metadata.read_text(encoding="utf-8"))
         origin = data["origin"]
         parsed = urlsplit(origin)
         if parsed.scheme != "http" or parsed.hostname != "127.0.0.1" or not parsed.port:
             return None
-        request = Request(origin + "/api/sessions", headers={"X-Claim-Token": data["token"]})
-        with urlopen(request, timeout=2) as response:
-            if response.status == 200:
+        headers = {"X-Claim-Token": data["token"], "X-Claim-Request": "1"}
+        with urlopen(Request(origin + "/api/sessions", headers=headers), timeout=2) as response:
+            if response.status != 200:
+                return None
+            info = json.loads(response.read().decode("utf-8"))
+        if code_version and info.get("code_version") != code_version:
+            if info.get("busy"):
+                print("코드가 바뀌었지만 이전 서버가 아직 응답 중이라 그대로 엽니다. 응답이 끝나면 '프로그램 종료' 후 다시 실행해 주세요.", flush=True)
                 return origin + "/?token=" + data["token"]
+            print("코드가 바뀌어 이전 서버를 종료하고 다시 시작합니다.", flush=True)
+            shutdown_server(origin, headers)
+            return None
+        return origin + "/?token=" + data["token"]
     except (OSError, ValueError, KeyError):
         pass
     return None
+
+
+def shutdown_server(origin: str, headers: dict) -> None:
+    try:
+        with urlopen(Request(origin + "/api/shutdown", data=b"{}", headers={**headers, "Content-Type": "application/json"}), timeout=3):
+            pass
+    except OSError:
+        return
+    for _ in range(40):
+        try:
+            with urlopen(Request(origin + "/api/sessions", headers=headers), timeout=1):
+                pass
+        except OSError:
+            return
+        time.sleep(0.25)
+
+
+def current_code_version(root: Path) -> str | None:
+    """Same fingerprint the server publishes; computed without importing the runtime's dependencies."""
+    import hashlib
+
+    base = root / "claim_agent"
+    if not base.is_dir():
+        return None
+    digest = hashlib.sha256()
+    for path in sorted(p for p in base.rglob("*") if p.is_file() and p.suffix in {".py", ".md", ".html", ".js", ".css"} and "__pycache__" not in p.parts):
+        digest.update(str(path.relative_to(base)).replace("\\", "/").encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()[:16]
 
 
 def main() -> int:
@@ -36,7 +82,7 @@ def main() -> int:
         print("Python 3.11 이상을 설치해 주세요.")
         return 1
     metadata = root / ".tui" / "web" / "server.json"
-    url = existing_server(metadata)
+    url = existing_server(metadata, current_code_version(root))
     if url:
         webbrowser.open(url)
         return 0

@@ -385,3 +385,100 @@ def test_project_http_endpoints(workspace):
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+def test_composer_claim_target_reaches_ui_hints_and_message(workspace, monkeypatch):
+    sid = workspace.create()["id"]
+    commands = []
+
+    def capture(sid, job, command):
+        commands.append(command)
+        job["done"] = True
+
+    monkeypatch.setattr(workspace, "execute", capture)
+    workspace.start(sid, {"mode": "AUTHORING_DRAFT", "text": "청구항 작성", "target_mode": "single", "target_claim": 3})
+    wait_for(lambda: len(commands) == 1)
+    req = json.loads(Path(commands[0][commands[0].index("--request") + 1]).read_text(encoding="utf-8"))
+    assert req["ui_hints"] == dict(selected_mode="AUTHORING_DRAFT", dependent=True, target="3", target_mode="single")
+    assert workspace.snapshot(sid)["messages"][-2]["claim_target"] == dict(mode="single", dependent=True, target="3")
+    workspace.start(sid, {"mode": "AUTHORING_DRAFT", "text": "청구항 작성", "target_mode": "range", "target_segments": [{"from": 2, "to": 4}, {"from": 6, "to": 6}]})
+    wait_for(lambda: len(commands) == 2)
+    req = json.loads(Path(commands[1][commands[1].index("--request") + 1]).read_text(encoding="utf-8"))
+    assert req["ui_hints"]["target"] == "2~4,6" and req["ui_hints"]["target_mode"] == "range"
+    workspace.start(sid, {"text": "안녕", "dependent": False, "target": "2~8"})      # legacy composer payload
+    wait_for(lambda: len(commands) == 3)
+    req = json.loads(Path(commands[2][commands[2].index("--request") + 1]).read_text(encoding="utf-8"))
+    assert req["ui_hints"] == dict(selected_mode="CHAT", dependent=False, target="", target_mode="independent")
+    with pytest.raises(ValueError, match="2항 이상"):
+        workspace.start(sid, {"mode": "AUTHORING_DRAFT", "text": "청구항 작성", "target_mode": "range", "target_segments": [{"from": 1, "to": 3}]})
+    assert len(workspace.sessions[sid]["messages"]) == 6
+
+
+def test_delete_session_keeps_others_and_refuses_while_running(workspace, fake_chat):
+    keep = workspace.create()["id"]
+    gone = workspace.create()["id"]
+    workspace.upload(gone, "자료.txt", b"x")
+    folder = workspace.directory(gone)
+    workspace.start(gone, {"text": "stop"})
+    wait_for(lambda: workspace.snapshot(gone)["running"])
+    with pytest.raises(ValueError, match="응답 중"):
+        workspace.delete(gone)
+    workspace.stop(gone)
+    wait_for(lambda: not workspace.snapshot(gone)["running"])
+    workspace.delete(gone)
+    assert gone not in workspace.sessions and gone not in workspace.jobs and not folder.exists()
+    assert keep in workspace.sessions and workspace.directory(keep).exists()
+    with pytest.raises(ValueError):
+        workspace.delete(gone)
+    assert gone not in web.Workspace(workspace.root).sessions
+
+
+def test_launcher_restarts_a_server_built_from_other_code(workspace, tmp_path):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("launch_web", Path(__file__).resolve().parents[1] / "scripts" / "launch_web.py")
+    launcher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launcher)
+    assert launcher.current_code_version(Path(__file__).resolve().parents[1]) == web.code_fingerprint()
+    server = web.Server(workspace)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    metadata = tmp_path / "server.json"
+    web.save_json(metadata, dict(pid=1, origin=server.origin, token=server.token, code_version=web.code_fingerprint()))
+    try:
+        assert launcher.existing_server(metadata) == server.origin + "/?token=" + server.token
+        assert launcher.existing_server(metadata, web.code_fingerprint()) == server.origin + "/?token=" + server.token
+        assert launcher.existing_server(metadata, "0000000000000000") is None       # asked the stale server to shut down
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+        assert launcher.existing_server(metadata, web.code_fingerprint()) is None
+    finally:
+        if thread.is_alive():
+            server.shutdown()
+        server.server_close()
+
+
+def test_sessions_endpoint_reports_code_version_busy_and_delete(workspace):
+    server = web.Server(workspace)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    headers = {"X-Claim-Token": server.token, "X-Claim-Request": "1"}
+
+    def call(path, body=None):
+        return urlopen(Request(server.origin + path, data=json.dumps(body).encode() if body is not None else None, headers=headers), timeout=3)
+
+    try:
+        sid = workspace.create()["id"]
+        with call("/api/sessions") as response:
+            data = json.load(response)
+            assert data["code_version"] == web.code_fingerprint() and data["busy"] == 0 and [s["id"] for s in data["sessions"]] == [sid]
+        with call("/api/delete", {"id": sid}) as response:
+            assert json.load(response)["ok"]
+        with pytest.raises(HTTPError):
+            call("/api/delete", {"id": sid})
+        with call("/api/sessions") as response:
+            assert json.load(response)["sessions"] == []
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()

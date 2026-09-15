@@ -37,11 +37,13 @@ Windows에서는 `truststore`로 운영체제의 신뢰 인증서를 사용하�
 
 ### 기본 웹 채팅
 
-Windows 더블클릭 실행기는 `scripts/launch_web.py`를 통해 `claim_agent.web`의 로컬 HTTP 서버를 백그라운드로 열고 기본 브라우저를 실행한다. 서버가 살아 있으면 재사용한다. 직접 실행은 `python -m claim_agent.web`이며 `--project-root`, `--config`, `--no-browser`를 지원한다. 정적 화면은 웹 모듈과 함께 설치되는 `web_assets/`에 있고, 브라우저 기본 textarea의 IME 조합 이벤트를 보호한다.
+Windows 더블클릭 실행기는 `scripts/launch_web.py`를 통해 `claim_agent.web`의 로컬 HTTP 서버를 백그라운드로 열고 기본 브라우저를 실행한다. 서버가 살아 있으면 재사용하되, `server.json`·`/api/sessions`의 `code_version`(`claim_agent/` 패키지 파일의 내용 해시, `web.code_fingerprint`)이 현재 체크아웃과 다르면 응답 중(`busy`)이 아닌 한 `/api/shutdown`으로 이전 서버를 내리고 새로 시작한다. 직접 실행은 `python -m claim_agent.web`이며 `--project-root`, `--config`, `--no-browser`를 지원한다. 정적 화면은 웹 모듈과 함께 설치되는 `web_assets/`에 있고, 브라우저 기본 textarea의 IME 조합 이벤트를 보호한다.
 
 서버는 `127.0.0.1`의 임의 포트에만 바인딩한다. 실행기 토큰으로 HttpOnly/SameSite 쿠키를 설정하고 API는 Host·Origin·요청 헤더를 검증한다. API 키는 서버 환경변수에만 유지한다. 업로드는 세션별 복사본과 ID로 관리하고 `.env`, 경로 탈출, 지원하지 않는 형식 및 20MB 초과 파일을 거부한다. API에서 임의 로컬 경로를 읽지 않는다.
 
 대화 목록·메시지·Gemini 역할 이력은 `.tui/web/sessions/`에 저장된다. 기본 선택인 **자동 분류 · 대화**는 `claim_agent.chat`에서 답변 전에 현재 `CLAUDE.md`와 이전 문맥으로 요청을 분류한다. 청구항 출력물·수정안은 `AUTHORING_DRAFT`, 명시적 출원용 최종 확정은 `FINALIZATION`, 특허 의견은 `REVIEW_ONLY`로 기존 `PipelineEngine`에 연결된다. 작성·수정은 필수 역할과 게이트 순서를 거치며, 제한 검수는 요청된 리뷰어만 호출한다. 수동 **청구항 작성·수정** 선택도 유지된다.
+
+**작성 대상.** 컴포저의 작성 옵션은 `target_mode`(independent/single/range)와 `target_claim` 또는 `target_segments`(`{from,to}` 목록이나 `2~4,6` 문자열)를 보내고, `claim_scope.resolve_claim_target`이 이를 `(dependent, target, mode)`로 정규화해 `ui_hints`에 싣는다(이전 `dependent`+`target` 필드도 계속 받는다). `conversation_pipeline.run_pipeline`은 라우터 결과에 `claim_scope.apply_ui_target`을 적용해 화면에서 고른 항으로만 결정론적으로 좁힌다. 요청 문장의 항 번호가 우선하고, 문장이 1항만 지목하면 종속항 작업을 추가하지 않으며, 문장의 번호와 선택이 겹치지 않으면 ValueError로 중지한다. 후속 수정에서는 화면 선택도 `revision_path`의 종속항 범위 판단에 쓰인다. `/api/delete`는 대화와 업로드를 지우고 `runs/`는 보존한다.
 
 **프로젝트 폴더.** `.tui/web/projects/<id>/project.json`은 이름·설명·`instructions`·`user_lock`·소스 파일 목록(종류: invention/drawing/prior_art/spec)을 저장하고, 파일 본문은 `files/<file_id>/<원본 이름>`에 둔다. 세션은 `project_id`로 프로젝트에 종속되며 `/api/new`에 `project_id`를 넘겨 만든다. `/api/projects`·`/api/project`·`/api/project/new|update|delete|upload|remove-file`가 관리 API다. 프로젝트 세션의 매 전송에서 `Workspace.project_inputs`가 `chat.json`에 `instructions`, `user_lock`, 프로젝트 파일(`files` 앞부분과 `attachments`의 종류·`project_file_id`)을 채운다. 지침은 라우터 패킷의 `project_instructions`, 일반 대화의 system instruction 뒤 프로젝트 지침 블록, 파이프라인의 `현재 요청` 앞 `## 프로젝트 지침` 절로만 전달되며 원자료 블록이나 MaterialBundle에는 들어가지 않는다. `user_lock`은 새 run의 `RunRequest.user_lock`이 되고, 기존 run의 후속 수정은 run에 저장된 USER_LOCK을 유지한다. `revision_path`는 `project_file_id`가 붙은 프리셋 파일을 이번 턴의 새 첨부로 보지 않으므로 스타일·의미 수정 경로가 그대로 열린다. 프로젝트 삭제는 폴더만 지우고 세션의 `project_id`를 해제한다.
 

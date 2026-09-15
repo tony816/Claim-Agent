@@ -73,6 +73,8 @@ ROUTER_SYSTEM = """너는 Claim-Agent 요청 분류기다. 답변, 청구항, �
   REVIEW_ONLY/META/CHAT은 dependent=false, dependent_target=null이다. 1항만 묻는데 첨부에 2~8항이
   있거나 ui_hints.dependent가 true라는 이유로 종속항 작성을 추가하지 않는다.
   작성 요청에 별도 범위 제한이 없을 때만 ui_hints의 종속항 옵션을 작성 범위 보조 정보로 사용한다.
+  ui_hints.target_mode가 single이면 사용자가 화면에서 항 하나(ui_hints.target)만 골랐고, range면 그 범위만 골랐다는 뜻이다.
+  요청 문장에 항 번호가 없으면 그 선택을 dependent_target으로 쓰고, 문장의 항 번호가 있으면 문장이 우선한다.
 - 이전 작업(existing_claims 블록)이 있는 후속 수정 요청이면 revision_kind를 고른다. 조사·띄어쓰기·문장부호·범위가 같은 표면
   용어만 바꾸면 STYLE_ONLY, 절 결속·관계 술어·한정 표현을 바꾸면 MEANING, 주골격·구성 계층·한정 집합·권리범위를 바꾸거나
   새 기술내용을 반영하면 DESIGN. 처음 작성이거나 판단이 서지 않으면 DESIGN 또는 NONE. 새 자료·도면이 첨부되면 항상 DESIGN이다.

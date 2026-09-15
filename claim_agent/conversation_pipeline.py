@@ -7,7 +7,7 @@ import json
 import re
 from pathlib import Path
 
-from .claim_scope import constrain_target
+from .claim_scope import apply_ui_target, constrain_target, ui_target_set
 from .models.request import IMAGE_EXT, RunRequest
 from .pipeline.engine import Decision
 from .routing import RouteDecision
@@ -121,7 +121,7 @@ def revision_path(route: RouteDecision, request: dict, blocks: list[dict], paths
         return "restart", None
     kind = "style" if route.revision_kind == "STYLE_ONLY" else "meaning"
     scope = None
-    mentioned = explicit_mentions(request["text"])
+    mentioned = explicit_mentions(request["text"]) or ui_target_set(request.get("ui_hints"))
     if mentioned and previous.dependent and previous.dependent.current and not previous.dependent.stale:
         scope = "DEPENDENT"
     return kind, scope
@@ -154,6 +154,7 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
                  paths: dict, folder: Path, previous=None):
     if route.mode in {"AUTHORING_DRAFT", "FINALIZATION"}:
         route.dependent, route.dependent_target = constrain_target(request["text"], route.dependent, route.dependent_target)
+        route.dependent, route.dependent_target = apply_ui_target(route.mode, route.dependent, route.dependent_target, request["text"], request.get("ui_hints"))
     source = next((b for b in blocks if b["id"] == route.claim_source_id), None)
     if source is None and previous and route.mode in {"AUTHORING_DRAFT", "FINALIZATION"}:
         source = next((b for b in blocks if b["category"] == "existing_claims"), None)

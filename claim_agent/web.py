@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
+from .claim_scope import resolve_claim_target
 from .config import load_config
 from .live_events import EventReader
 from .sources.extract import DOC_EXT, ExtractionError, extract_text
@@ -33,6 +34,21 @@ def save_json(path: Path, data: dict) -> None:
     temp = path.with_suffix(".tmp")
     temp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     temp.replace(path)
+
+
+def code_fingerprint(package_dir: Path | None = None) -> str:
+    """Content hash of the installed claim_agent package (web server, assets and every module the child
+    processes import). The launcher restarts a live server whose fingerprint differs from the checkout."""
+    import hashlib
+
+    base = package_dir or Path(__file__).resolve().parent
+    digest = hashlib.sha256()
+    for path in sorted(p for p in base.rglob("*") if p.is_file() and p.suffix in {".py", ".md", ".html", ".js", ".css"} and "__pycache__" not in p.parts):
+        digest.update(str(path.relative_to(base)).replace("\\", "/").encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()[:16]
 
 
 class Workspace:
@@ -75,6 +91,23 @@ class Workspace:
 
     def persist(self, session: dict) -> None:
         save_json(self.directory(session["id"]) / "session.json", session)
+
+    def delete(self, sid: str) -> None:
+        """Remove a conversation and its uploads; pipeline runs under runs/ are kept for the audit trail."""
+        import shutil
+
+        with self.lock:
+            folder = self.directory(sid)
+            job = self.jobs.get(sid)
+            if job and not job["done"]:
+                raise ValueError("응답 중인 대화입니다. 먼저 중지한 뒤 삭제하세요.")
+            self.jobs.pop(sid, None)
+            del self.sessions[sid]
+            shutil.rmtree(folder, ignore_errors=True)
+
+    def running_count(self) -> int:
+        with self.lock:
+            return sum(1 for job in self.jobs.values() if not job["done"])
 
     def create(self, project_id: str | None = None) -> dict:
         """A conversation, optionally bound to a project whose instructions and source files preset every turn."""
@@ -304,6 +337,9 @@ class Workspace:
             known = {item["id"]: item for item in session["files"]}
             if any(fid not in known for fid in selected):
                 raise ValueError("이 대화에 첨부된 파일만 사용할 수 있습니다.")
+            # 작성 대상: 독립항만 / 특정 항 1개 / 종속항 범위 — validated here, then a hint for the router and a
+            # deterministic narrowing in conversation_pipeline (the request text still has precedence).
+            dependent, target, target_mode = resolve_claim_target(data)
             rid = "web-" + uuid.uuid4().hex
             job_dir = self.root / ".tui" / "requests" / rid
             model = self.cfg.model.default
@@ -322,13 +358,14 @@ class Workspace:
             save_json(req, dict(text=text, material=material, reference=context,
                                 files=all_files, attachments=preset["attachments"], history=history, model=model, run_id=session["run_id"],
                                 instructions=preset["instructions"], user_lock=preset["user_lock"], project=preset["project"],
-                                ui_hints=dict(selected_mode=mode, dependent=bool(data.get("dependent")), target=str(data.get("target", "2~8")))))
+                                ui_hints=dict(selected_mode=mode, dependent=dependent, target=target or "", target_mode=target_mode)))
             command = [sys.executable, "-u", "-m", "claim_agent.chat", "--project-root", str(self.root), "--request", str(req)]
             if self.config:
                 command += ["--config", str(self.config)]
             mid = uuid.uuid4().hex
             session["messages"].extend([
-                dict(id=uuid.uuid4().hex, role="user", text=text, files=[known[f] for f in dict.fromkeys(selected)], mode=mode),
+                dict(id=uuid.uuid4().hex, role="user", text=text, files=[known[f] for f in dict.fromkeys(selected)], mode=mode,
+                     claim_target=dict(mode=target_mode, dependent=dependent, target=target)),
                 dict(id=mid, role="assistant", text="", status="running", mode=mode, log_id=rid),
             ])
             session["title"] = session["messages"][0]["text"][:36]
@@ -579,7 +616,7 @@ class Handler(BaseHTTPRequestHandler):
                 with workspace.lock:
                     sessions = sorted(workspace.sessions.values(), key=lambda x: x["updated"], reverse=True)
                     projects = sorted(workspace.projects.values(), key=lambda x: x["updated"], reverse=True)
-                    self.json(dict(model=workspace.cfg.model.default,
+                    self.json(dict(model=workspace.cfg.model.default, code_version=code_fingerprint(), busy=workspace.running_count(),
                                    sessions=[dict(id=s["id"], title=s["title"], project_id=s.get("project_id")) for s in sessions],
                                    projects=[dict(id=p["id"], name=p["name"], files=len(p["files"]),
                                                   sessions=sum(1 for s in sessions if s.get("project_id") == p["id"])) for p in projects]))
@@ -671,6 +708,9 @@ class Handler(BaseHTTPRequestHandler):
             elif url.path == "/api/stop":
                 workspace.stop(data.get("id", ""))
                 self.json({"ok": True})
+            elif url.path == "/api/delete":
+                workspace.delete(str(data.get("id", "")))
+                self.json({"ok": True})
             elif url.path == "/api/shutdown":
                 self.json({"ok": True})
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
@@ -689,7 +729,7 @@ def main(argv=None) -> int:
     workspace = Workspace(args.project_root, args.config)
     server = Server(workspace)
     metadata = workspace.folder / "server.json"
-    save_json(metadata, dict(pid=os.getpid(), origin=server.origin, token=server.token))
+    save_json(metadata, dict(pid=os.getpid(), origin=server.origin, token=server.token, code_version=code_fingerprint()))
     if not args.no_browser:
         webbrowser.open(server.origin + "/?token=" + server.token)
     try:

@@ -226,3 +226,20 @@ def test_project_instructions_reach_router_chat_and_pipeline_but_not_materials(p
     assert state.request["user_lock"] == "제1항 문언 유지"
     assert "## 프로젝트 지침" in roles.calls[0].packet_text and "종속항은 2~4항까지." in roles.calls[0].packet_text
     assert "<<<MATERIAL" in roles.calls[0].packet_text and "종속항은 2~4항까지" not in roles.calls[0].packet_text.split("## RUN_HEADER")[0]
+
+
+def test_single_claim_picked_in_composer_limits_the_dependent_work(rt, request_indep, tmp_path, monkeypatch):
+    folder = tmp_path / "single-pick"
+    folder.mkdir()
+    monkeypatch.setattr(R, "DEP_CLAIMS", R.DEP_CLAIMS[1:2])          # only 【청구항 3】 (parent 1)
+    monkeypatch.setattr(R, "DEP_SET_TEXT", R.DEP_CLAIMS[0][3])
+    request = {**request_data(request_indep), "text": "청구항 세트를 작성해줘",
+               "ui_hints": dict(selected_mode="AUTHORING_DRAFT", dependent=True, target="3", target_mode="single")}
+    blocks, paths = intake(request, folder)
+    route = RouteDecision(mode="AUTHORING_DRAFT", reason="작성", dependent=True, dependent_target="2~8")
+    provider = ScriptedProvider(R.happy_script(n_targets=1))
+    result = run_pipeline(rt, provider, request, route, blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert state.request["dependent_target"] == "3" and result["status"] == "complete"
+    assert [c["claim_no"] for c in state.dependent.current.claims] == [3]
+    assert [c.meta["target_claim_id"] for c in provider.calls if c.scope == "DEPENDENT_SINGLE"] == ["3", "3"]
