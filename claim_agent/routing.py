@@ -79,11 +79,13 @@ ROUTER_SYSTEM = """너는 Claim-Agent 요청 분류기다. 답변, 청구항, �
 - claim_source_id는 검토할 기존 청구항이 담긴 입력 블록의 id를 그대로 선택한다. 원문을 생성/요약하지 않는다.
   순수 의견 질문에 검토할 청구항이 없으면 null. 종속항 검토는 부모항을 포함한 원문 블록을 선택한다.
 - assistant_reference는 대화 이해/검토 대상 선택에만 사용하며 발명 원자료가 아니다.
+- project_instructions는 사용자가 프로젝트 폴더에 미리 적어 둔 상시 지시다(예: 기본 종속항 범위, 작성 방식, 용어 선호).
+  현재 요청의 산출물 판별을 돕는 보조 정보이며, 지침 자체는 청구항 작성 명령이 아니다. 지침을 발명 원자료로 취급하지 않는다.
 """
 
 
 def classify_request(provider: LLMProvider, root: Path, model: str, text: str,
-                     blocks: list[dict], run_id: str, ui_hints: dict | None = None) -> RouteDecision:
+                     blocks: list[dict], run_id: str, ui_hints: dict | None = None, instructions: str | None = None) -> RouteDecision:
     contract = (root / "CLAUDE.md").read_text(encoding="utf-8")
     # Bound classification context, keeping the complete sources separately for
     # the pipeline. Prefer recent turns; source identifiers remain stable.
@@ -96,7 +98,7 @@ def classify_request(provider: LLMProvider, root: Path, model: str, text: str,
         if budget <= 0:
             break
     packet = json.dumps({"context": list(reversed(context)), "current_request": text,
-                         "ui_hints": ui_hints or {}}, ensure_ascii=False)
+                         "ui_hints": ui_hints or {}, "project_instructions": (instructions or "").strip()[:12000]}, ensure_ascii=False)
     # The contract is the stable part of every routing call: pass it as the cacheable sources block
     # (system + sources form the context-cache key; the per-turn packet stays inline).
     result = provider.generate(CallSpec(

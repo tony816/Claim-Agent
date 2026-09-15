@@ -1,7 +1,7 @@
 "use strict";
 history.replaceState(null, "", "/");
 const $ = id => document.getElementById(id);
-const state = {id:null, data:null, pending:[], busy:false, uploading:0, composing:false, nodes:new Map(), generation:0};
+const state = {id:null, data:null, pending:[], busy:false, uploading:0, composing:false, nodes:new Map(), generation:0, project:null, view:"chat", projectData:null};
 const drafts = new Map();
 const routeNames = {CHAT:"일반 대화",META:"설정·진행 확인",AUTHORING_DRAFT:"청구항 작성·수정",FINALIZATION:"출원용 최종 검증",REVIEW_ONLY:"특허 의견·제한 검수"};
 const el = (tag, cls, text) => {const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
@@ -33,6 +33,7 @@ function pending(){const container=$("attachments");container.replaceChildren();
 function render(data){
   const box=$("conversation"),follow=box.scrollHeight-box.scrollTop-box.clientHeight<100;
   state.data=data;$("welcome").hidden=data.messages.length>0;
+  const chip=$("project-chip");if(data.project){chip.hidden=false;chip.textContent="▣ "+data.project.name+(data.project.files?" · 파일 "+data.project.files:"")+(data.project.has_instructions?" · 지침":"");chip.onclick=()=>openProject(data.project.id).catch(e=>error(e.message));}else chip.hidden=true;
   for(const m of data.messages){
     let view=state.nodes.get(m.id);
     if(!view){
@@ -62,7 +63,21 @@ function render(data){
   }
   renderRun(data);controls();if(follow)box.scrollTop=box.scrollHeight;
 }
-async function list(){const data=await api("/api/sessions");$("model").textContent=data.model;$("sessions").replaceChildren();for(const s of data.sessions){const b=el("button",s.id===state.id?"active":"",s.title);b.onclick=()=>open(s.id).catch(e=>error(e.message));$("sessions").append(b);}return data.sessions;}
+async function list(){
+  const data=await api("/api/sessions");$("model").textContent=data.model;
+  const names=new Map(data.projects.map(p=>[p.id,p.name]));
+  if(state.project&&!names.has(state.project))state.project=null;
+  const projects=$("projects");projects.replaceChildren();
+  const all=el("button",!state.project&&state.view==="chat"?"active":"","전체 대화");all.onclick=()=>{state.project=null;localStorage.removeItem("claim-project");showChat();list().catch(e=>error(e.message));};projects.append(all);
+  for(const p of data.projects){const b=el("button",p.id===state.project?"active":"");b.append(el("span","","▣ "+p.name),el("span","count",String(p.sessions)));b.title=p.name+" · 대화 "+p.sessions+"개 · 파일 "+p.files+"개";b.onclick=()=>openProject(p.id).catch(e=>error(e.message));projects.append(b);}
+  const sessions=$("sessions");sessions.replaceChildren();
+  const visible=data.sessions.filter(s=>!state.project||s.project_id===state.project);
+  for(const s of visible){const b=el("button",s.id===state.id&&state.view==="chat"?"active":"");b.append(document.createTextNode(s.title));if(!state.project&&s.project_id&&names.has(s.project_id))b.append(el("span","tag",names.get(s.project_id)));b.onclick=()=>open(s.id).catch(e=>error(e.message));sessions.append(b);}
+  if(!visible.length)sessions.append(el("p","side-empty",state.project?"아직 대화가 없습니다.":"대화가 없습니다."));
+  $("new-chat").textContent=state.project&&names.has(state.project)?"＋ 새 대화 · "+names.get(state.project):"＋ 새 대화";
+  return data.sessions;
+}
+function showChat(){state.view="chat";$("project-panel").hidden=true;$("conversation").hidden=false;document.querySelector("main footer").hidden=false;}
 async function open(id){
   if(state.busy||state.uploading)return;
   if(state.id)drafts.set(state.id,{text:$("prompt").value,files:state.pending,mode:$("mode").value});
@@ -70,11 +85,13 @@ async function open(id){
   state.id=id;state.nodes.clear();$("messages").replaceChildren();state.pending=drafts.get(id)?.files||[];
   $("prompt").value=drafts.get(id)?.text||localStorage.getItem("draft-"+id)||"";
   $("mode").value=drafts.get(id)?.mode||data.messages.filter(m=>m.role==="user").at(-1)?.mode||"CHAT";
-  localStorage.setItem("claim-session",id);document.body.classList.remove("sidebar-open");error("");render(data);pending();resize();await list();$("conversation").scrollTop=$("conversation").scrollHeight;$("prompt").focus();
+  state.project=data.project?data.project.id:null;if(state.project)localStorage.setItem("claim-project",state.project);else localStorage.removeItem("claim-project");
+  showChat();localStorage.setItem("claim-session",id);document.body.classList.remove("sidebar-open");error("");render(data);pending();resize();await list();$("conversation").scrollTop=$("conversation").scrollHeight;$("prompt").focus();
 }
-async function create(){if(state.busy||state.uploading)return;const data=await api("/api/new",{});await open(data.id);}
+async function create(projectId){if(state.busy||state.uploading)return;const data=await api("/api/new",{project_id:projectId===undefined?state.project:projectId});await open(data.id);}
 async function refresh(){const id=state.id,version=state.generation;if(!id)return;const data=await api("/api/session?id="+id);if(id===state.id&&version===state.generation){const wasRunning=state.data?.running;render(data);if(wasRunning&&!data.running)await list();}}
 async function upload(files){
+  if(state.view==="project")return projectUpload(files);
   if(!files.length)return;const id=state.id;if(!id)return;state.uploading++;controls();error("");
   try{for(const file of files){if(file.size>20*1024*1024)throw new Error(file.name+": 파일당 20MB까지 첨부할 수 있습니다.");const item=await api(`/api/upload?id=${id}&name=${encodeURIComponent(file.name||"붙여넣은 이미지.png")}`,file,true);if(state.id===id){state.pending.push(item);pending();}}}catch(e){error(e.message);}finally{state.uploading--;controls();}
 }
@@ -96,11 +113,53 @@ document.addEventListener("dragover",event=>{if(event.dataTransfer.types.include
 document.addEventListener("dragleave",()=>{if(--drag<=0){drag=0;$("drop-overlay").hidden=true;}});
 document.addEventListener("drop",event=>{drag=0;$("drop-overlay").hidden=true;if(event.dataTransfer.files.length){event.preventDefault();upload([...event.dataTransfer.files]);}});
 $("new-chat").onclick=()=>create().catch(e=>error(e.message));$("menu").onclick=()=>document.body.classList.toggle("sidebar-open");
+$("new-project").onclick=()=>createProject().catch(e=>error(e.message));
 $("mode").onchange=controls;$("stop").onclick=async()=>{try{await api("/api/stop",{id:state.id});await refresh();}catch(e){error(e.message);}};
 $("shutdown").onclick=async()=>{if(state.data?.running&&!confirm("진행 중인 응답을 중지하고 프로그램을 종료할까요?"))return;try{await api("/api/shutdown",{});clearInterval(timer);$("composer").hidden=true;error("프로그램을 종료했습니다. 다시 이용하려면 바탕화면 실행기를 더블클릭하세요.");}catch(e){error(e.message);}};
 for(const button of document.querySelectorAll("[data-prompt]"))button.onclick=()=>{$("prompt").value=button.dataset.prompt;resize();controls();$("prompt").focus();};
 const timer=setInterval(()=>{if(!state.busy)refresh().catch(()=>error("프로그램에 연결할 수 없습니다. 실행기를 다시 더블클릭해 주세요."));},700);
-(async()=>{try{const sessions=await list();const saved=localStorage.getItem("claim-session");if(sessions.length)await open(sessions.find(s=>s.id===saved)?.id||sessions[0].id);else await create();}catch(e){error(e.message);}})();
+(async()=>{try{state.project=localStorage.getItem("claim-project")||null;const sessions=await list();const saved=localStorage.getItem("claim-session");if(sessions.length)await open(sessions.find(s=>s.id===saved)?.id||sessions[0].id);else await create(null);}catch(e){error(e.message);}})();
+
+// ---- 프로젝트: 지침·USER_LOCK·소스 파일을 미리 설정해 두는 폴더. 속한 대화의 매 요청에 자동으로 전달된다.
+const CATEGORY_LABEL={invention:"발명 자료",drawing:"도면",prior_art:"선행기술",spec:"정식 명세서"};
+function fmtSize(n){return n>=1048576?(n/1048576).toFixed(1)+" MB":n>=1024?Math.round(n/1024)+" KB":n+" B";}
+function renderProject(p){
+  state.projectData=p;$("project-title").textContent=p.name;
+  if(document.activeElement!==$("project-name"))$("project-name").value=p.name;
+  if(document.activeElement!==$("project-description"))$("project-description").value=p.description||"";
+  if(document.activeElement!==$("project-instructions"))$("project-instructions").value=p.instructions||"";
+  if(document.activeElement!==$("project-user-lock"))$("project-user-lock").value=p.user_lock||"";
+  const files=$("project-file-list");files.replaceChildren();
+  for(const f of p.files){const li=el("li");li.append(el("span","cat",CATEGORY_LABEL[f.category]||f.category),el("span","name","▤ "+f.name),el("span","size",fmtSize(f.size)));const remove=el("button","","제거");remove.type="button";remove.onclick=async()=>{if(!confirm(f.name+" 파일을 프로젝트에서 제거할까요? 이미 실행된 작업의 기록은 유지됩니다."))return;try{await api("/api/project/remove-file",{id:p.id,file:f.id});await openProject(p.id);}catch(e){error(e.message);}};li.append(remove);files.append(li);}
+  if(!p.files.length)files.append(el("li","empty","등록된 소스 파일이 없습니다. 발명 설명·도면·선행기술을 추가해 두면 이 프로젝트의 모든 대화에서 사용됩니다."));
+  const sessions=$("project-session-list");sessions.replaceChildren();
+  for(const s of p.sessions){const li=el("li");const b=el("button","",s.title);b.type="button";b.onclick=()=>open(s.id).catch(e=>error(e.message));li.append(b);sessions.append(li);}
+  if(!p.sessions.length)sessions.append(el("li","empty","아직 대화가 없습니다. 위의 버튼으로 이 프로젝트의 첫 대화를 시작하세요."));
+}
+async function openProject(id){
+  if(state.busy||state.uploading)return;
+  const p=await api("/api/project?id="+encodeURIComponent(id));
+  state.project=id;state.view="project";localStorage.setItem("claim-project",id);
+  $("conversation").hidden=true;document.querySelector("main footer").hidden=true;$("project-panel").hidden=false;$("project-saved").textContent="";
+  document.body.classList.remove("sidebar-open");error("");renderProject(p);await list();
+}
+async function createProject(){if(state.busy||state.uploading)return;const p=await api("/api/project/new",{name:"새 프로젝트"});await openProject(p.id);$("project-name").select();}
+async function projectUpload(files){
+  const p=state.projectData;if(!p||!files.length)return;state.uploading++;controls();error("");
+  try{for(const file of files){if(file.size>20*1024*1024)throw new Error(file.name+": 파일당 20MB까지 첨부할 수 있습니다.");await api(`/api/project/upload?id=${encodeURIComponent(p.id)}&name=${encodeURIComponent(file.name||"붙여넣은 이미지.png")}&category=${$("project-category").value}`,file,true);}}
+  catch(e){error(e.message);}finally{state.uploading--;controls();}
+  try{await openProject(p.id);}catch(e){error(e.message);}
+}
+$("project-form").onsubmit=async event=>{
+  event.preventDefault();const p=state.projectData;if(!p)return;
+  try{const updated=await api("/api/project/update",{id:p.id,name:$("project-name").value,description:$("project-description").value,instructions:$("project-instructions").value,user_lock:$("project-user-lock").value});
+    renderProject(updated);$("project-saved").textContent="저장됨";setTimeout(()=>$("project-saved").textContent="",1500);await list();}
+  catch(e){error(e.message);}
+};
+$("project-new-chat").onclick=()=>{const p=state.projectData;if(p)create(p.id).catch(e=>error(e.message));};
+$("project-attach").onclick=()=>$("project-file-picker").click();$("project-file-picker").onchange=event=>{projectUpload([...event.target.files]);event.target.value="";};
+$("project-delete").onclick=async()=>{const p=state.projectData;if(!p)return;if(!confirm(`"${p.name}" 프로젝트와 저장된 지침·소스 파일을 삭제할까요? 대화 ${p.sessions.length}개는 남고 프로젝트 연결만 해제됩니다.`))return;
+  try{await api("/api/project/delete",{id:p.id});state.project=null;localStorage.removeItem("claim-project");const sessions=await list();if(sessions.length)await open(sessions[0].id);else await create(null);}catch(e){error(e.message);}};
 
 // ---- 작업 상태 패널: 단계 스텝퍼 · 게이트 표 · 중지 사유 · 재개 · 내보내기 · 리비전 대조
 const STAGES_ROOT=["ARCHITECT","DRAFT","STYLE","SUCCESS","SYNTAX","OA","BLIND","PICTURE","LOCK"],STAGES_DEP=["DEP_ARCHITECT","DEP_DRAFT","DEP_STYLE","DEP_SUCCESS","DEP_SYNTAX","DEP_OA","DEP_RECON","DEP_LOCK"];

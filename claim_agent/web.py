@@ -20,10 +20,12 @@ from urllib.parse import parse_qs, quote, urlsplit
 from .config import load_config
 from .live_events import EventReader
 from .sources.extract import DOC_EXT, ExtractionError, extract_text
-from .tui_support import RESUME_KINDS, child_options, read_state, resume_command, validate_attachment
+from .tui_support import CATEGORIES, RESUME_KINDS, child_options, read_state, resume_command, validate_attachment
 
 ASSETS = Path(__file__).with_name("web_assets")
 MAX_UPLOAD = 20 * 1024 * 1024
+MAX_PROJECT_TEXT = 100000
+PROJECT_TEXT_FIELDS = ("name", "description", "instructions", "user_lock")
 
 
 def save_json(path: Path, data: dict) -> None:
@@ -42,7 +44,12 @@ class Workspace:
         self.folder.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
         self.sessions: dict[str, dict] = {}
+        self.projects: dict[str, dict] = {}
         self.jobs: dict[str, dict] = {}
+        for path in (self.folder / "projects").glob("*/project.json"):
+            data = read_state(path)
+            if data and re.fullmatch(r"[a-f0-9]{32}", str(data.get("id", ""))):
+                self.projects[data["id"]] = data
         for path in (self.folder / "sessions").glob("*/session.json"):
             data = read_state(path)
             if data:
@@ -50,6 +57,8 @@ class Workspace:
                     if message.get("status") == "running":
                         message["status"] = "stopped"
                         message["text"] += "\n\n[프로그램이 종료되어 응답이 중단되었습니다.]"
+                if data.get("project_id") not in self.projects:
+                    data["project_id"] = None   # The project folder was removed; the conversation stays.
                 self.sessions[data["id"]] = data
 
     def redact(self, text: str) -> str:
@@ -67,13 +76,134 @@ class Workspace:
     def persist(self, session: dict) -> None:
         save_json(self.directory(session["id"]) / "session.json", session)
 
-    def create(self) -> dict:
+    def create(self, project_id: str | None = None) -> dict:
+        """A conversation, optionally bound to a project whose instructions and source files preset every turn."""
         with self.lock:
+            if project_id:
+                self.project_dir(project_id)
             sid = uuid.uuid4().hex
-            session = dict(id=sid, title="새 대화", messages=[], files=[], run_id=None, updated=time.time())
+            session = dict(id=sid, title="새 대화", messages=[], files=[], run_id=None, updated=time.time(), project_id=project_id or None)
             self.sessions[sid] = session
             self.persist(session)
+            if project_id:
+                self.projects[project_id]["updated"] = time.time()
+                self.persist_project(self.projects[project_id])
             return session
+
+    # ---- projects: a folder of preset instructions, USER_LOCK and source files shared by its conversations
+
+    def project_dir(self, pid: str) -> Path:
+        if not re.fullmatch(r"[a-f0-9]{32}", str(pid)) or pid not in self.projects:
+            raise ValueError("프로젝트를 찾을 수 없습니다.")
+        return self.folder / "projects" / pid
+
+    def persist_project(self, project: dict) -> None:
+        save_json(self.project_dir(project["id"]) / "project.json", project)
+
+    def _project_fields(self, project: dict, data: dict) -> None:
+        for key in PROJECT_TEXT_FIELDS:
+            if key not in data:
+                continue
+            value = data[key]
+            if not isinstance(value, str):
+                raise ValueError("프로젝트 설정은 문자열이어야 합니다.")
+            value = value.replace("\r\n", "\n")
+            if key == "name":
+                value = value.strip()[:80]
+                if not value:
+                    raise ValueError("프로젝트 이름을 입력하세요.")
+            elif len(value) > MAX_PROJECT_TEXT:
+                raise ValueError("프로젝트 설정은 항목당 10만 글자까지 저장할 수 있습니다.")
+            project[key] = value
+
+    def create_project(self, data: dict) -> dict:
+        with self.lock:
+            pid = uuid.uuid4().hex
+            project = dict(id=pid, name="새 프로젝트", description="", instructions="", user_lock="", files=[],
+                           created=time.time(), updated=time.time())
+            self._project_fields(project, data)
+            self.projects[pid] = project
+            (self.folder / "projects" / pid).mkdir(parents=True, exist_ok=True)
+            self.persist_project(project)
+            return self.project_snapshot(pid)
+
+    def update_project(self, pid: str, data: dict) -> dict:
+        with self.lock:
+            self.project_dir(pid)
+            project = self.projects[pid]
+            self._project_fields(project, data)
+            project["updated"] = time.time()
+            self.persist_project(project)
+            return self.project_snapshot(pid)
+
+    def delete_project(self, pid: str) -> None:
+        """Remove the project folder; its conversations are kept and detached (their runs already hold copies)."""
+        import shutil
+
+        with self.lock:
+            folder = self.project_dir(pid)
+            for session in self.sessions.values():
+                if session.get("project_id") == pid:
+                    if self.jobs.get(session["id"]) and not self.jobs[session["id"]]["done"]:
+                        raise ValueError("이 프로젝트의 대화가 아직 응답 중입니다. 완료하거나 중지한 뒤 삭제하세요.")
+            for session in self.sessions.values():
+                if session.get("project_id") == pid:
+                    session["project_id"] = None
+                    self.persist(session)
+            del self.projects[pid]
+            shutil.rmtree(folder, ignore_errors=True)
+
+    def project_snapshot(self, pid: str) -> dict:
+        with self.lock:
+            self.project_dir(pid)
+            result = json.loads(json.dumps(self.projects[pid]))
+            result["sessions"] = [dict(id=s["id"], title=s["title"], updated=s["updated"])
+                                  for s in sorted(self.sessions.values(), key=lambda x: x["updated"], reverse=True) if s.get("project_id") == pid]
+            result["categories"] = CATEGORIES
+            return result
+
+    def project_upload(self, pid: str, name: str, data: bytes, category: str = "invention") -> dict:
+        with self.lock:
+            folder = self.project_dir(pid)
+            if category not in CATEGORIES:
+                raise ValueError("자료 종류는 발명 자료·도면·선행기술·정식 명세서 중 하나여야 합니다.")
+            project = self.projects[pid]
+            if category == "spec" and any(f["category"] == "spec" for f in project["files"]):
+                raise ValueError("정식 명세서는 프로젝트당 한 파일만 등록할 수 있습니다.")
+            item = self._store_upload(folder / "files", name, data, category)
+            project["files"].append(item)
+            project["updated"] = time.time()
+            self.persist_project(project)
+            return item
+
+    def project_remove_file(self, pid: str, fid: str) -> None:
+        import shutil
+
+        with self.lock:
+            folder = self.project_dir(pid)
+            project = self.projects[pid]
+            if not re.fullmatch(r"[a-f0-9]{32}", str(fid)) or not any(f["id"] == fid for f in project["files"]):
+                raise ValueError("프로젝트 파일을 찾을 수 없습니다.")
+            project["files"] = [f for f in project["files"] if f["id"] != fid]
+            project["updated"] = time.time()
+            self.persist_project(project)
+            shutil.rmtree(folder / "files" / fid, ignore_errors=True)
+
+    def project_inputs(self, session: dict) -> dict:
+        """Preset inputs of the session's project for one request: instructions, USER_LOCK and categorized files."""
+        pid = session.get("project_id")
+        if not pid or pid not in self.projects:
+            return dict(instructions="", user_lock="", files=[], attachments=[], project=None)
+        folder = self.project_dir(pid)
+        project = self.projects[pid]
+        attachments = []
+        for item in project["files"]:
+            path = folder / "files" / item["id"] / item["name"]
+            checked = validate_attachment(path, item.get("category", "invention"))
+            attachments.append(dict(path=str(checked.path), category=checked.category, name=item["name"], project_file_id=item["id"]))
+        return dict(instructions=project.get("instructions", "").strip(), user_lock=project.get("user_lock", "").strip(),
+                    files=[a["path"] for a in attachments], attachments=attachments,
+                    project=dict(id=pid, name=project["name"]))
 
     def run_status(self, run_id: str | None) -> dict | None:
         """Halt/outcome/usage summary of the session's pipeline run (no claim text, no paths)."""
@@ -107,35 +237,49 @@ class Workspace:
             result["running"] = bool(job and not job["done"])
             result["live_log"] = job["log"][-300000:] if job else ""
             result["run"] = self.run_status(self.sessions[sid].get("run_id"))
+            pid = self.sessions[sid].get("project_id")
+            project = self.projects.get(pid) if pid else None
+            result["project"] = dict(id=pid, name=project["name"], files=len(project["files"]),
+                                     has_instructions=bool(project.get("instructions", "").strip()),
+                                     has_user_lock=bool(project.get("user_lock", "").strip())) if project else None
             return result
+
+    def _store_upload(self, base: Path, name: str, data: bytes, category: str = "invention") -> dict:
+        if not name or name != Path(name).name or "/" in name or "\\" in name or ":" in name or name.endswith((".", " ")):
+            raise ValueError("올바른 파일 이름이 아닙니다.")
+        if len(data) > MAX_UPLOAD:
+            raise ValueError("파일은 하나당 20MB까지 첨부할 수 있습니다.")
+        # Validate the original name as well as its extension; never accept .env.
+        if name.lower().startswith(".env"):
+            raise ValueError("API 키가 담긴 .env 파일은 첨부할 수 없습니다.")
+        fid = uuid.uuid4().hex
+        path = base / fid / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        try:
+            checked = validate_attachment(path, category)
+            if path.suffix.lower() in DOC_EXT:
+                extract_text(path)          # rejects scanned/encrypted/corrupt documents at upload time
+            elif path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+                path.read_text(encoding="utf-8-sig")
+        except ExtractionError as exc:
+            path.unlink()
+            raise ValueError(f"{name}: {exc}") from None
+        except ValueError as exc:
+            path.unlink()
+            if "도면에는" in str(exc):
+                raise
+            raise ValueError("지원 형식: UTF-8 텍스트, MD, JSON, YAML, CSV, PDF, DOCX, HWPX, HWP, PNG, JPG, WEBP") from None
+        except UnicodeError:
+            path.unlink()
+            raise ValueError("지원 형식: UTF-8 텍스트, MD, JSON, YAML, CSV, PDF, DOCX, HWPX, HWP, PNG, JPG, WEBP") from None
+        return dict(id=fid, name=name, size=len(data), category=checked.category)
 
     def upload(self, sid: str, name: str, data: bytes) -> dict:
         with self.lock:
             folder = self.directory(sid)
-            if not name or name != Path(name).name or "/" in name or "\\" in name or ":" in name or name.endswith((".", " ")):
-                raise ValueError("올바른 파일 이름이 아닙니다.")
-            if len(data) > MAX_UPLOAD:
-                raise ValueError("파일은 하나당 20MB까지 첨부할 수 있습니다.")
-            # Validate the original name as well as its extension; never accept .env.
-            if name.lower().startswith(".env"):
-                raise ValueError("API 키가 담긴 .env 파일은 첨부할 수 없습니다.")
-            fid = uuid.uuid4().hex
-            path = folder / "uploads" / fid / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(data)
-            try:
-                validate_attachment(path)
-                if path.suffix.lower() in DOC_EXT:
-                    extract_text(path)          # rejects scanned/encrypted/corrupt documents at upload time
-                elif path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
-                    path.read_text(encoding="utf-8-sig")
-            except ExtractionError as exc:
-                path.unlink()
-                raise ValueError(f"{name}: {exc}") from None
-            except (ValueError, UnicodeError):
-                path.unlink()
-                raise ValueError("지원 형식: UTF-8 텍스트, MD, JSON, YAML, CSV, PDF, DOCX, HWPX, HWP, PNG, JPG, WEBP") from None
-            item = dict(id=fid, name=name, size=len(data))
+            item = self._store_upload(folder / "uploads", name, data)
+            item.pop("category", None)
             self.sessions[sid]["files"].append(item)
             self.persist(self.sessions[sid])
             return item
@@ -171,10 +315,13 @@ class Workspace:
             material = "\n\n".join(m["text"] for m in prior_users)
             context = "\n\n".join(m["text"] for m in session["messages"] if m.get("mode") == "AUTHORING_DRAFT" and m.get("status") in {"complete", "review"})
             earlier_files = [f["id"] for m in prior_users for f in m.get("files", [])]
-            all_files = [str(validate_attachment(folder / "uploads" / fid / known[fid]["name"]).path) for fid in dict.fromkeys([*earlier_files, *selected])]
+            preset = self.project_inputs(session)
+            session_files = [str(validate_attachment(folder / "uploads" / fid / known[fid]["name"]).path) for fid in dict.fromkeys([*earlier_files, *selected])]
+            all_files = list(dict.fromkeys([*preset["files"], *session_files]))
             req = job_dir / "chat.json"
             save_json(req, dict(text=text, material=material, reference=context,
-                                files=all_files, history=history, model=model, run_id=session["run_id"],
+                                files=all_files, attachments=preset["attachments"], history=history, model=model, run_id=session["run_id"],
+                                instructions=preset["instructions"], user_lock=preset["user_lock"], project=preset["project"],
                                 ui_hints=dict(selected_mode=mode, dependent=bool(data.get("dependent")), target=str(data.get("target", "2~8")))))
             command = [sys.executable, "-u", "-m", "claim_agent.chat", "--project-root", str(self.root), "--request", str(req)]
             if self.config:
@@ -431,7 +578,13 @@ class Handler(BaseHTTPRequestHandler):
             elif url.path == "/api/sessions":
                 with workspace.lock:
                     sessions = sorted(workspace.sessions.values(), key=lambda x: x["updated"], reverse=True)
-                    self.json(dict(model=workspace.cfg.model.default, sessions=[dict(id=s["id"], title=s["title"]) for s in sessions]))
+                    projects = sorted(workspace.projects.values(), key=lambda x: x["updated"], reverse=True)
+                    self.json(dict(model=workspace.cfg.model.default,
+                                   sessions=[dict(id=s["id"], title=s["title"], project_id=s.get("project_id")) for s in sessions],
+                                   projects=[dict(id=p["id"], name=p["name"], files=len(p["files"]),
+                                                  sessions=sum(1 for s in sessions if s.get("project_id") == p["id"])) for p in projects]))
+            elif url.path == "/api/project":
+                self.json(workspace.project_snapshot(query.get("id", [""])[0]))
             elif url.path == "/api/session":
                 self.json(workspace.snapshot(query.get("id", [""])[0]))
             elif url.path == "/api/diff":
@@ -487,11 +640,28 @@ class Handler(BaseHTTPRequestHandler):
                 query = parse_qs(url.query)
                 self.json(workspace.upload(query.get("id", [""])[0], query.get("name", [""])[0], raw))
                 return
+            if url.path == "/api/project/upload":
+                query = parse_qs(url.query)
+                self.json(workspace.project_upload(query.get("id", [""])[0], query.get("name", [""])[0], raw, query.get("category", ["invention"])[0]))
+                return
             data = json.loads(raw or b"{}")
             if not isinstance(data, dict):
                 raise ValueError("잘못된 요청입니다.")
             if url.path == "/api/new":
-                self.json(workspace.create())
+                project_id = data.get("project_id")
+                if project_id is not None and not isinstance(project_id, str):
+                    raise ValueError("프로젝트를 찾을 수 없습니다.")
+                self.json(workspace.create(project_id or None))
+            elif url.path == "/api/project/new":
+                self.json(workspace.create_project(data))
+            elif url.path == "/api/project/update":
+                self.json(workspace.update_project(str(data.get("id", "")), data))
+            elif url.path == "/api/project/delete":
+                workspace.delete_project(str(data.get("id", "")))
+                self.json({"ok": True})
+            elif url.path == "/api/project/remove-file":
+                workspace.project_remove_file(str(data.get("id", "")), str(data.get("file", "")))
+                self.json({"ok": True})
             elif url.path == "/api/send":
                 workspace.start(data.get("id", ""), data)
                 self.json({"ok": True})

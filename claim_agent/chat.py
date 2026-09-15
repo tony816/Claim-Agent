@@ -32,7 +32,19 @@ def user_message(text: str, material: str, files: list[str]) -> dict:
     return {"role": "user", "parts": parts}
 
 
-def _chat_spec(model: str, history: list[dict], message: dict) -> CallSpec:
+PROJECT_INSTRUCTIONS_HEADER = "## 프로젝트 지침 (사용자가 프로젝트 폴더에 미리 설정한 지시)"
+
+
+def system_with_instructions(base: str, instructions: str | None) -> str:
+    """Project instructions are standing user directives for the conversation, never invention facts or gate verdicts."""
+    text = (instructions or "").strip()
+    if not text:
+        return base
+    return (base + "\n\n" + PROJECT_INSTRUCTIONS_HEADER + "\n" + text
+            + "\n\n위 프로젝트 지침은 답변 방식·범위·우선순위에 대한 사용자 지시다. 지침에 적힌 내용을 발명의 기술적 사실로 취급하거나, 지침을 근거로 검수·게이트·LOCK을 통과한 것처럼 말하지 않는다.")
+
+
+def _chat_spec(model: str, history: list[dict], message: dict, instructions: str | None = None) -> CallSpec:
     """The current turn as a provider-neutral CallSpec: text parts become the packet, images ride along."""
     texts, images = [], []
     for part in message["parts"]:
@@ -42,15 +54,15 @@ def _chat_spec(model: str, history: list[dict], message: dict) -> CallSpec:
             data = base64.b64decode(part["inline_data"]["data"])
             images.append(ImagePart(part["inline_data"]["mime_type"], data, "첨부 이미지", hashlib.sha256(data).hexdigest()))
     return CallSpec(
-        role="대화", scope="CHAT", model=model, system_instruction=SYSTEM, packet_text="\n\n".join(texts), sources_block="",
+        role="대화", scope="CHAT", model=model, system_instruction=system_with_instructions(SYSTEM, instructions), packet_text="\n\n".join(texts), sources_block="",
         images=images, json_schema=None, tools=None, gen=GenParams(temperature=0.7, thinking_level="LOW", max_output_tokens=8192),
         use_cache=False, phase="chat", stage="CHAT", run_id="", history=history,
     )
 
 
-def generate_turn(provider: LLMProvider, model: str, history: list[dict], message: dict, events: EventWriter) -> dict:
+def generate_turn(provider: LLMProvider, model: str, history: list[dict], message: dict, events: EventWriter, instructions: str | None = None) -> dict:
     """One conversational turn through the configured provider (Gemini or Anthropic); events are emitted by the provider."""
-    result = provider.generate(_chat_spec(model, history, message))
+    result = provider.generate(_chat_spec(model, history, message, instructions))
     answer = result.text
     if not answer:
         raise RuntimeError("모델이 텍스트 응답을 반환하지 않았습니다.")
@@ -66,7 +78,7 @@ def routed_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
     previous = previous_state(cfg, request)
     blocks, paths = intake(request, folder, previous)
     route = classify_request(provider, cfg.project_root, request["model"], request["text"], blocks, folder.name,
-                             request.get("ui_hints"))
+                             request.get("ui_hints"), request.get("instructions"))
     (folder / "route.json").write_text(route.model_dump_json(indent=2), encoding="utf-8")
     planned_id = previous.run_id if previous and previous.request_mode.value == route.mode and route.mode in {"AUTHORING_DRAFT", "FINALIZATION"} else folder.name
     events.emit("route", role="요청 분류", run_id=planned_id, **route.model_dump())
@@ -77,7 +89,7 @@ def routed_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
         context = history
         if request.get("reference"):
             context = [*history, {"role": "model", "parts": [{"text": request["reference"]}]}]
-        result = generate_turn(provider, request["model"], context, message, events)
+        result = generate_turn(provider, request["model"], context, message, events, request.get("instructions"))
         return {**result, "effective_mode": route.mode, "route": route.model_dump()}
     model_key = "provider.anthropic.model" if cfg.provider.kind == "anthropic" else "model.default"
     rt = build_runtime(cfg.project_root, config_path, overrides={model_key: request["model"]})
