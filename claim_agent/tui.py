@@ -581,9 +581,10 @@ class ClaimAgentApp(App):
         if self.active_mode == "FEEDBACK" and report.exists() and report.stat().st_mtime_ns == self.previous_report_stamp:
             self.query_one("#result", TextArea).load_text("수정된 보고서가 생성되지 않았습니다. 로그 펼치기로 중지 원인을 확인하세요. 이전 보고서는 결과 폴더에 보존되어 있습니다.")
             return
+        concise = self.cfg.path("runs_dir") / self.run_id / "report-chat.md"
         if report.exists():
             self.last_pipeline_run = self.run_id
-            self.result_text = self.redact(report.read_text(encoding="utf-8"))
+            self.result_text = self.redact((concise if concise.exists() else report).read_text(encoding="utf-8"))
             self.query_one("#result", TextArea).load_text(self.result_text)
             self.query_one("#copy", Button).disabled = False
         else:

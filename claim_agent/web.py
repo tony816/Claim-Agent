@@ -536,10 +536,13 @@ class Workspace:
                     if result.get("run_id") and result.get("effective_mode") in {"AUTHORING_DRAFT", "FINALIZATION"}:
                         session["run_id"] = result["run_id"]
                 else:
-                    report = self.cfg.path("runs_dir") / job["run_id"] / "report.md"
+                    folder = self.cfg.path("runs_dir") / job["run_id"]
+                    report = folder / "report.md"
                     if not report.exists() or report.stat().st_mtime_ns == job["previous_report"]:
                         raise ValueError("새 보고서가 생성되지 않았습니다. 작업 로그에서 중지 원인을 확인하세요.")
-                    message["text"] = self.redact(report.read_text(encoding="utf-8"))
+                    concise = folder / "report-chat.md"
+                    message["text"] = self.redact((concise if concise.exists() else report).read_text(encoding="utf-8"))
+                    message["pipeline_run_id"] = job["run_id"]
                     message["status"] = "complete" if process.returncode == 0 else "review"
         except Exception as exc:
             with self.lock:
@@ -683,6 +686,17 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 self.wfile.write(payload)
+            elif url.path == "/api/report":
+                sid, mid = query.get("id", [""])[0], query.get("message", [""])[0]
+                with workspace.lock:
+                    workspace.directory(sid)
+                    session = workspace.sessions[sid]
+                    message = next((m for m in session["messages"] if m["id"] == mid), None)
+                    run_id = (message or {}).get("pipeline_run_id") or session.get("run_id")
+                    if not run_id or not workspace.run_status(run_id):
+                        raise ValueError("전체 보고서를 찾을 수 없습니다.")
+                    path = workspace.cfg.path("runs_dir") / run_id / "report.md"
+                    self.json({"text": workspace.redact(path.read_text(encoding="utf-8")) if path.exists() else "보고서가 아직 없습니다."})
             elif url.path == "/api/log":
                 sid, mid = query.get("id", [""])[0], query.get("message", [""])[0]
                 with workspace.lock:

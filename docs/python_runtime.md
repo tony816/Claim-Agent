@@ -43,6 +43,8 @@ Windows 더블클릭 실행기는 `scripts/launch_web.py`를 통해 `claim_agent
 
 대화 목록·메시지·Gemini 역할 이력은 `.tui/web/sessions/`에 저장된다. 기본 선택인 **자동 분류 · 대화**는 `claim_agent.chat`에서 답변 전에 현재 `CLAUDE.md`와 이전 문맥으로 요청을 분류한다. 청구항 출력물·수정안은 `AUTHORING_DRAFT`, 명시적 출원용 최종 확정은 `FINALIZATION`, 특허 의견은 `REVIEW_ONLY`로 기존 `PipelineEngine`에 연결된다. 작성·수정은 필수 역할과 게이트 순서를 거치며, 제한 검수는 요청된 리뷰어만 호출한다. 수동 **청구항 작성·수정** 선택도 유지된다.
 
+**보고서 두 벌.** `runs/<run_id>/report.md`는 게이트 표·성능 요약·리비전 이력까지 담은 완전한 기록이고, `report-chat.md`는 대화에 표시할 간결본(`render_chat_report`)이다. 간결본은 청구항 문언·LOCK, 결과 한 줄, 미통과 단계, 중지 사유와 그 역할의 원 보고서, 남은 UNVERIFIED만 담고 작업 상태 패널이 이미 보여 주는 표는 싣지 않는다(성공 런 기준 약 6,100자 → 1,000자). 웹·TUI는 간결본을 표시하고, 웹의 `/api/report`는 전체 보고서를 접힌 영역에 지연 로드한다. CLI·export·감사 기록은 `report.md`를 그대로 쓴다.
+
 **스코프 가드.** `PipelineEngine.scope_guard`가 `run()`(과 `resume()`)의 첫 동작으로, 모델 호출 전에 종속항 요청의 전제를 검사한다. `dependent`가 참이고 이 run에 독립항 LOCK이 없는데 `claim_file`이 종속항만 담고 있으면 `INDEPENDENT_SCOPE_DEPENDENT_CLAIM_TEXT`로, 요청한 목표항의 부모항 체인을 제공된 청구항에서 복원할 수 없으면 `DEPENDENT_PARENT_CHAIN_MISSING`으로 `BLOCK` 정지한다. 원자료만 있는 통상 작성(독립항 먼저, 이어서 종속항)과 독립항이 포함된 청구항 세트는 그대로 통과한다.
 
 **작성 대상.** 컴포저의 작성 옵션은 `target_mode`(independent/single/range)와 `target_claim` 또는 `target_segments`(`{from,to}` 목록이나 `2~4,6` 문자열)를 보내고, `claim_scope.resolve_claim_target`이 이를 `(dependent, target, mode)`로 정규화해 `ui_hints`에 싣는다(이전 `dependent`+`target` 필드도 계속 받는다). `conversation_pipeline.run_pipeline`은 라우터 결과에 `claim_scope.apply_ui_target`을 적용해 화면에서 고른 항으로만 결정론적으로 좁힌다. 요청 문장의 항 번호가 우선하고, 문장이 1항만 지목하면 종속항 작업을 추가하지 않으며, 문장의 번호와 선택이 겹치지 않으면 ValueError로 중지한다. 후속 수정에서는 화면 선택도 `revision_path`의 종속항 범위 판단에 쓰인다. `/api/delete`는 대화와 업로드를 지우고 `runs/`는 보존한다.

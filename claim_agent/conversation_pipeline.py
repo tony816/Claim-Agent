@@ -185,10 +185,11 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
     else:
         state = engine.run(engine.start(req, folder.name))
     state.notes.append("자동 요청 분류: " + route.mode + " — " + route.reason + (f" (revision 경로: {applied})" if resume else ""))
-    from .store.report import render_report
+    from .store.report import render_chat_report, render_report
     rt.store.save_state(state)
-    answer = render_report(state)
-    rt.store.write_report(state.run_id, answer)
+    rt.store.write_report(state.run_id, render_report(state))
+    answer = render_chat_report(state)
+    rt.store.write_chat_report(state.run_id, answer)
     (folder / "pipeline-request.json").write_text(req.model_dump_json(indent=2), encoding="utf-8")
     (folder / "route.json").write_text(json.dumps({
         **route.model_dump(), "run_id": state.run_id,

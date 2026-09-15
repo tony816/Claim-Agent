@@ -86,6 +86,16 @@ class RunStore:
         p.write_text(text, encoding="utf-8")
         return p
 
+    def write_chat_report(self, run_id: str, text: str) -> Path:
+        """The conversation-sized report. report.md stays the complete record for export and audit."""
+        p = self.run_dir(run_id) / "report-chat.md"
+        p.write_text(text, encoding="utf-8")
+        return p
+
+    def chat_report_path(self, run_id: str) -> Path:
+        p = self.run_dir(run_id) / "report-chat.md"
+        return p if p.exists() else self.run_dir(run_id) / "report.md"
+
     def write_shadow(self, run_id: str, seq: int, role: str, payload: dict[str, Any]) -> None:
         d = self.run_dir(run_id) / "shadow"
         d.mkdir(parents=True, exist_ok=True)
