@@ -15,7 +15,7 @@ import webbrowser
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 from .config import load_config
 from .live_events import EventReader
@@ -193,6 +193,16 @@ class Workspace:
             thread = threading.Thread(target=self.execute, args=(sid, job, command), daemon=True)
             job["thread"] = thread
             thread.start()
+
+    def export(self, run_id: str, fmt: str, with_evidence: bool = False) -> tuple[bytes, str, str]:
+        from .runtime import build_runtime
+        from .store.export import export_run
+
+        rt = build_runtime(self.root, self.config)
+        state = rt.store.load_state(run_id)
+        path = export_run(rt.store, state, fmt, with_evidence=with_evidence)
+        mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document" if fmt == "docx" else "text/markdown; charset=utf-8"
+        return path.read_bytes(), path.name, mime
 
     def resume(self, sid: str, data: dict) -> None:
         """Continue the session's halted run with a user decision (same run, same USER_LOCK)."""
@@ -417,6 +427,22 @@ class Handler(BaseHTTPRequestHandler):
                     self.json(dict(model=workspace.cfg.model.default, sessions=[dict(id=s["id"], title=s["title"]) for s in sessions]))
             elif url.path == "/api/session":
                 self.json(workspace.snapshot(query.get("id", [""])[0]))
+            elif url.path == "/api/export":
+                sid = query.get("id", [""])[0]
+                fmt = query.get("format", ["docx"])[0]
+                with workspace.lock:
+                    workspace.directory(sid)
+                    run_id = workspace.sessions[sid].get("run_id")
+                    if not run_id or not workspace.run_status(run_id):
+                        raise ValueError("내보낼 작업이 없습니다.")
+                    payload, filename, mime = workspace.export(run_id, fmt, query.get("evidence", ["0"])[0] == "1")
+                self.send_response(200)
+                self.send_header("Content-Type", mime)
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + quote(filename))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(payload)
             elif url.path == "/api/log":
                 sid, mid = query.get("id", [""])[0], query.get("message", [""])[0]
                 with workspace.lock:

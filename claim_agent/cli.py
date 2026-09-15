@@ -173,6 +173,16 @@ def cmd_runs(args) -> int:
     return 0
 
 
+def cmd_export(args) -> int:
+    from .store.export import export_run
+
+    rt = _rt(args)
+    st = rt.store.load_state(args.run_id)
+    path = export_run(rt.store, st, args.format, Path(args.out) if args.out else None, args.with_evidence)
+    print(f"written: {path}")
+    return 0
+
+
 def cmd_doctor(args) -> int:
     from .doctor import run_doctor
 
@@ -515,6 +525,13 @@ def build_parser() -> argparse.ArgumentParser:
     rr.add_argument("run_id")
     rr.add_argument("--out")
     ru.set_defaults(func=cmd_runs)
+
+    ex = sub.add_parser("export", help="export a run's locked claims as Markdown or DOCX")
+    ex.add_argument("run_id")
+    ex.add_argument("--format", default="docx", choices=["md", "docx"])
+    ex.add_argument("--out")
+    ex.add_argument("--with-evidence", action="store_true", help="append gate table, performance summary, evidence table and UNVERIFIED items")
+    ex.set_defaults(func=cmd_export)
 
     d = sub.add_parser("doctor", help="check environment, sources, roles, schema; --live probes the API")
     d.add_argument("--live", action="store_true")
