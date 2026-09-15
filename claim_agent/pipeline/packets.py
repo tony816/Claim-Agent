@@ -93,24 +93,31 @@ def _output_contract(extra: str = "") -> str:
 
 
 # --------------------------------------------------------------------------- independent
+#
+# Packet layout (stable prefix first): `USER_LOCK → 원자료 → run-invariant upstream reports` come before the
+# volatile `RUN_HEADER → task sections → per-revision reports → 출력 계약`. A role's repeated calls
+# (loops, repair, tool phase) then share an identical prefix, which implicit context caching can reuse;
+# nothing in any role contract fixes the header position, and every identifier is still in the packet.
+
+
 def architect(state: RunState, bundle: MaterialBundle, ids: Identifiers, record_id: str, request_text: str, redesign_goal: str | None) -> Packet:
     mats, imgs = _materials(bundle, ("invention", "drawing", "spec", "prior_art"))
-    txt = _hdr(state, ids, record_id)
+    txt = _user_lock(bundle) + mats
+    txt += _hdr(state, ids, record_id)
     txt += _section("현재 요청", request_text)
     if bundle.claim_file_text():
         txt += _section("기존 청구항 — 편집 대상 (새 기술내용의 근거가 아님)", bundle.claim_file_text())
     if redesign_goal:
         txt += _section("설계 변경 목표 (새 design_revision)", redesign_goal)
-    txt += _user_lock(bundle) + mats
     txt += _output_contract("`gates.DESIGN_GATE`에 LOCKED/UNLOCKED, `invention_type`에 발명 유형을 적는다.")
     return Packet(txt, imgs)
 
 
 def drafter_independent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, design_record_id: str, prior_text: str | None, change_goal: str | None) -> Packet:
     mats, imgs = _materials(bundle, ("invention", "drawing", "spec"))
-    txt = _hdr(state, ids, record_id, {"draft_scope": "INDEPENDENT", "meaning_draft_id": record_id, "목표 revision": ids.revision})
-    txt += _user_lock(bundle) + mats
+    txt = _user_lock(bundle) + mats
     txt += _report(state, store, design_record_id, "DESIGN_GATE: LOCKED 전문 (claim-architect 보고서)")
+    txt += _hdr(state, ids, record_id, {"draft_scope": "INDEPENDENT", "meaning_draft_id": record_id, "목표 revision": ids.revision})
     if prior_text:
         txt += _section("직전 확정 revision 청구항 전문", prior_text)
         txt += _section("이번 의미 변경 목표", change_goal or "")
@@ -123,9 +130,9 @@ def style_independent(
     meaning_draft_id: str | None, mode: StyleChangeMode, prior_text: str | None, prior_style_record_id: str | None, feedback: str | None,
 ) -> Packet:
     mats, imgs = _materials(bundle, ("invention", "drawing", "spec"))
-    txt = _hdr(state, ids, record_id, {"style_scope": "INDEPENDENT", "style_change_mode": mode.value, "style_record_id": record_id, "목표 revision": ids.revision})
-    txt += _user_lock(bundle) + mats
+    txt = _user_lock(bundle) + mats
     txt += _report(state, store, design_record_id, "DESIGN_GATE: LOCKED 전문")
+    txt += _hdr(state, ids, record_id, {"style_scope": "INDEPENDENT", "style_change_mode": mode.value, "style_record_id": record_id, "목표 revision": ids.revision})
     if mode == StyleChangeMode.STYLE_ONLY_REVISION:
         txt += _section("직전 확정 revision 청구항 전문", prior_text)
         txt += _report(state, store, prior_style_record_id, "직전 style record 전문")
@@ -142,11 +149,11 @@ def style_independent(
 
 def success_independent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, design_record_id: str, meaning_draft_id: str | None, style_record_id: str, exact_text: str, corpus_fragments: str | None) -> Packet:
     mats, imgs = _materials(bundle, ("invention", "drawing", "spec", "prior_art"))
-    txt = _hdr(state, ids, record_id, {"success_scope": "INDEPENDENT", "success_record_id (예정)": record_id})
+    txt = _user_lock(bundle) + mats
+    txt += _report(state, store, design_record_id, "DESIGN_GATE: LOCKED 전문")
+    txt += _hdr(state, ids, record_id, {"success_scope": "INDEPENDENT", "success_record_id (예정)": record_id})
     txt += _section("검수 대상 exact 청구항 전문", exact_text)
     txt += _section("평문(줄바꿈·번호 제거)", flatten(exact_text))
-    txt += _user_lock(bundle) + mats
-    txt += _report(state, store, design_record_id, "DESIGN_GATE: LOCKED 전문")
     txt += _report(state, store, meaning_draft_id, "PRE_STYLE 의미 초안 보고서 전문")
     txt += _report(state, store, style_record_id, "style record 전문 (변경 대조표·용어·표현 출처표·두 후처리 게이트·독자·기하 게이트)")
     if corpus_fragments:
@@ -157,11 +164,11 @@ def success_independent(state: RunState, store, bundle: MaterialBundle, ids: Ide
 
 def syntax_independent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, design_record_id: str, style_record_id: str, success_record_id: str, exact_text: str, baseline_text: str | None, mode: StyleChangeMode) -> Packet:
     mats, imgs = _materials(bundle, ("invention", "drawing", "spec"))
-    txt = _hdr(state, ids, record_id, {"review_scope": "INDEPENDENT"})
+    txt = _user_lock(bundle) + mats
+    txt += _report(state, store, design_record_id, "DESIGN_GATE 전문")
+    txt += _hdr(state, ids, record_id, {"review_scope": "INDEPENDENT"})
     txt += _section("검수 대상 청구항 전문", exact_text)
     txt += _section("평문(줄바꿈·번호 제거)", flatten(exact_text))
-    txt += _user_lock(bundle) + mats
-    txt += _report(state, store, design_record_id, "DESIGN_GATE 전문")
     txt += _report(state, store, style_record_id, "style record 전문 (CLAIM_STYLE_GATE: PASS)")
     txt += _report(state, store, success_record_id, "claim-success-reviewer success record 전문 (상태: PASS)")
     txt += _section(f"범위 불변 비교 기준 전문 ({mode.value})", baseline_text or "style record의 PRE_STYLE 의미 초안 참조")
@@ -171,10 +178,10 @@ def syntax_independent(state: RunState, store, bundle: MaterialBundle, ids: Iden
 
 def oa_independent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, design_record_id: str, style_record_id: str, success_record_id: str, syntax_record_id: str, exact_text: str) -> Packet:
     mats, imgs = _materials(bundle, ("invention", "drawing", "spec", "prior_art"))
-    txt = _hdr(state, ids, record_id, {"review_scope": "INDEPENDENT"})
-    txt += _section("검수 대상 청구항 전문", exact_text)
-    txt += _user_lock(bundle) + mats
+    txt = _user_lock(bundle) + mats
     txt += _report(state, store, design_record_id, "DESIGN_GATE 전문")
+    txt += _hdr(state, ids, record_id, {"review_scope": "INDEPENDENT"})
+    txt += _section("검수 대상 청구항 전문", exact_text)
     txt += _report(state, store, style_record_id, "style record 전문")
     txt += _report(state, store, success_record_id, "success record 전문")
     txt += _report(state, store, syntax_record_id, "syntax-scope-reviewer PASS 보고서 전문")
@@ -187,39 +194,44 @@ def oa_independent(state: RunState, store, bundle: MaterialBundle, ids: Identifi
 
 def picture_independent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, design_record_id: str, style_record_id: str, oa_record_id: str, blind_record_id: str, exact_text: str) -> Packet:
     mats, imgs = _materials(bundle, ("invention", "drawing"))
-    txt = _hdr(state, ids, record_id, {"mode": "REFERENCE_COMPARE", "claim_scope": "INDEPENDENT", "blind_snapshot_id": blind_record_id})
+    txt = mats
+    txt += _report(state, store, design_record_id, "DESIGN_GATE 전문")
+    txt += _hdr(state, ids, record_id, {"mode": "REFERENCE_COMPARE", "claim_scope": "INDEPENDENT", "blind_snapshot_id": blind_record_id})
     txt += _section("변경 없는 청구항 전문", exact_text)
     txt += _report(state, store, blind_record_id, "봉인된 blind snapshot 전문 (independence: FRESH_CALL_NO_PROJECT_CONTEXT)")
-    txt += _report(state, store, design_record_id, "DESIGN_GATE 전문")
     txt += _report(state, store, style_record_id, "style record 전문 (CLAIM_STYLE_GATE·TERM_EXPRESSION_GATE)")
     txt += _report(state, store, oa_record_id, "OA 보고서 전문")
-    txt += mats
     txt += _output_contract("`status`는 최종 판정(PASS/PASS-RANGE/REVIEW/BLOCK/UNVERIFIED)이다.")
     return Packet(txt, imgs)
 
 
 # --------------------------------------------------------------------------- dependent
+def _dependent_stable(state: RunState, store, bundle: MaterialBundle, root_lock_id: str, root_design_record_id: str | None, cats: tuple[str, ...]) -> tuple[str, list[ImagePart]]:
+    """Run-invariant part shared by every dependent-stage packet: USER_LOCK, 원자료, root lock (+ root design)."""
+    mats, imgs = _materials(bundle, cats)
+    txt = _user_lock(bundle) + mats
+    txt += _report(state, store, root_lock_id, "루트 독립항 LOCK 전문")
+    if root_design_record_id:
+        txt += _report(state, store, root_design_record_id, "루트 DESIGN_GATE 전문 (기술 개념표)")
+    return txt, imgs
+
+
 def dep_architect(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_design_record_id: str, root_text: str, request_text: str, redesign_goal: str | None) -> Packet:
-    mats, imgs = _materials(bundle, ("invention", "drawing", "spec", "prior_art"))
-    txt = _hdr(state, ids, record_id)
+    txt, imgs = _dependent_stable(state, store, bundle, root_lock_id, root_design_record_id, ("invention", "drawing", "spec", "prior_art"))
+    txt += _hdr(state, ids, record_id)
     txt += _section("현재 요청 (종속항 세트)", request_text)
     if redesign_goal:
         txt += _section("종속항 설계 변경 목표", redesign_goal)
     txt += _section("변경 없는 루트 독립항 전문", root_text)
-    txt += _report(state, store, root_lock_id, "루트 독립항 LOCK 전문")
-    txt += _report(state, store, root_design_record_id, "루트 DESIGN_GATE 전문 (기술 개념표)")
-    txt += _user_lock(bundle) + mats
     txt += _output_contract("`gates.DEPENDENT_DESIGN_GATE`, `gates.INVENTIVE_STEP`, `candidates[]`(DC-NN별 분류·세 게이트·예정 항·부모항)를 채운다.")
     return Packet(txt, imgs)
 
 
 def drafter_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_text: str, dep_design_record_id: str, prior_set_text: str | None, change_goal: str | None) -> Packet:
-    mats, imgs = _materials(bundle, ("invention", "drawing", "spec"))
-    txt = _hdr(state, ids, record_id, {"draft_scope": "DEPENDENT_SET", "dependent_meaning_draft_id": record_id})
-    txt += _section("변경 없는 루트 독립항 전문", root_text)
-    txt += _report(state, store, root_lock_id, "루트 독립항 LOCK 전문")
+    txt, imgs = _dependent_stable(state, store, bundle, root_lock_id, None, ("invention", "drawing", "spec"))
     txt += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE: LOCKED 전문")
-    txt += _user_lock(bundle) + mats
+    txt += _hdr(state, ids, record_id, {"draft_scope": "DEPENDENT_SET", "dependent_meaning_draft_id": record_id})
+    txt += _section("변경 없는 루트 독립항 전문", root_text)
     if prior_set_text:
         txt += _section("직전 확정 dependent_revision 세트 전문", prior_set_text)
         txt += _section("이번 의미 변경 목표", change_goal or "")
@@ -228,12 +240,10 @@ def drafter_dependent(state: RunState, store, bundle: MaterialBundle, ids: Ident
 
 
 def style_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_text: str, dep_design_record_id: str, dep_meaning_draft_id: str | None, mode: StyleChangeMode, prior_set_text: str | None, prior_style_record_id: str | None, feedback: str | None) -> Packet:
-    mats, imgs = _materials(bundle, ("invention", "drawing", "spec"))
-    txt = _hdr(state, ids, record_id, {"style_scope": "DEPENDENT_SET", "style_change_mode": mode.value, "dependent_style_record_id": record_id})
-    txt += _section("변경 없는 루트 독립항 전문", root_text)
-    txt += _report(state, store, root_lock_id, "루트 독립항 LOCK 전문")
+    txt, imgs = _dependent_stable(state, store, bundle, root_lock_id, None, ("invention", "drawing", "spec"))
     txt += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE: LOCKED 전문")
-    txt += _user_lock(bundle) + mats
+    txt += _hdr(state, ids, record_id, {"style_scope": "DEPENDENT_SET", "style_change_mode": mode.value, "dependent_style_record_id": record_id})
+    txt += _section("변경 없는 루트 독립항 전문", root_text)
     if mode == StyleChangeMode.STYLE_ONLY_REVISION:
         txt += _section("직전 확정 dependent_revision 세트 전문", prior_set_text)
         txt += _report(state, store, prior_style_record_id, "직전 dependent style record 전문")
@@ -248,47 +258,41 @@ def style_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identif
 
 
 def success_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_text: str, dep_design_record_id: str, dep_meaning_draft_id: str | None, dep_style_record_id: str, set_text: str, corpus_fragments: str | None) -> Packet:
-    mats, imgs = _materials(bundle, ("invention", "drawing", "spec", "prior_art"))
-    txt = _hdr(state, ids, record_id, {"success_scope": "DEPENDENT_SET", "dependent_success_record_id (예정)": record_id})
+    txt, imgs = _dependent_stable(state, store, bundle, root_lock_id, None, ("invention", "drawing", "spec", "prior_art"))
+    txt += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE: LOCKED 전문")
+    txt += _hdr(state, ids, record_id, {"success_scope": "DEPENDENT_SET", "dependent_success_record_id (예정)": record_id})
     txt += _section("루트 독립항 전문", root_text)
     txt += _section("검수 대상 exact 종속항 세트 전문", set_text)
-    txt += _report(state, store, root_lock_id, "루트 독립항 LOCK 전문")
-    txt += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE: LOCKED 전문")
     txt += _report(state, store, dep_meaning_draft_id, "종속항 PRE_STYLE 의미 초안 보고서 전문")
     txt += _report(state, store, dep_style_record_id, "dependent style record 전문")
     if corpus_fragments:
         txt += _section("style record가 사용한 코퍼스 정확 조각과 라우팅 인덱스", corpus_fragments)
-    txt += _user_lock(bundle) + mats
     txt += _output_contract("`handoff_ready`는 `syntax 진행 가능` 값이다. `per_claim_gates[]`에 목표항별 판정을 적는다.")
     return Packet(txt, imgs)
 
 
 def syntax_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_text: str, dep_design_record_id: str, dep_style_record_id: str, dep_success_record_id: str, set_text: str, baseline_text: str | None, mode: StyleChangeMode) -> Packet:
-    mats, imgs = _materials(bundle, ("invention", "drawing", "spec"))
-    txt = _hdr(state, ids, record_id, {"review_scope": "DEPENDENT_SET"})
+    txt, imgs = _dependent_stable(state, store, bundle, root_lock_id, None, ("invention", "drawing", "spec"))
+    txt += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE 전문")
+    txt += _hdr(state, ids, record_id, {"review_scope": "DEPENDENT_SET"})
     txt += _section("루트 독립항 전문", root_text)
     txt += _section("검수 대상 종속항 세트 전문", set_text)
-    txt += _report(state, store, root_lock_id, "루트 독립항 LOCK 전문")
-    txt += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE 전문")
     txt += _report(state, store, dep_style_record_id, "dependent style record 전문")
     txt += _report(state, store, dep_success_record_id, "dependent success record 전문")
     txt += _section(f"범위 불변 비교 기준 ({mode.value})", baseline_text or "dependent style record의 PRE_STYLE 세트 참조")
-    txt += _user_lock(bundle) + mats
     txt += _output_contract("`status`는 종합 판정, `handoff_ready`는 `OA 진행 가능` 값이다.")
     return Packet(txt, imgs)
 
 
 def oa_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_text: str, dep_design_record_id: str, dep_style_record_id: str, dep_success_record_id: str, dep_syntax_record_id: str, set_text: str) -> Packet:
-    mats, imgs = _materials(bundle, ("invention", "drawing", "spec", "prior_art"))
-    txt = _hdr(state, ids, record_id, {"review_scope": "DEPENDENT_SET"})
+    txt, imgs = _dependent_stable(state, store, bundle, root_lock_id, None, ("invention", "drawing", "spec", "prior_art"))
+    txt += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE 전문")
+    txt += _hdr(state, ids, record_id, {"review_scope": "DEPENDENT_SET"})
     txt += _section("루트 독립항 전문", root_text)
     txt += _section("검수 대상 종속항 세트 전문", set_text)
-    txt += _report(state, store, root_lock_id, "루트 독립항 LOCK 전문")
-    txt += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE 전문")
     txt += _report(state, store, dep_style_record_id, "dependent style record 전문")
     txt += _report(state, store, dep_success_record_id, "dependent success record 전문")
     txt += _report(state, store, dep_syntax_record_id, "dependent syntax PASS 보고서 전문")
-    txt += _user_lock(bundle) + mats
     txt += _output_contract(
         "`gates.DEPENDENT_OA_DRAFT_GATE`와 `gates.DEPENDENT_OA_FINAL_GATE`를 분리해 채우고 정식 명세서가 없으면 FINAL은 UNVERIFIED + SPEC_NOT_PROVIDED다. `handoff_ready`는 `DRAFT 진행 가능(종속항별 역구성 YES)` 값이다."
     )
@@ -296,19 +300,20 @@ def oa_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identifier
 
 
 def picture_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_design_record_id: str, dep_design_record_id: str, dep_style_record_id: str, dep_oa_record_id: str, blind_record_id: str, parent_chain_text: str, target_claim_text: str, dc_id: str | None) -> Packet:
+    # Shared block first (identical for every target of the set → one explicit cache, parallel jobs share it),
+    # then the per-target part.
     mats, imgs = _materials(bundle, ("invention", "drawing"))
-    txt = _hdr(state, ids, record_id, {"mode": "REFERENCE_COMPARE", "claim_scope": "DEPENDENT_SINGLE", "dependent_blind_snapshot_id": blind_record_id, "목표 DC": dc_id or "미지정(DEPENDENT_DESIGN_GATE에서 대응 확인)"})
+    shared = mats
+    shared += _report(state, store, root_lock_id, "루트 독립항 LOCK 전문")
+    shared += _report(state, store, root_design_record_id, "루트 DESIGN_GATE 전문")
+    shared += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE 전문 (목표 DC-NN 포함)")
+    shared += _report(state, store, dep_style_record_id, "dependent style record 전문")
+    shared += _report(state, store, dep_oa_record_id, "종속항 OA 보고서 전문")
+    txt = shared
+    txt += _hdr(state, ids, record_id, {"mode": "REFERENCE_COMPARE", "claim_scope": "DEPENDENT_SINGLE", "dependent_blind_snapshot_id": blind_record_id, "목표 DC": dc_id or "미지정(DEPENDENT_DESIGN_GATE에서 대응 확인)"})
     txt += _section("부모항 체인 전문 (blind 입력과 동일)", parent_chain_text)
     txt += _section("목표 종속항 전문 (blind 입력과 동일)", target_claim_text)
     txt += _report(state, store, blind_record_id, "봉인된 dependent blind snapshot 전문")
-    shared_start = len(txt)
-    txt += _report(state, store, root_lock_id, "루트 독립항 LOCK 전문")
-    txt += _report(state, store, root_design_record_id, "루트 DESIGN_GATE 전문")
-    txt += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE 전문 (목표 DC-NN 포함)")
-    txt += _report(state, store, dep_style_record_id, "dependent style record 전문")
-    txt += _report(state, store, dep_oa_record_id, "종속항 OA 보고서 전문")
-    txt += mats
-    shared = txt[shared_start:]
     txt += _output_contract("`status`는 목표항의 최종 판정이다.")
     return Packet(txt, imgs, cache_text=shared, cache_images=True)
 
@@ -317,11 +322,11 @@ def picture_dependent(state: RunState, store, bundle: MaterialBundle, ids: Ident
 def review_only(state: RunState, bundle: MaterialBundle, ids: Identifiers, record_id: str, role: str, scope: Scope, claim_text: str, request_text: str) -> Packet:
     mats, imgs = _materials(bundle, ("invention", "drawing", "spec", "prior_art"))
     key = {"syntax-scope-reviewer": "review_scope", "oa-strategy-reviewer": "review_scope", "claim-success-reviewer": "success_scope"}.get(role, "scope")
-    txt = _hdr(state, ids, record_id, {key: scope.value, "design_revision": "N/A"})
+    txt = _user_lock(bundle) + mats
+    txt += _hdr(state, ids, record_id, {key: scope.value, "design_revision": "N/A"})
     txt += _section("검토 요청", request_text)
     txt += _section("제공된 청구항 전문", claim_text or "미제공 — 일반 의견 요청이다. 개별 청구항을 만들거나 검증했다고 하지 않는다.")
     txt += _section("평문(줄바꿈·번호 제거)", flatten(claim_text))
-    txt += _user_lock(bundle) + mats
     txt += _section("REVIEW_ONLY 규칙", "요청된 의견/검토 결과를 report_markdown에 답한다. 어떤 방법을 택할지 묻는 요청에는 먼저 기능을 가능하게 하는 관계, 선택지별 근거·불확실성, 현재 자료상 권장 방향과 이유를 설명한다. 선택에 필요한 분석을 하지 않은 채 사용자에게 선택을 되묻지 않는다. 첨부의 다른 미결정 메모나 명칭 문제는 현재 요청과 직접 관련이 있을 때만 다루며 검토를 중지시키지 않는다. 수정 문언을 새로 작성하지 않는다. 제공되지 않은 청구항·설계·원자료·비교 기준·법률 근거가 필요한 시험은 개별 UNVERIFIED로 두고, 이 결과는 DRAFT·FINAL LOCK의 PASS 근거가 아니다.")
     txt += _output_contract()
     return Packet(txt, imgs)

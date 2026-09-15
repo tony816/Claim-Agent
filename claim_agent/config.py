@@ -24,13 +24,20 @@ class RoleConfig(BaseModel):
     temperature: float = 0.2
     cache: bool = True
     tools: bool = True
-    aux_mode: str = "two_phase"       # style adjuster only: two_phase | prefetch | off
+    aux_mode: str = "two_phase"       # style adjuster only: two_phase | off
+    aux_thinking_level: str = "LOW"   # tool phase (corpus search decision) runs light: no images, 07+README only
+    aux_max_output_tokens: int = 2048
     max_output_tokens: int | None = None
 
 
 class CacheConfig(BaseModel):
     enabled: bool = True
     ttl: str = "3600s"
+    # Creation policy. "auto": create a context cache only when the same role×scope bundle is expected to be
+    # reused at least `min_expected_reuse` times in this run, or when the same bundle was requested once before
+    # within the TTL window (second sighting = proven reuse). "always": create on first use (batch/eval sessions).
+    # "never": never create; existing live entries are still used.
+    warm: str = "auto"                 # auto | always | never
     min_expected_reuse: int = 2
 
 

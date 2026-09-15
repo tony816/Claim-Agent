@@ -80,7 +80,10 @@ def routed_turn(client, cfg, config_path, request: dict, folder: Path, events: E
 
     previous = previous_state(cfg, request)
     blocks, paths = intake(request, folder, previous)
-    router = GeminiProvider(client, events=events)
+    from .provider.cache import CacheManager
+
+    router_cache = CacheManager(client, cfg.path("runs_dir") / ".cache-registry.json", cfg.cache.ttl, cfg.cache.enabled, warm=cfg.cache.warm, min_expected_reuse=cfg.cache.min_expected_reuse)
+    router = GeminiProvider(client, router_cache, events=events)
     route = classify_request(router, cfg.project_root, request["model"], request["text"], blocks, folder.name,
                              request.get("ui_hints"))
     (folder / "route.json").write_text(route.model_dump_json(indent=2), encoding="utf-8")

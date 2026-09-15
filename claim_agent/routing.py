@@ -86,12 +86,15 @@ def classify_request(provider: LLMProvider, root: Path, model: str, text: str,
             break
     packet = json.dumps({"context": list(reversed(context)), "current_request": text,
                          "ui_hints": ui_hints or {}}, ensure_ascii=False)
+    # The contract is the stable part of every routing call: pass it as the cacheable sources block
+    # (system + sources form the context-cache key; the per-turn packet stays inline).
     result = provider.generate(CallSpec(
         role="request-router", scope="META", model=model,
-        system_instruction=ROUTER_SYSTEM + "\n\n프로젝트 계약:\n" + contract,
+        system_instruction=ROUTER_SYSTEM,
+        sources_block="## 프로젝트 계약 (CLAUDE.md)\n\n" + contract,
         packet_text=packet, json_schema=RouteDecision.model_json_schema(),
         gen=GenParams(temperature=0, thinking_level="LOW", max_output_tokens=2048),
-        use_cache=False, phase="route", stage="ROUTING", run_id=run_id,
+        use_cache=True, phase="route", stage="ROUTING", run_id=run_id,
     ))
     if result.finish_reason not in ("", "STOP"):
         raise ValueError("요청 분류가 완료되지 않았습니다. 일반 대화로 우회하지 않습니다.")

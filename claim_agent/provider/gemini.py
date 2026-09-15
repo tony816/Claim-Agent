@@ -154,7 +154,7 @@ class GeminiProvider:
             cache_source = spec.sources_block + ("\n" + shared if shared else "")
             cache_entry = self.cache.get_or_create(
                 spec.model, spec.role, spec.scope, spec.system_instruction, cache_source,
-                images=spec.images if spec.cache_images else (), identity=spec.run_id if shared else "",
+                images=spec.images if spec.cache_images else (), identity=spec.run_id if shared else "", expected_reuse=spec.expected_reuse,
             )
         json_mode = spec.json_schema is not None and not spec.tools
         last_exc: Exception | None = None

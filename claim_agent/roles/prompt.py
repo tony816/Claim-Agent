@@ -63,6 +63,18 @@ class PromptAssembler:
             paths.append(sf.relpath)
         return "".join(blocks), keys, paths
 
+    def sources_subset(self, role: RoleSpec, scope: Scope, keys: list[str]) -> str:
+        """A smaller pre-loaded block (only `keys`, all of which must be whitelisted for the role/scope)."""
+        allowed = sources_for(role.name, scope)
+        chosen = [k for k in keys if k in allowed]
+        if not chosen:
+            return ""
+        blocks = ["## 사전 로딩 소스\n\n"]
+        for key in chosen:
+            sf = self.sources.get(key)
+            blocks.append(render_file_block(sf.relpath, sf.sha256, sf.text))
+        return "".join(blocks)
+
     def assemble(self, role: RoleSpec, scope: Scope) -> AssembledPrompt:
         block, keys, paths = self.sources_block(role, scope)
         return AssembledPrompt(self.system_instruction(role), block, keys, paths)

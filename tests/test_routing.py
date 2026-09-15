@@ -22,9 +22,9 @@ def test_semantic_router_receives_context_and_current_contract(project_root):
     decision = classify_request(provider, project_root, "test-model", "그렇게 바꿔줘", blocks, "route-test")
     assert decision.dependent and decision.dependent_target == "2"
     call = provider.calls[0]
-    assert (project_root / "CLAUDE.md").read_text(encoding="utf-8") in call.system_instruction
+    assert (project_root / "CLAUDE.md").read_text(encoding="utf-8") in call.sources_block
     assert "그렇게 바꿔줘" in call.packet_text and "original" in call.packet_text
-    assert call.tools is None and not call.use_cache
+    assert call.tools is None and call.use_cache   # contract block is the cacheable prefix
 
 
 @pytest.mark.parametrize("text", ["청구항 수정안을 작성해줘", "suggest me revised claim 2", "특허적인 의견을 알려줘"])

@@ -260,6 +260,15 @@ class PipelineEngine:
             return ""
         return "### 사용자 결정·메모 (최신순)\n\n" + "\n".join(f"- {n}" for n in state.notes[-5:][::-1]) + "\n\n"
 
+    def _with_decisions(self, state: RunState, text: str) -> str:
+        """Volatile decision notes go just before the output contract so the stable prefix stays cacheable."""
+        section = self._decision_section(state)
+        if not section:
+            return text
+        marker = "### 출력 계약"
+        i = text.rfind(marker)
+        return text[:i] + section + text[i:] if i >= 0 else text + section
+
     def _call(
         self,
         state: RunState,
@@ -274,6 +283,7 @@ class PipelineEngine:
         use_tools: bool = False,
         blind: bool = False,
         loop_index: int = 0,
+        expected_reuse: int = 1,
     ) -> tuple[RoleEnvelope, RecordRef]:
         spec_role = self.roles.get(role)
         prompt = self.assembler.assemble(spec_role, scope)
@@ -283,16 +293,19 @@ class PipelineEngine:
         with self._lock:
             state.call_seq += 1
             seq = state.call_seq
-        packet_text = packet.text if blind else self._decision_section(state) + packet.text
+        packet_text = packet.text if blind else self._with_decisions(state, packet.text)
         tool_log = ToolLog()
         tools = None
         if use_tools and rc.tools and rc.aux_mode == "two_phase" and not blind:
             tools = make_tools(self.sources, tool_log)
+            # Light tool phase: only the 07 gate and the catalog, no drawings, low thinking, short output.
+            # The JSON main call that follows carries the full context.
             phase_a = CallSpec(
                 role=role, scope=scope.value, model=self.cfg.model_for(role), system_instruction=prompt.system_instruction,
                 packet_text=packet_text + "\n### 도구 단계\n\n07 §3 조건이 성립하면 도구로 정확 조각을 검색하고, 검색이 끝났거나 필요 없으면 `SEARCH_DONE`만 출력한다. 이 단계에서는 JSON을 출력하지 않는다.\n",
-                sources_block=prompt.sources_block, images=list(packet.images), json_schema=None, tools=tools, gen=self._gen(role),
-                use_cache=rc.cache and self.cfg.cache.enabled, phase="tool_phase", stage=stage.value, run_id=state.run_id, seq=seq,
+                sources_block=self.assembler.sources_subset(spec_role, scope, ["README", "S07"]), images=[], json_schema=None, tools=tools,
+                gen=GenParams(rc.temperature, rc.aux_thinking_level, rc.aux_max_output_tokens),
+                use_cache=False, phase="tool_phase", stage=stage.value, run_id=state.run_id, seq=seq,
             )
             res_a = self.provider.generate(phase_a)
             self._telemetry_tool(state, phase_a, res_a, ids, rid, tool_log)
@@ -304,7 +317,7 @@ class PipelineEngine:
             packet_text=packet_text, sources_block=prompt.sources_block, images=list(packet.images), json_schema=ENVELOPE_JSON_SCHEMA,
             tools=None, gen=self._gen(role), use_cache=(rc.cache and self.cfg.cache.enabled and not blind), phase="main",
             stage=stage.value, run_id=state.run_id, seq=seq, meta={"record_id": rid, "kind": kind, "target_claim_id": ids.target_claim_id},
-            cache_packet_text=packet.cache_text if not blind else "", cache_images=packet.cache_images and not blind,
+            cache_packet_text=packet.cache_text if not blind else "", cache_images=packet.cache_images and not blind, expected_reuse=expected_reuse,
         )
         env, result, repair_used, problems = self._generate_validated(spec, contract, ids, rid, expected_exact, prompt.source_paths, blind)
         if tool_log.calls:
@@ -992,7 +1005,7 @@ class PipelineEngine:
                 return tid, benv, None, brid, "", None
             prid = record_id("dependent_reference_compare", ids)
             pk = packets.picture_dependent(state, self.store, bundle, ids, prid, d.root_lock_id, state.candidate.design_record_id or "", d.design_record_id or "", cur.records.get("dependent_style", ""), cur.records.get("dependent_oa", ""), brid, chain_text, target_text, dc)
-            penv, _ = self._call(state, "picture-claim-reconstruction-reviewer", Scope.DEPENDENT_SINGLE, st, "dependent_reference_compare", pk, ids, prid, expected_exact=None)
+            penv, _ = self._call(state, "picture-claim-reconstruction-reviewer", Scope.DEPENDENT_SINGLE, st, "dependent_reference_compare", pk, ids, prid, expected_exact=None, expected_reuse=len(jobs))
             tr = decide(penv, contract_for("picture-claim-reconstruction-reviewer", Scope.DEPENDENT_SINGLE), state.request_mode, d.loop_counts, self.cfg.pipeline.max_return_loops)
             return tid, benv, penv, brid, prid, tr
 

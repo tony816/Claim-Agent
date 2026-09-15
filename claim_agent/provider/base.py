@@ -43,6 +43,7 @@ class CallSpec:
     meta: dict[str, Any] = field(default_factory=dict)
     cache_packet_text: str = ""             # exact shared substring; full packet remains auditable
     cache_images: bool = False
+    expected_reuse: int = 1                 # planned uses of the cacheable bundle in this run (cache creation policy)
 
     @property
     def system_sha(self) -> str:
