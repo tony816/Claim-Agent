@@ -264,3 +264,124 @@ def test_web_feedback_resumes_and_rechecks_same_run(rt, request_indep, tmp_path,
         assert workspace.snapshot(sid)["messages"][-1]["status"] == "complete"
     finally:
         workspace.close()
+
+
+def test_project_presets_instructions_lock_and_files_for_every_session(workspace, monkeypatch):
+    project = workspace.create_project({"name": "  클립 홀더 출원  ", "instructions": "종속항은 2~4항까지.\r\n청구항만 출력.", "user_lock": "제1항 문언 유지"})
+    assert project["name"] == "클립 홀더 출원" and project["instructions"] == "종속항은 2~4항까지.\n청구항만 출력."
+    pid = project["id"]
+    invention = workspace.project_upload(pid, "발명설명.md", "발명 원자료".encode())
+    prior = workspace.project_upload(pid, "선행.txt", "선행기술".encode(), "prior_art")
+    spec = workspace.project_upload(pid, "명세서.txt", "명세서 전문".encode(), "spec")
+    assert (invention["category"], prior["category"], spec["category"]) == ("invention", "prior_art", "spec")
+    with pytest.raises(ValueError, match="한 파일만"):
+        workspace.project_upload(pid, "명세서2.txt", b"x", "spec")
+    with pytest.raises(ValueError, match="도면에는"):
+        workspace.project_upload(pid, "도면.txt", b"x", "drawing")
+    for name, category in [(".env", "invention"), ("../x.txt", "invention"), ("a.txt", "claims")]:
+        with pytest.raises(ValueError):
+            workspace.project_upload(pid, name, b"data", category)
+    with pytest.raises(ValueError, match="프로젝트를 찾을 수 없습니다"):
+        workspace.create("f" * 32)
+    first = workspace.create(pid)["id"]
+    second = workspace.create(pid)["id"]
+    standalone = workspace.create()["id"]
+    snap = workspace.snapshot(first)
+    assert snap["project"] == dict(id=pid, name="클립 홀더 출원", files=3, has_instructions=True, has_user_lock=True)
+    assert workspace.snapshot(standalone)["project"] is None
+    assert [s["id"] for s in workspace.project_snapshot(pid)["sessions"]] == [second, first]
+    own = workspace.upload(second, "추가.txt", "대화 첨부".encode())
+    commands = []
+
+    def capture(sid, job, command):
+        commands.append(command)
+        job["done"] = True
+
+    monkeypatch.setattr(workspace, "execute", capture)
+    workspace.start(second, {"text": "독립항 작성해줘", "files": [own["id"]]})
+    workspace.start(standalone, {"text": "안녕"})
+    wait_for(lambda: len(commands) == 2)
+    req = json.loads(Path(commands[0][commands[0].index("--request") + 1]).read_text(encoding="utf-8"))
+    names = [Path(p).name for p in req["files"]]
+    assert names == ["발명설명.md", "선행.txt", "명세서.txt", "추가.txt"]     # project presets first, then the turn's attachment
+    assert req["instructions"] == "종속항은 2~4항까지.\n청구항만 출력." and req["user_lock"] == "제1항 문언 유지"
+    assert req["project"] == dict(id=pid, name="클립 홀더 출원")
+    categories = {a["name"]: a["category"] for a in req["attachments"]}
+    assert categories == {"발명설명.md": "invention", "선행.txt": "prior_art", "명세서.txt": "spec"}
+    assert all(a["project_file_id"] for a in req["attachments"]) and "추가.txt" not in categories
+    plain = json.loads(Path(commands[1][commands[1].index("--request") + 1]).read_text(encoding="utf-8"))
+    assert plain["files"] == [] and plain["instructions"] == "" and plain["user_lock"] == "" and plain["project"] is None
+    # Survives a restart; removing a file and deleting the project keep the conversations.
+    restored = web.Workspace(workspace.root)
+    assert restored.projects[pid]["files"][1]["name"] == "선행.txt" and restored.sessions[first]["project_id"] == pid
+    restored.project_remove_file(pid, prior["id"])
+    assert [f["name"] for f in restored.project_snapshot(pid)["files"]] == ["발명설명.md", "명세서.txt"]
+    assert not (restored.project_dir(pid) / "files" / prior["id"]).exists()
+    restored.delete_project(pid)
+    assert pid not in restored.projects and restored.sessions[first]["project_id"] is None
+    assert not (workspace.folder / "projects" / pid).exists()
+    assert web.Workspace(workspace.root).sessions[second]["project_id"] is None
+
+
+def test_project_http_endpoints(workspace):
+    import io
+
+    from PIL import Image
+
+    server = web.Server(workspace)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    def call(path, body=None, headers=None, raw=None):
+        data = raw if raw is not None else (json.dumps(body).encode() if body is not None else None)
+        return urlopen(Request(server.origin + path, data=data, headers=headers or {}), timeout=3)
+
+    try:
+        with call("/?token=" + server.token) as response:
+            cookie = response.headers["Set-Cookie"].split(";")[0]
+            page = response.read().decode()
+            assert 'id="project-panel"' in page and 'id="projects"' in page and 'id="new-project"' in page
+        headers = {"Cookie": cookie, "X-Claim-Request": "1"}
+        with pytest.raises(HTTPError) as e:
+            call("/api/project/new", {"name": "x"}, {"Cookie": cookie})
+        assert e.value.code == 403
+        with call("/api/project/new", {"name": "프로젝트 A", "description": "설명"}, headers) as response:
+            project = json.load(response)
+        pid = project["id"]
+        assert project["files"] == [] and project["sessions"] == [] and project["categories"]["spec"] == "정식 명세서"
+        png = io.BytesIO()
+        Image.new("RGB", (8, 8), "white").save(png, format="PNG")
+        with call(f"/api/project/upload?id={pid}&name=%EB%8F%84%EB%A9%B4.png&category=drawing", headers=headers, raw=png.getvalue()) as response:
+            drawing = json.load(response)
+            assert drawing["name"] == "도면.png" and drawing["category"] == "drawing"
+        with pytest.raises(HTTPError):
+            call(f"/api/project/upload?id={pid}&name=x.txt&category=claims", headers=headers, raw=b"x")
+        with call("/api/project/update", {"id": pid, "instructions": "청구항만 출력"}, headers) as response:
+            assert json.load(response)["instructions"] == "청구항만 출력"
+        with pytest.raises(HTTPError):
+            call("/api/project/update", {"id": pid, "name": "   "}, headers)
+        with call("/api/new", {"project_id": pid}, headers) as response:
+            sid = json.load(response)["id"]
+        with pytest.raises(HTTPError):
+            call("/api/new", {"project_id": "0" * 32}, headers)
+        with call("/api/project?id=" + pid, headers=headers) as response:
+            data = json.load(response)
+            assert data["sessions"][0]["id"] == sid and data["instructions"] == "청구항만 출력" and data["files"][0]["id"] == drawing["id"]
+        with call("/api/sessions", headers=headers) as response:
+            listing = json.load(response)
+            assert listing["projects"][0] == dict(id=pid, name="프로젝트 A", files=1, sessions=1)
+            assert next(s for s in listing["sessions"] if s["id"] == sid)["project_id"] == pid
+        with call("/api/session?id=" + sid, headers=headers) as response:
+            assert json.load(response)["project"]["name"] == "프로젝트 A"
+        with call("/api/project/remove-file", {"id": pid, "file": drawing["id"]}, headers) as response:
+            assert json.load(response)["ok"]
+        with call("/api/project/delete", {"id": pid}, headers) as response:
+            assert json.load(response)["ok"]
+        with pytest.raises(HTTPError):
+            call("/api/project?id=" + pid, headers=headers)
+        with call("/api/session?id=" + sid, headers=headers) as response:
+            assert json.load(response)["project"] is None
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()

@@ -77,6 +77,22 @@ def test_new_material_forces_redesign_even_when_router_says_style(rt, request_in
     assert state.candidate.design_revision == "d2" and [c.role for c in provider.calls if c.phase == "main"][0] == "claim-architect"
 
 
+def test_project_preset_files_do_not_force_redesign_but_new_uploads_do(rt, request_indep, tmp_path):
+    previous = _previous(rt, request_indep, "rev-project")
+    folder = tmp_path / "followup-project"
+    folder.mkdir()
+    presets = [dict(path=p, category="invention", name=Path(p).name, project_file_id="pf") for p in request_indep.invention_sources]
+    request = dict(text="띄어쓰기만 고쳐줘", files=list(request_indep.invention_sources), attachments=presets, history=[])
+    blocks, paths = intake(request, folder, previous)
+    route = RouteDecision(mode="AUTHORING_DRAFT", reason="표면 수정", revision_kind="STYLE_ONLY")
+    assert revision_path(route, request, blocks, paths, previous) == ("style", None)
+    extra = tmp_path / "이번 첨부.md"
+    extra.write_text("이번 대화에서 새로 첨부한 설명", encoding="utf-8")
+    request["files"].append(str(extra))
+    blocks, paths = intake(request, folder, previous)
+    assert revision_path(route, request, blocks, paths, previous) == ("restart", None)
+
+
 def test_dependent_only_mention_targets_the_dependent_revision(rt, request_dep, tmp_path):
     previous = _previous(rt, request_dep, "rev-dep")
     folder = tmp_path / "followup-d"

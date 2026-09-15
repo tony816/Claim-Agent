@@ -114,7 +114,10 @@ def revision_path(route: RouteDecision, request: dict, blocks: list[dict], paths
                 new_material.append(rp)
     if paths.get("spec_path") and str(Path(paths["spec_path"]).resolve()) not in known:
         new_material.append(paths["spec_path"])
-    if new_material or request.get("files"):
+    # Files attached in this turn are new material by intent even when their bytes match; a project's preset
+    # files ride along with every turn and are already part of the run, so they never force a restart by themselves.
+    preset = {a["path"] for a in request.get("attachments", []) if a.get("project_file_id")}
+    if new_material or [f for f in request.get("files", []) if f not in preset]:
         return "restart", None
     kind = "style" if route.revision_kind == "STYLE_ONLY" else "meaning"
     scope = None
@@ -122,6 +125,19 @@ def revision_path(route: RouteDecision, request: dict, blocks: list[dict], paths
     if mentioned and previous.dependent and previous.dependent.current and not previous.dependent.stale:
         scope = "DEPENDENT"
     return kind, scope
+
+
+def effective_request_text(request: dict) -> str:
+    """The request the roles see: project instructions (standing user directives) precede the current turn's text.
+
+    Instructions never enter the material bundle, so they cannot become invention evidence; they only travel in the
+    `현재 요청` section that every role already treats as the user's instruction.
+    """
+    instructions = str(request.get("instructions") or "").strip()
+    if not instructions:
+        return request["text"]
+    return ("## 프로젝트 지침 (사용자가 프로젝트 폴더에 미리 설정한 지시 — 발명 원자료가 아님)\n\n" + instructions
+            + "\n\n## 현재 요청\n\n" + request["text"])
 
 
 def previous_state(cfg, request):
@@ -141,10 +157,11 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
     source = next((b for b in blocks if b["id"] == route.claim_source_id), None)
     if source is None and previous and route.mode in {"AUTHORING_DRAFT", "FINALIZATION"}:
         source = next((b for b in blocks if b["category"] == "existing_claims"), None)
+    text = effective_request_text(request)
     req = RunRequest(
-        request_mode=route.mode, request_text=request["text"],
+        request_mode=route.mode, request_text=text,
         candidate_id=previous.candidate.candidate_id if previous else "cand-01",
-        user_lock=previous.request.get("user_lock") if previous else None,
+        user_lock=previous.request.get("user_lock") if previous else (str(request.get("user_lock") or "").strip() or None),
         dependent=route.dependent if route.mode != "REVIEW_ONLY" else False,
         dependent_target=route.dependent_target if route.mode != "REVIEW_ONLY" else None,
         dependent_set_id=previous.request.get("dependent_set_id") if previous else None,
@@ -160,10 +177,10 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
         kind, scope = revision_path(route, request, blocks, paths, previous)
         applied = kind + (f"/{scope}" if scope else "")
         if kind == "restart":
-            state = engine.resume(previous.run_id, Decision(text=request["text"], restart_from="ARCHITECT", request_update=req))
+            state = engine.resume(previous.run_id, Decision(text=text, restart_from="ARCHITECT", request_update=req))
         else:
             # Same materials, same USER_LOCK: only the wording changes, so the cheaper revision path applies.
-            state = engine.resume(previous.run_id, Decision(text=request["text"], action="style_fix" if kind == "style" else "meaning_fix", scope=scope))
+            state = engine.resume(previous.run_id, Decision(text=text, action="style_fix" if kind == "style" else "meaning_fix", scope=scope))
     else:
         state = engine.run(engine.start(req, folder.name))
     state.notes.append("자동 요청 분류: " + route.mode + " — " + route.reason + (f" (revision 경로: {applied})" if resume else ""))
