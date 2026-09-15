@@ -23,14 +23,14 @@ def run_doctor(rt: Runtime, live: bool = False, model: str | None = None, contra
     """Return rows of (check, status, detail). status ∈ OK | WARN | FAIL | SKIP."""
     rows: list[tuple[str, str, str]] = []
     cfg = rt.cfg
-    rows.append(("config", "OK", f"model={cfg.model.default} cache={cfg.cache.enabled} runs={cfg.path('runs_dir')}"))
+    rows.append(("config", "OK", f"provider={cfg.provider.kind} model={cfg.default_model} cache={cfg.cache.enabled} runs={cfg.path('runs_dir')}"))
     rows.append(("roles", "OK", f"{len(rt.roles.roles)} role files loaded ({', '.join(ROLE_NAMES[:3])}…)"))
     rows.append(("sources", "OK", f"{len(rt.sources.files)} source files; source_set_id={rt.source_set_id}"))
     rows.append(("lessons", "OK", f"approved={len(rt.lessons.list('approved'))} pending={len(rt.lessons.list('pending'))} hash={rt.lessons_hash[:12]}"))
     depth = schema_depth(ENVELOPE_JSON_SCHEMA)
     rows.append(("envelope schema", "OK" if depth <= 3 else "WARN", f"depth={depth}, properties={len(ENVELOPE_JSON_SCHEMA['properties'])}"))
-    key_present = bool(os.environ.get(cfg.model.api_key_env) or os.environ.get("GOOGLE_API_KEY"))
-    rows.append(("api key", "OK" if key_present else "WARN", f"{cfg.model.api_key_env} {'set' if key_present else 'not set — live calls impossible; use --replay'}"))
+    key_present = bool(os.environ.get(cfg.api_key_env) or (cfg.provider.kind == "gemini" and os.environ.get("GOOGLE_API_KEY")) or (cfg.provider.kind == "anthropic" and os.environ.get("ANTHROPIC_AUTH_TOKEN")))
+    rows.append(("api key", "OK" if key_present else "WARN", f"{cfg.api_key_env} {'set' if key_present else 'not set — live calls impossible; use --replay'}"))
 
     if contracts:
         root = cfg.project_root
@@ -46,6 +46,18 @@ def run_doctor(rt: Runtime, live: bool = False, model: str | None = None, contra
     if live:
         if not key_present:
             rows.append(("live probe", "SKIP", "no API key"))
+            return rows
+        if cfg.provider.kind == "anthropic":
+            try:
+                from .runtime import live_provider
+
+                names = live_provider(cfg).list_models()
+                target = model or cfg.default_model
+                rows.append(("models.list", "OK" if target in names else "WARN", f"{len(names)} models; configured '{target}' {'found' if target in names else 'NOT found'}" + ("" if target in names else suggest_model(target, names))))
+                if not cfg.telemetry.pricing.get(target):
+                    rows.append(("pricing", "WARN", f"telemetry.pricing has no entry for '{target}'; cost estimates will be empty"))
+            except Exception as exc:  # noqa: BLE001
+                rows.append(("live probe", "FAIL", str(exc)[:300]))
             return rows
         try:
             from .provider.gemini import GeminiProvider, make_client

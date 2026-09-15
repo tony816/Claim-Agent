@@ -212,11 +212,12 @@ def cmd_doctor(args) -> int:
 
 def cmd_models(args) -> int:
     rt = _rt(args)
-    from .provider.gemini import GeminiProvider, make_client
+    from .runtime import live_provider
 
-    gp = GeminiProvider(make_client(rt.cfg.model.api_key_env))
+    gp = live_provider(rt.cfg)
+    print(f"provider: {rt.cfg.provider.kind}")
     for n in gp.list_models():
-        mark = " <- configured" if n == rt.cfg.model.default else ""
+        mark = " <- configured" if n == rt.cfg.default_model else ""
         print(n + mark)
     return 0
 

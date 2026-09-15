@@ -3,14 +3,16 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
-import uuid
 from pathlib import Path
+from typing import Any
 
 from .config import load_config
-from .live_events import EventWriter, visible_text
+from .live_events import EventWriter
 from .models.request import IMAGE_EXT
-from .provider.gemini import make_client
+from .provider.base import CallSpec, GenParams, ImagePart, LLMProvider
+from .runtime import live_provider
 from .sources.extract import read_text_any
 from .tui_support import validate_attachment
 
@@ -30,62 +32,40 @@ def user_message(text: str, material: str, files: list[str]) -> dict:
     return {"role": "user", "parts": parts}
 
 
-def generate_turn(client, model: str, history: list[dict], message: dict, events: EventWriter) -> dict:
-    from google.genai import types
-    messages = [*history, message]
-    contents = []
-    for entry in messages:
-        parts = []
-        for part in entry["parts"]:
-            if "text" in part:
-                parts.append(types.Part.from_text(text=part["text"]))
-            else:
-                image = part["inline_data"]
-                parts.append(types.Part.from_bytes(data=base64.b64decode(image["data"]), mime_type=image["mime_type"]))
-        contents.append(types.Content(role=entry["role"], parts=parts))
-    call_id = uuid.uuid4().hex
-    # Log text history, preserving roles; binary attachments are identified, not dumped.
-    transcript = "\n\n".join(e["role"] + ":\n" + "\n".join(p.get("text", "[첨부 이미지]") for p in e["parts"]) for e in messages)
-    events.emit("request", call_id=call_id, role="대화", text=transcript, system=SYSTEM)
-    result = []
-    finish = ""
-    try:
-        for chunk in client.models.generate_content_stream(
-            model=model, contents=contents,
-            config=types.GenerateContentConfig(system_instruction=SYSTEM, max_output_tokens=8192,
-                                              automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-                                              thinking_config=types.ThinkingConfig(thinking_level="LOW")),
-        ):
-            text = visible_text(chunk)
-            if text:
-                result.append(text)
-                events.emit("delta", call_id=call_id, role="대화", text=text)
-            for candidate in chunk.candidates or []:
-                if candidate.finish_reason:
-                    finish = str(getattr(candidate.finish_reason, "value", candidate.finish_reason))
-        if not result:
-            raise RuntimeError("모델이 텍스트 응답을 반환하지 않았습니다.")
-        answer = "".join(result)
-        events.emit("response_end", call_id=call_id, role="대화", finish_reason=finish)
-        return {"answer": answer, "history": [*messages, {"role": "model", "parts": [{"text": answer}]}], "finish_reason": finish}
-    except Exception as exc:
-        events.emit("error", call_id=call_id, role="대화", text=str(exc))
-        raise
+def _chat_spec(model: str, history: list[dict], message: dict) -> CallSpec:
+    """The current turn as a provider-neutral CallSpec: text parts become the packet, images ride along."""
+    texts, images = [], []
+    for part in message["parts"]:
+        if "text" in part:
+            texts.append(part["text"])
+        elif "inline_data" in part:
+            data = base64.b64decode(part["inline_data"]["data"])
+            images.append(ImagePart(part["inline_data"]["mime_type"], data, "첨부 이미지", hashlib.sha256(data).hexdigest()))
+    return CallSpec(
+        role="대화", scope="CHAT", model=model, system_instruction=SYSTEM, packet_text="\n\n".join(texts), sources_block="",
+        images=images, json_schema=None, tools=None, gen=GenParams(temperature=0.7, thinking_level="LOW", max_output_tokens=8192),
+        use_cache=False, phase="chat", stage="CHAT", run_id="", history=history,
+    )
 
 
-def routed_turn(client, cfg, config_path, request: dict, folder: Path, events: EventWriter) -> dict:
+def generate_turn(provider: LLMProvider, model: str, history: list[dict], message: dict, events: EventWriter) -> dict:
+    """One conversational turn through the configured provider (Gemini or Anthropic); events are emitted by the provider."""
+    result = provider.generate(_chat_spec(model, history, message))
+    answer = result.text
+    if not answer:
+        raise RuntimeError("모델이 텍스트 응답을 반환하지 않았습니다.")
+    return {"answer": answer, "history": [*history, message, {"role": "model", "parts": [{"text": answer}]}], "finish_reason": result.finish_reason}
+
+
+def routed_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: Path, events: EventWriter) -> dict:
+    """`provider` is the configured live provider (routing + plain chat); the pipeline builds its own from the runtime."""
     from .conversation_pipeline import intake, previous_state, run_pipeline
-    from .provider.gemini import GeminiProvider
     from .routing import classify_request
     from .runtime import build_runtime, make_provider
 
     previous = previous_state(cfg, request)
     blocks, paths = intake(request, folder, previous)
-    from .provider.cache import CacheManager
-
-    router_cache = CacheManager(client, cfg.path("runs_dir") / ".cache-registry.json", cfg.cache.ttl, cfg.cache.enabled, warm=cfg.cache.warm, min_expected_reuse=cfg.cache.min_expected_reuse)
-    router = GeminiProvider(client, router_cache, events=events)
-    route = classify_request(router, cfg.project_root, request["model"], request["text"], blocks, folder.name,
+    route = classify_request(provider, cfg.project_root, request["model"], request["text"], blocks, folder.name,
                              request.get("ui_hints"))
     (folder / "route.json").write_text(route.model_dump_json(indent=2), encoding="utf-8")
     planned_id = previous.run_id if previous and previous.request_mode.value == route.mode and route.mode in {"AUTHORING_DRAFT", "FINALIZATION"} else folder.name
@@ -97,15 +77,15 @@ def routed_turn(client, cfg, config_path, request: dict, folder: Path, events: E
         context = history
         if request.get("reference"):
             context = [*history, {"role": "model", "parts": [{"text": request["reference"]}]}]
-        result = generate_turn(client, request["model"], context, message, events)
+        result = generate_turn(provider, request["model"], context, message, events)
         return {**result, "effective_mode": route.mode, "route": route.model_dump()}
-    rt = build_runtime(cfg.project_root, config_path, overrides={"model.default": request["model"]})
-    provider = make_provider(rt)
+    model_key = "provider.anthropic.model" if cfg.provider.kind == "anthropic" else "model.default"
+    rt = build_runtime(cfg.project_root, config_path, overrides={model_key: request["model"]})
+    pipeline_provider = make_provider(rt)
     try:
-        result = run_pipeline(rt, provider, request, route, blocks, paths, folder, previous)
+        result = run_pipeline(rt, pipeline_provider, request, route, blocks, paths, folder, previous)
     finally:
-        if getattr(provider, "client", None):
-            provider.client.close()
+        _close(pipeline_provider)
     result["history"] = [*history, message, {"role": "model", "parts": [{"text": result["answer"]}]}]
     return result
 
@@ -119,12 +99,12 @@ def main(argv=None) -> int:
     cfg = load_config(args.config, args.project_root)
     request = json.loads(args.request.read_text(encoding="utf-8"))
     folder = args.request.parent
-    events = EventWriter.from_env(cfg.model.api_key_env)
+    events = EventWriter.from_env(cfg.api_key_env)
     if events is None:
         raise ValueError("실시간 로그 경로가 필요합니다.")
-    client = make_client(cfg.model.api_key_env)
+    provider = live_provider(cfg, events)
     try:
-        result = routed_turn(client, cfg, args.config, request, folder, events)
+        result = routed_turn(provider, cfg, args.config, request, folder, events)
         (folder / "response.json").write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
         (folder / "report.md").write_text(result["answer"], encoding="utf-8")
         return 0
@@ -134,7 +114,17 @@ def main(argv=None) -> int:
         print("요청 분류 또는 하네스 실행이 완료되지 않았습니다. 일반 답변으로 우회하지 않습니다. 로그를 확인하세요.")
         return 1
     finally:
-        client.close()
+        _close(provider)
+
+
+def _close(provider: Any) -> None:
+    client = getattr(provider, "client", None)
+    close = getattr(client, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:  # noqa: BLE001 - best effort
+            pass
 
 
 if __name__ == "__main__":

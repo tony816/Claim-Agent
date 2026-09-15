@@ -18,6 +18,20 @@ class ModelConfig(BaseModel):
     max_output_tokens: int = 32768
 
 
+class AnthropicConfig(BaseModel):
+    model: str = "claude-opus-5"
+    api_key_env: str = "ANTHROPIC_API_KEY"
+    thinking: str = "adaptive"        # adaptive | off (Claude 4.6+ models; effort comes from the role's thinking_level)
+    fallbacks: str = "default"        # default | none — server-side refusal fallbacks (beta)
+    structured_outputs: bool = True   # output_config.format; falls back to a prompt JSON instruction if the schema is refused
+    send_temperature: bool = False    # sampling params are rejected on Claude Opus 5 / Fable 5
+
+
+class ProviderConfig(BaseModel):
+    kind: str = "gemini"              # gemini | anthropic
+    anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
+
+
 class RoleConfig(BaseModel):
     model: str | None = None
     thinking_level: str = "HIGH"      # MINIMAL | LOW | MEDIUM | HIGH
@@ -97,13 +111,22 @@ class AppConfig(BaseModel):
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     materials: MaterialsConfig = Field(default_factory=MaterialsConfig)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
+    provider: ProviderConfig = Field(default_factory=ProviderConfig)
     project_root: Path = Field(default_factory=Path.cwd, exclude=True)
 
     def role(self, name: str) -> RoleConfig:
         return self.roles.get(name, RoleConfig())
 
     def model_for(self, role_name: str) -> str:
-        return self.role(role_name).model or self.model.default
+        return self.role(role_name).model or self.default_model
+
+    @property
+    def default_model(self) -> str:
+        return self.provider.anthropic.model if self.provider.kind == "anthropic" else self.model.default
+
+    @property
+    def api_key_env(self) -> str:
+        return self.provider.anthropic.api_key_env if self.provider.kind == "anthropic" else self.model.api_key_env
 
     def path(self, key: str) -> Path:
         return (self.project_root / getattr(self.paths, key)).resolve()

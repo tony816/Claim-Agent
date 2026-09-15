@@ -90,8 +90,9 @@ def test_chat_retains_roles_and_attachments(tmp_path):
     source = tmp_path / "원자료.txt"
     source.write_text("첨부 내용", encoding="utf-8")
     events = EventWriter(tmp_path / "events.jsonl")
-    first = generate_turn(client, "gemini-3.8-flash", [], user_message("질문", "", [str(source)]), events)
-    second = generate_turn(client, "gemini-3.8-flash", first["history"], user_message("이어서 설명", "", []), events)
+    provider = GeminiProvider(client, events=events)
+    first = generate_turn(provider, "gemini-3.8-flash", [], user_message("질문", "", [str(source)]), events)
+    second = generate_turn(provider, "gemini-3.8-flash", first["history"], user_message("이어서 설명", "", []), events)
     assert [m.role for m in calls[1]["contents"]] == ["user", "model", "user"]
     assert "첨부 내용" in calls[1]["contents"][0].parts[1].text
     assert len(second["history"]) == 4

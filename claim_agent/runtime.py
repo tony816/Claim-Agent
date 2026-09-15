@@ -59,22 +59,35 @@ def build_runtime(project_root: Path, config_path: Path | None = None, variant: 
     return Runtime(cfg, roles, sources, lessons, store, assembler, ssid, lessons_hash, variant)
 
 
+def live_provider(cfg: AppConfig, events=None, api_key: str | None = None) -> LLMProvider:
+    """The configured live provider (provider.kind): Gemini with context cache + Files API, or Anthropic."""
+    if cfg.provider.kind == "anthropic":
+        from .provider.anthropic_provider import AnthropicProvider, make_anthropic_client
+
+        a = cfg.provider.anthropic
+        return AnthropicProvider(make_anthropic_client(a.api_key_env, api_key), events=events, thinking=a.thinking, fallbacks=a.fallbacks,
+                                 structured_outputs=a.structured_outputs, send_temperature=a.send_temperature,
+                                 retry_attempts=cfg.pipeline.retry.max_attempts, backoff_s=cfg.pipeline.retry.backoff_s)
+    if cfg.provider.kind != "gemini":
+        raise ValueError(f"unknown provider.kind: {cfg.provider.kind} (gemini | anthropic)")
+    from .provider.files import FileStore
+    from .provider.gemini import GeminiProvider, make_client
+
+    client = make_client(cfg.model.api_key_env, api_key)
+    cache = CacheManager(client, cfg.path("runs_dir") / ".cache-registry.json", cfg.cache.ttl, cfg.cache.enabled, warm=cfg.cache.warm, min_expected_reuse=cfg.cache.min_expected_reuse)
+    files = FileStore(client, cfg.path("runs_dir") / ".files-registry.json", cfg.materials.files_api)
+    return GeminiProvider(client, cache, cfg.pipeline.retry.max_attempts, cfg.pipeline.retry.backoff_s, events=events, files=files)
+
+
 def make_provider(rt: Runtime, mode: str = "gemini", fixtures: Path | None = None, strict_replay: bool = False, api_key: str | None = None) -> LLMProvider:
-    """mode: gemini | replay | record."""
+    """mode: gemini (= the configured live provider) | replay | record."""
     if mode == "replay":
         if fixtures is None:
             raise ValueError("--replay requires a fixtures directory")
         return ReplayProvider(fixtures, strict=strict_replay)
     from .live_events import EventWriter
-    from .provider.gemini import GeminiProvider, make_client
 
-    client = make_client(rt.cfg.model.api_key_env, api_key)
-    cache = CacheManager(client, rt.cfg.path("runs_dir") / ".cache-registry.json", rt.cfg.cache.ttl, rt.cfg.cache.enabled, warm=rt.cfg.cache.warm, min_expected_reuse=rt.cfg.cache.min_expected_reuse)
-    from .provider.files import FileStore
-
-    files = FileStore(client, rt.cfg.path("runs_dir") / ".files-registry.json", rt.cfg.materials.files_api)
-    gp = GeminiProvider(client, cache, rt.cfg.pipeline.retry.max_attempts, rt.cfg.pipeline.retry.backoff_s,
-                        events=EventWriter.from_env(rt.cfg.model.api_key_env), files=files)
+    gp = live_provider(rt.cfg, EventWriter.from_env(rt.cfg.api_key_env), api_key)
     if mode == "record":
         if fixtures is None:
             raise ValueError("--record requires a fixtures directory")

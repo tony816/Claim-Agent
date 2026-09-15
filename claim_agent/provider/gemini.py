@@ -1,6 +1,7 @@
 """Gemini provider (google-genai SDK)."""
 from __future__ import annotations
 
+import base64
 import os
 import ssl
 import sys
@@ -91,7 +92,17 @@ class GeminiProvider:
             inline_bytes += inline
             via_uri += 0 if inline else 1
         self._last_image_transport = ("files_api" if via_uri and not inline_bytes else "mixed" if via_uri else "inline" if inline_bytes else "none", inline_bytes)
-        return [types.Content(role="user", parts=parts)]
+        history = []
+        for entry in spec.history:
+            hparts = []
+            for part in entry.get("parts", []):
+                if "text" in part:
+                    hparts.append(types.Part.from_text(text=part["text"]))
+                elif "inline_data" in part:
+                    hparts.append(types.Part.from_bytes(data=base64.b64decode(part["inline_data"]["data"]), mime_type=part["inline_data"]["mime_type"]))
+            if hparts:
+                history.append(types.Content(role="model" if entry.get("role") in ("model", "assistant") else "user", parts=hparts))
+        return history + [types.Content(role="user", parts=parts)]
 
     def _image_part(self, img: ImagePart) -> tuple[Any, int]:
         """Files API reference when available (uploaded once per content hash), else inline bytes."""

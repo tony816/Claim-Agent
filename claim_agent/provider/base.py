@@ -45,6 +45,7 @@ class CallSpec:
     cache_packet_text: str = ""             # exact shared substring; full packet remains auditable
     cache_images: bool = False
     expected_reuse: int = 1                 # planned uses of the cacheable bundle in this run (cache creation policy)
+    history: list[dict[str, Any]] = field(default_factory=list)   # chat turns [{role: user|model, parts: [{text}|{inline_data}]}]
 
     @property
     def system_sha(self) -> str:
