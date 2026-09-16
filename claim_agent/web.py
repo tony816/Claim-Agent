@@ -20,12 +20,14 @@ from urllib.parse import parse_qs, quote, urlsplit
 from .claim_scope import resolve_claim_target
 from .config import load_config
 from .live_events import EventReader
+from .live_log import LiveLogFormatter
 from .sources.extract import DOC_EXT, ExtractionError, extract_text
-from .tui_support import CATEGORIES, RESUME_KINDS, child_options, read_state, resume_command, validate_attachment
+from .tui_support import CATEGORIES, RESUME_KINDS, child_options, claim_proposal_route, read_state, resume_command, validate_attachment
 
 ASSETS = Path(__file__).with_name("web_assets")
 MAX_UPLOAD = 20 * 1024 * 1024
-MAX_LIVE_LOG = 300000       # sliding window of the live log kept in memory and rendered in the browser
+MAX_LIVE_LOG = 300000       # window of the live log kept in memory and rendered in the browser
+LIVE_LOG_HEAD = MAX_LIVE_LOG // 5   # the start of the log stays in the window; the rest slides
 MIN_GZIP = 1400             # responses above this are gzipped when the browser accepts it
 MAX_PROJECT_TEXT = 100000
 PROJECT_TEXT_FIELDS = ("name", "description", "instructions", "user_lock")
@@ -339,10 +341,15 @@ class Workspace:
             result = json.loads(json.dumps(self.sessions[sid]))
             job = self.jobs.get(sid)
             result["running"] = bool(job and not job["done"])
-            base, log = (job["log_base"], job["log"]) if job else (0, "")
+            base, log, head = (job["log_base"], job["log"], job.get("log_head")) if job else (0, "", None)
             cursor = base + len(log)
             reset = log_from is None or not base <= log_from <= cursor
-            result["live_log"] = log if reset else log[log_from - base:]
+            if reset and head is not None:
+                skipped = base - len(head)
+                log = head + (f"\n\n…(실시간 로그 {skipped:,}자 생략 — 전문은 run 폴더의 calls/·records/)…\n\n" if skipped else "") + log
+                result["live_log"] = log
+            else:
+                result["live_log"] = log if reset else log[log_from - base:]
             result["log_cursor"] = cursor
             result["log_reset"] = reset
             result["run"] = self.run_status(self.sessions[sid].get("run_id"))
@@ -489,13 +496,19 @@ class Workspace:
                 raise ValueError("결정 내용을 입력하세요.")
             if not status["halt"] and kind in ("none", "accept_unverified"):
                 raise ValueError("중지된 작업이 아닙니다. 스타일·의미·재설계 중 하나를 고르세요.")
-            self.require_connection()
             selected = data.get("files", [])
             known = {item["id"]: item for item in session["files"]}
             if not isinstance(selected, list) or any(fid not in known for fid in selected):
                 raise ValueError("이 대화에 첨부된 파일만 사용할 수 있습니다.")
+            state = read_state(self.cfg.path("runs_dir") / run_id / "state.json") or {}
+            if kind != "accept_unverified" and self.answer_out_of_edit(session, state, text, [known[f] for f in selected]):
+                return
+            self.require_connection()
             add = [str(validate_attachment(folder / "uploads" / fid / known[fid]["name"]).path) for fid in selected]
             scope = data.get("scope") if data.get("scope") in ("INDEPENDENT", "DEPENDENT") else None
+            dep = state.get("dependent") or {}
+            routed, scope = claim_proposal_route(kind, text, scope, bool(dep.get("current") and not dep.get("stale")))
+            rerouted, kind = routed != kind, routed
             rid = "web-" + uuid.uuid4().hex
             job_dir = self.root / ".tui" / "requests" / rid
             job_dir.mkdir(parents=True)
@@ -508,7 +521,8 @@ class Workspace:
             mid = uuid.uuid4().hex
             labels = {"none": "같은 단계 재실행", "style": "스타일만 수정", "meaning": "의미 수정", "redesign": "재설계", "restart": "처음부터", "accept_unverified": "미검증 수용"}
             session["messages"].extend([
-                dict(id=uuid.uuid4().hex, role="user", text=f"[재개 · {labels[kind]}] {text}".strip(), files=[known[f] for f in selected], mode="AUTHORING_DRAFT"),
+                dict(id=uuid.uuid4().hex, role="user", text=(f"[재개 · {labels[kind]}" + (" — 청구항 문언 제안이라 스타일 수정 대신 설계부터" if rerouted else "") + f"] {text}").strip(),
+                     files=[known[f] for f in selected], mode="AUTHORING_DRAFT"),
                 dict(id=mid, role="assistant", text="", status="running", mode="AUTHORING_DRAFT", log_id=rid, execution_mode="RESUME"),
             ])
             session["updated"] = time.time()
@@ -520,40 +534,66 @@ class Workspace:
             job["thread"] = thread
             thread.start()
 
-    def trim_log(self, job: dict) -> None:
-        """Redact, then keep the last MAX_LIVE_LOG characters, counting what fell off the front.
+    def answer_out_of_edit(self, session: dict, state: dict, text: str, files: list[dict]) -> bool:
+        """Answer at once, without a run, when feedback on an in-place edit changes what that edit keeps read-only.
 
-        `log_base + len(log)` is a cursor that only grows, so a client can ask for everything after the position it
-        already has instead of re-downloading the whole window on every poll. Re-redacting the whole buffer never
+        Resuming would rebuild only the edit targets on the old set and silently drop the user's other changes (their
+        renumbered or reworded parent claims), which read as "no answer to my feedback" after minutes of calls.
+        """
+        from .pipeline.claimtext import pasted_claims, proposal_outside_targets
+
+        base = state.get("baseline_set")
+        changes = proposal_outside_targets(base["claims"], base["edit_targets"], text) if base else []
+        if not changes:
+            return False
+        nos = ", ".join(f"제{n}항" for n in base["edit_targets"])
+        lines = ["## 피드백 확인 — 파이프라인을 실행하지 않았습니다", "",
+                 f"이 대화의 작업은 기존 청구항 세트에서 {nos}만 고치는 편집입니다. 다른 항과 인용관계는 읽기 전용이라, 붙여 넣은 문언의 "
+                 f"아래 변경은 이 작업으로 반영할 수 없습니다. 그대로 실행하면 기존 세트를 기준으로 {nos}만 다시 작성되고 이 변경은 버려집니다.", ""]
+        lines += [f"- {change}" for change in changes]
+        lines += ["", "### 이어서 하는 방법", "",
+                  "- **개정한 세트를 새 기준으로 편집:** 메인 입력창에 【청구항 1】부터 개정 세트 전문을 붙여 넣고 검토·수정할 항 번호를 함께 적어 보내세요"
+                  " (예: `아래 세트에서 8항, 9항 검토해줘`). 그 세트를 기준으로 새 편집이 시작됩니다.",
+                  f"- **기존 세트 기준으로 {nos}만 고치기:** 붙여 넣은 문언에서 {nos}만 남기고 인용관계를 기존대로 둔 채 이 입력창으로 다시 보내세요."]
+        if 1 not in pasted_claims(text):
+            lines += ["", "※ 붙여 넣은 문언에 `【청구항 1】` 머리가 없습니다. 새 기준 세트로 쓰려면 독립항부터 머리를 붙여 주세요."]
+        session["messages"].extend([
+            dict(id=uuid.uuid4().hex, role="user", text=f"[재개] {text}", files=files, mode="AUTHORING_DRAFT"),
+            dict(id=uuid.uuid4().hex, role="assistant", text="\n".join(lines), status="review", mode="AUTHORING_DRAFT", execution_mode="RESUME"),
+        ])
+        session["updated"] = time.time()
+        self.persist(session)
+        return True
+
+    def trim_log(self, job: dict) -> None:
+        """Redact, then keep the first LIVE_LOG_HEAD and the last characters within MAX_LIVE_LOG, counting what was cut.
+
+        The head (first run and role headers) is frozen once the log first overflows, so the window never opens in
+        the middle of a document. `job["log"]` is the sliding tail and `log_base` the absolute position of its first
+        character: `log_base + len(log)` is a cursor that only grows, so a client can ask for everything after the
+        position it already has instead of re-downloading the whole window on every poll. Re-redacting the tail never
         changes the part a client has already received (it holds no raw key any more), so old cursors stay valid.
         """
         redacted = self.redact(job["log"])
-        job["log_base"] = job.get("log_base", 0) + max(0, len(redacted) - MAX_LIVE_LOG)
-        job["log"] = redacted[-MAX_LIVE_LOG:]
+        if job.get("log_head") is None and len(redacted) > MAX_LIVE_LOG:
+            job["log_head"] = redacted[:LIVE_LOG_HEAD]
+            job["log_base"] = job.get("log_base", 0) + LIVE_LOG_HEAD
+            redacted = redacted[LIVE_LOG_HEAD:]
+        limit = MAX_LIVE_LOG - len(job.get("log_head") or "")
+        job["log_base"] = job.get("log_base", 0) + max(0, len(redacted) - limit)
+        job["log"] = redacted[-limit:]
 
     def consume_events(self, job: dict, message: dict, reader: EventReader) -> None:
+        formatter = job.setdefault("formatter", LiveLogFormatter())
         for event in reader.read():
-            kind, role = event.get("kind"), event.get("role", "에이전트")
-            label = role + (" · 항 " + str(event["target"]) if event.get("target") else "")
-            if kind == "delta":
-                if job.get("call_id") != event.get("call_id"):
-                    job["log"] += f"\n── {label} · 응답 ──\n"
-                job["log"] += event.get("text", "")
-                if job["mode"] == "CHAT" and role == "대화":
-                    message["text"] += self.redact(event.get("text", ""))
-            elif kind == "request":
-                job["log"] += f"\n── {label} · 요청 ──\n"
-                for key in ("system", "sources", "text", "images"):
-                    if event.get(key):
-                        job["log"] += str(event[key]) + "\n"
-                job["log"] += f"\n── {label} · 응답 ──\n"
-            elif kind == "route":
+            if event.get("kind") == "route":
                 message["execution_mode"] = event["mode"]
                 message["route_reason"] = self.redact(event.get("reason", ""))
                 job["log"] += f"\n[자동 분류: {event['mode']}] {event.get('reason', '')}\n"
-            else:
-                job["log"] += f"\n[{label} · {kind}] " + json.dumps(event, ensure_ascii=False) + "\n"
-            job["call_id"] = event.get("call_id")
+                continue
+            if event.get("kind") == "delta" and job["mode"] == "CHAT" and event.get("role") == "대화":
+                message["text"] += self.redact(event.get("text", ""))
+            job["log"] += formatter.feed(event)
         self.trim_log(job)
 
     def execute(self, sid: str, job: dict, command: list[str]) -> None:
@@ -580,6 +620,7 @@ class Workspace:
                 with self.lock:
                     self.consume_events(job, message, reader)
             with self.lock:
+                job["log"] += job.setdefault("formatter", LiveLogFormatter()).flush()
                 job["log"] += "\n" + (job["folder"] / "console.log").read_text(encoding="utf-8", errors="replace")
                 self.trim_log(job)
                 if job["stopped"]:

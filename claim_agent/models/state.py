@@ -182,6 +182,8 @@ class RunState(BaseModel):
     usage: dict[str, float] = Field(default_factory=dict)   # calls, prompt_tokens, cached_tokens, output_tokens, thoughts_tokens, latency_ms, cost_usd, cache_hits, unpriced_calls
     stage_usage: dict[str, dict[str, float]] = Field(default_factory=dict)   # stage -> same keys (성능 요약)
     turn: dict[str, float] = Field(default_factory=dict)   # the latest run/resume only: usage keys + started_at, finished_at (답변 주석)
+    # The latest resume's user feedback: {text, action, dispositions: {stage: the role's "사용자 피드백 처리" section}} (답변의 피드백 반영 절)
+    feedback: dict[str, Any] | None = None
 
     def add_usage(self, stage: str, row: dict[str, float]) -> None:
         for bucket in (self.usage, self.stage_usage.setdefault(stage, {})):

@@ -19,6 +19,7 @@ from textual.widgets import Button, Checkbox, DataTable, Footer, Header, Input, 
 
 from .config import load_config
 from .live_events import EventReader
+from .live_log import LiveLogFormatter
 from .tui_support import Attachment, child_options, feedback_command, native_input, parse_paths, prepare_request, read_state, run_command, validate_attachment
 
 STAGES = {
@@ -110,7 +111,7 @@ class ClaimAgentApp(App):
         self.event_reader: EventReader | None = None
         self.chat_prefix = ""
         self.chat_stream = ""
-        self.live_call_id = ""
+        self.log_formatter = LiveLogFormatter()
         self.last_pipeline_run: str | None = None
         self.previous_report_stamp = 0
 
@@ -191,8 +192,9 @@ class ClaimAgentApp(App):
 
     def refresh_log(self) -> None:
         editor = self.query_one("#logs", TextArea)
-        # Full request/response events stay on disk; bound the terminal render size.
-        editor.load_text(self.log_text[-300000:])
+        # Full call inputs and outputs stay in the run folder; bound the terminal render size but keep the start.
+        text = self.log_text if len(self.log_text) <= 300000 else self.log_text[:60000] + "\n\n…(실시간 로그 일부 생략)…\n\n" + self.log_text[-240000:]
+        editor.load_text(text)
         editor.scroll_end(animate=False)
 
     def set_log_open(self, opened: bool) -> None:
@@ -503,38 +505,17 @@ class ClaimAgentApp(App):
             rows = self.event_reader.read()
         except (OSError, ValueError):
             return
+        formatter = self.log_formatter
         for event in rows:
             kind = event["kind"]
-            role = event.get("role", "에이전트")
-            if event.get("target"):
-                role += f" · 항 {event['target']}"
-            call_id = event.get("call_id", role)
-            if kind == "request":
-                self.live_call_id = call_id
-                self.log_text += f"\n── {role} · 요청 ({event.get('phase', 'chat')}) ──\n"
-                for key, label in (("system", "역할 지침"), ("sources", "전달 자료"), ("text", "입력")):
-                    if event.get(key):
-                        self.log_text += f"[{label}]\n{event[key]}\n"
-                if event.get("images"):
-                    self.log_text += "[첨부 이미지] " + ", ".join(event["images"]) + "\n"
-                self.log_text += f"\n── {role} · 응답 ──\n"
-            elif kind == "delta":
-                if self.live_call_id != call_id:
-                    self.log_text += f"\n── {role} · 응답 계속 ──\n"
-                    self.live_call_id = call_id
-                self.log_text += event.get("text", "")
-                if self.active_mode == "CHAT" and role == "대화":
-                    self.chat_stream += event.get("text", "")
-            elif kind == "route":
+            if kind == "route":
                 self.routed_mode = event["mode"]
                 self.routed_run_id = event.get("run_id")
                 self.log_text += f"\n[자동 분류: {event['mode']}] {event.get('reason', '')}\n"
-            elif kind == "error":
-                self.log_text += f"\n[{role} 오류] {event.get('text', '')}\n"
-            elif kind == "response_end":
-                self.log_text += f"\n[{role} 응답 완료 · {event.get('finish_reason', '')}]\n"
-                for call in event.get("function_calls", []):
-                    self.log_text += "[도구 호출/결과] " + json.dumps(call, ensure_ascii=False) + "\n"
+                continue
+            if kind == "delta" and self.active_mode == "CHAT" and event.get("role") == "대화" and not event.get("target"):
+                self.chat_stream += event.get("text", "")
+            self.log_text += formatter.feed(event)
         if rows:
             self.log_text = self.redact(self.log_text)
             self.refresh_log()

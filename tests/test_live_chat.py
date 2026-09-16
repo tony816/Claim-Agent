@@ -41,8 +41,8 @@ def test_provider_stream_keeps_json_and_blind_isolation(tmp_path):
     assert result.parsed == {"status": "PASS"}
     assert result.finish_reason == "STOP"
     events = EventReader(path).read()
-    assert events[0]["sources"] == ""
-    assert events[0]["text"] == "PKT"
+    assert events[0]["sources"] == [] and events[0]["packet_chars"] == len("PKT")
+    assert "text" not in events[0] and "system" not in events[0]            # full texts live in the run's calls/ file
     assert "".join(e["text"] for e in events if e["kind"] == "delta") == result.text
     assert "hidden" not in path.read_text(encoding="utf-8")
 

@@ -108,6 +108,13 @@ class Decision:
     restart_from: str | None = None
     request_update: RunRequest | None = None  # conversational scope/source update; always redesign
     scope: str | None = None                  # INDEPENDENT | DEPENDENT: which revision a style/meaning fix targets on a finished run
+    feedback_text: str | None = None          # the user's own words when `text` also carries project instructions
+
+
+FEEDBACK_INSTRUCTION = (
+    "이번 호출은 사용자 피드백 뒤의 재실행이다. `report_markdown`에 `### 사용자 피드백 처리` 절을 두고, 피드백의 각 요청·제안 문언별로 "
+    "반영/부분 반영/미반영과 그 이유(원자료 근거·게이트·편집 범위)를 3~6줄로 적는다. '이렇게 하면 어떨지' 같은 질문형 피드백에는 그 평가를 먼저 적는다.\n\n"
+)
 
 
 class PipelineEngine:
@@ -352,6 +359,9 @@ class PipelineEngine:
                                     "(문언이 정해지기 전 단계에서 중지된 작업). 재설계(--redesign)로 재개하거나 원하는 방향을 새 요청으로 보내 주세요.")
         if decision.text:
             state.notes.append(f"사용자 결정 ({halted_stage.value}): {decision.text}")
+        # The answer to this turn must say what became of the feedback, not only redraw the claims.
+        words = decision.feedback_text if decision.feedback_text is not None else decision.text
+        state.feedback = dict(text=words, action=decision.action, dispositions={}) if words.strip() and decision.action != "accept_unverified" else None
         if decision.restart_from:
             state.stage = Stage(decision.restart_from)
             if state.stage == Stage.ARCHITECT:
@@ -398,7 +408,8 @@ class PipelineEngine:
     def _decision_section(self, state: RunState) -> str:
         if not state.notes:
             return ""
-        return "### 사용자 결정·메모 (최신순)\n\n" + "\n".join(f"- {n}" for n in state.notes[-5:][::-1]) + "\n\n"
+        section = "### 사용자 결정·메모 (최신순)\n\n" + "\n".join(f"- {n}" for n in state.notes[-5:][::-1]) + "\n\n"
+        return section + (FEEDBACK_INSTRUCTION if state.feedback else "")
 
     def _with_decisions(self, state: RunState, text: str) -> str:
         """Volatile decision notes go just before the output contract so the stable prefix stays cacheable."""
@@ -548,6 +559,12 @@ class PipelineEngine:
         self.store.write_record(state.run_id, rid, record_payload, env.report_markdown)
         with self._lock:
             state.records[rid] = ref
+            if state.feedback is not None and not blind:
+                from ..store.report import feedback_section
+
+                handled = feedback_section(env.report_markdown)
+                if handled:
+                    state.feedback.setdefault("dispositions", {})[stage.value] = handled
             self._telemetry(state, spec, result, env, ids, loop_index, repair_used)
             for r_stage, r_model, r_res in self._pending_repairs:
                 self._account(state, r_stage, r_model, r_res.usage, r_res.latency_ms, r_res.cache_hit)

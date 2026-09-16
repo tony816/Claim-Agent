@@ -134,6 +134,7 @@ def revision_path(route: RouteDecision, request: dict, blocks: list[dict], paths
     targets, new material, or switching into or out of the edit scope — starts a new run.
     """
     from .claim_scope import explicit_mentions
+    from .pipeline.claimtext import claim_wording
 
     if previous is not None and (route.authoring_scope == "EXISTING_SET_EDIT" or previous.baseline_set is not None):
         base = previous.baseline_set
@@ -143,6 +144,8 @@ def revision_path(route: RouteDecision, request: dict, blocks: list[dict], paths
             return "new", None
         dep = previous.dependent
         live = bool(dep and dep.current and dep.current.exact_text and not dep.stale)
+        if route.revision_kind == "STYLE_ONLY" and claim_wording(request["text"]):
+            return "redesign", "DEPENDENT"          # pasted claim wording is outside the style adjuster's authority
         if route.revision_kind in ("STYLE_ONLY", "MEANING") and live:
             return ("style" if route.revision_kind == "STYLE_ONLY" else "meaning"), "DEPENDENT"
         return "redesign", "DEPENDENT"
@@ -152,9 +155,14 @@ def revision_path(route: RouteDecision, request: dict, blocks: list[dict], paths
         return "restart", None
     kind = "style" if route.revision_kind == "STYLE_ONLY" else "meaning"
     scope = None
+    dependent_live = bool(previous.dependent and previous.dependent.current and not previous.dependent.stale)
     mentioned = explicit_mentions(request["text"]) or ui_target_set(request.get("ui_hints"))
-    if mentioned and previous.dependent and previous.dependent.current and not previous.dependent.stale:
+    if mentioned and dependent_live:
         scope = "DEPENDENT"
+    if kind == "style":
+        wording = claim_wording(request["text"])
+        if wording:
+            return "redesign", ("DEPENDENT" if wording == "DEPENDENT" and dependent_live else None)
     return kind, scope
 
 
@@ -236,13 +244,14 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
         if kind == "new":
             state = engine.run(engine.start(req, folder.name))
         elif kind == "restart":
-            state = engine.resume(previous.run_id, Decision(text=text, restart_from="ARCHITECT", request_update=req))
+            state = engine.resume(previous.run_id, Decision(text=text, restart_from="ARCHITECT", request_update=req, feedback_text=request["text"]))
         elif kind == "redesign":
             # Same set and targets: a new dependent_design_revision of the edit, never the independent architect.
-            state = engine.resume(previous.run_id, Decision(text=text, action="redesign"))
+            state = engine.resume(previous.run_id, Decision(text=text, action="redesign", scope=scope, feedback_text=request["text"]))
         else:
             # Same materials, same USER_LOCK: only the wording changes, so the cheaper revision path applies.
-            state = engine.resume(previous.run_id, Decision(text=text, action="style_fix" if kind == "style" else "meaning_fix", scope=scope))
+            state = engine.resume(previous.run_id, Decision(text=text, action="style_fix" if kind == "style" else "meaning_fix", scope=scope,
+                                                            feedback_text=request["text"]))
     else:
         state = engine.run(engine.start(req, folder.name))
     state.notes.append("자동 요청 분류: " + route.mode + " — " + route.reason + (f" (revision 경로: {applied})" if resume else ""))

@@ -126,6 +126,23 @@ RESUME_KINDS = {
 }
 
 
+def claim_proposal_route(kind: str, text: str, scope: str | None, dependent_live: bool) -> tuple[str, str | None]:
+    """A "style" decision that pastes claim wording is a claim proposal, so it goes to the design step instead.
+
+    The style adjuster may only change surface wording of the sealed claim; a new claim text or a changed citation is
+    outside its authority and always came back RETURN_TO_*_ARCHITECT, spending one full call first. Pasted dependent
+    claims on a run with a live dependent set start a new dependent_design_revision; anything else redesigns normally.
+    """
+    from .pipeline.claimtext import claim_wording
+
+    wording = claim_wording(text) if kind == "style" else None
+    if not wording:
+        return kind, scope
+    if scope is None and wording == "DEPENDENT" and dependent_live:
+        scope = "DEPENDENT"
+    return "redesign", scope
+
+
 def resume_command(root: Path, run_id: str, decision_path: Path, kind: str, model: str, add_sources: list[str] | None = None, scope: str | None = None) -> list[str]:
     if kind not in RESUME_KINDS:
         raise ValueError("지원하지 않는 재개 종류입니다.")

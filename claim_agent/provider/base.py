@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -105,6 +106,41 @@ class CallResult:
             model=d.get("model", ""),
             provider=d.get("provider", ""),
         )
+
+
+_FILE_HEAD = re.compile(r"^<<<FILE (\S+) sha256=([0-9a-f]+)>>>", re.MULTILINE)
+_MATERIAL_HEAD = re.compile(r"^<<<MATERIAL \[[^\]]+\] (.+?) \(sha256=([0-9a-f]+)\)>>>(.*)$", re.MULTILINE)
+_REQUEST_SECTION = re.compile(r"^### 현재 요청[^\n]*\n(.*?)(?=^### |\Z)", re.MULTILINE | re.DOTALL)
+REQUEST_EXCERPT_MAX = 1200
+
+
+def clip(text: str, limit: int) -> str:
+    text = text.strip()
+    return text if len(text) <= limit else text[:limit].rstrip() + f"\n…({len(text) - limit:,}자 생략)"
+
+
+def request_summary(spec: CallSpec, sources_sent: bool = True) -> dict[str, Any]:
+    """What the live log shows for one call: sizes, file headers and the current request — never the full texts.
+
+    The full system instruction, pre-loaded sources and packet stay in the run's `calls/` audit file; repeating them in
+    the event log filled the browser's window with source documents. `sources_sent` is False when a provider cache
+    served the sources, so the log does not claim to have sent what it did not.
+    """
+    request = ""
+    section = _REQUEST_SECTION.search(spec.packet_text)
+    if section:
+        request = section.group(1)
+        request = request.split("## 현재 요청", 1)[-1]            # after the project instructions, if they lead
+    elif not spec.stage:
+        request = spec.packet_text                               # a conversation turn: the packet is the message
+    materials = [f"{name}({sha[:8]})" for name, sha, rest in _MATERIAL_HEAD.findall(spec.packet_text) if "이미지 파트" not in rest]
+    call_file = f"{spec.run_id}/calls/{spec.seq:03d}-{spec.role}-{spec.scope}.json" if spec.run_id and spec.seq and spec.phase == "main" else ""
+    return dict(
+        seq=spec.seq, record_id=spec.meta.get("record_id"), json=spec.json_schema is not None,
+        system_chars=len(spec.system_instruction), sources=[f"{path} ({sha[:8]})" for path, sha in _FILE_HEAD.findall(spec.sources_block)],
+        sources_sent=sources_sent, materials=materials, images=[img.label for img in spec.images],
+        packet_chars=len(spec.packet_text), call_file=call_file, request=clip(request, REQUEST_EXCERPT_MAX) if request.strip() else "",
+    )
 
 
 class LLMProvider(Protocol):

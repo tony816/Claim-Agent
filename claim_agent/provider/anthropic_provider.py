@@ -23,7 +23,7 @@ import uuid
 from typing import Any
 
 from ..live_events import EventWriter
-from .base import CallResult, CallSpec, ImagePart, ProviderError, parse_json_text
+from .base import CallResult, CallSpec, ImagePart, ProviderError, parse_json_text, request_summary
 
 EFFORT = {"MINIMAL": "low", "LOW": "low", "MEDIUM": "medium", "HIGH": "high", "XHIGH": "xhigh", "MAX": "max"}
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -81,7 +81,8 @@ class AnthropicProvider:
     # ------------------------------------------------------------------ helpers
     def _emit(self, kind: str, spec: CallSpec, call_id: str, **data: Any) -> None:
         if self.events:
-            self.events.emit(kind, call_id=call_id, role=spec.role, scope=spec.scope, phase=spec.phase, target=spec.meta.get("target_claim_id"), **data)
+            self.events.emit(kind, call_id=call_id, role=spec.role, scope=spec.scope, phase=spec.phase, stage=spec.stage, run_id=spec.run_id,
+                             target=spec.meta.get("target_claim_id"), **data)
 
     @staticmethod
     def _image_block(img: ImagePart) -> dict[str, Any]:
@@ -185,7 +186,7 @@ class AnthropicProvider:
         last_exc: Exception | None = None
         for attempt in range(self.retry_attempts):
             call_id = uuid.uuid4().hex
-            self._emit("request", spec, call_id, attempt=attempt + 1, text=spec.packet_text, system=spec.system_instruction, sources=spec.sources_block, images=[i.label for i in spec.images])
+            self._emit("request", spec, call_id, attempt=attempt + 1, **request_summary(spec))
             params = self._params(spec, json_instruction, tools)
             t0 = time.time()
             try:

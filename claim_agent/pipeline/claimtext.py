@@ -26,6 +26,62 @@ _PREAMBLE_MARKERS = ("에 있어서", "있어서", "에 기재된", "에 따른"
 _PREAMBLE_WINDOW = 160
 
 
+_PROPOSED_HEAD = re.compile(r"^[ \t]*(?:【\s*청구항\s*(\d+)\s*】|\[\s*청구항\s*(\d+)\s*\])", re.MULTILINE)
+# "제8항에 있어서," (or a 내지/또는 range) followed by a claim body on the same line — not a note that merely names the phrase.
+_PROPOSED_DEPENDENT = re.compile(r"제\s*\d+\s*항(?:\s*(?:내지|또는|및|~|-|–|,)\s*제?\s*\d+\s*항)*(?:\s*중\s*어느\s*(?:한|하나의)\s*항)?\s*에\s*있어서\s*,[^\n]{40,}")
+
+
+def pasted_claims(text: str) -> dict[int, Claim]:
+    """Claims pasted into a note, by header. Text before the first header (the note itself, a headerless fragment) is ignored."""
+    heads = list(_PROPOSED_HEAD.finditer(text))
+    out: dict[int, Claim] = {}
+    for i, m in enumerate(heads):
+        body = text[m.end():(heads[i + 1].start() if i + 1 < len(heads) else len(text))].strip()
+        no = int(m.group(1) or m.group(2))
+        parents, multi = parse_parent_refs(body)
+        out[no] = Claim(no, f"【청구항 {no}】\n{body}", body, parents, multi)
+    return out
+
+
+def claim_wording(text: str) -> str | None:
+    """Whether a user's note pastes claim wording: DEPENDENT, INDEPENDENT or None (a note about the wording).
+
+    A proposal is a claim header line (【청구항 N】 / [청구항 N]) or a "제N항에 있어서," preamble with a body. It is
+    DEPENDENT when every headed claim cites a parent (or there is no header but a dependent preamble), INDEPENDENT when
+    some headed claim has no citation. Deterministic, so a resume can be routed without a model call.
+    """
+    claims = pasted_claims(text)
+    if claims:
+        return "DEPENDENT" if all("있어서" in c.body[:_PREAMBLE_WINDOW] for c in claims.values()) else "INDEPENDENT"
+    return "DEPENDENT" if _PROPOSED_DEPENDENT.search(text) else None
+
+
+def _cites(nos: list[int]) -> str:
+    return ("제" + ", ".join(map(str, nos)) + "항") if nos else "없음(독립항)"
+
+
+def proposal_outside_targets(baseline: list[dict], targets: list[int], text: str) -> list[str]:
+    """What a pasted proposal changes that an edit of `targets` cannot take: other claims' wording, new claims, any citation.
+
+    `baseline` rows are {claim_no, parent_nos, text}. An EXISTING_SET_EDIT keeps the user's set read-only apart from its
+    targets and their citations, so these changes would be dropped silently if the run went ahead.
+    """
+    base = {int(c["claim_no"]): c for c in baseline}
+    out: list[str] = []
+    for no, claim in sorted(pasted_claims(text).items()):
+        old = base.get(no)
+        if old is None:
+            out.append(f"제{no}항: 기존 세트에 없는 항")
+            continue
+        cite = f"인용 {_cites(list(old['parent_nos']))} → {_cites(claim.parent_nos)}" if claim.parent_nos != list(old["parent_nos"]) else ""
+        if no in targets:
+            if cite:
+                out.append(f"제{no}항(편집 대상): {cite}")
+        elif flatten(claim.text) != flatten(old["text"]):
+            out.append(f"제{no}항: 문언 변경" + (f" · {cite}" if cite else ""))
+    return out
+
+
 class ClaimParseError(ValueError):
     pass
 

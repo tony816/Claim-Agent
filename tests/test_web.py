@@ -523,7 +523,9 @@ def test_live_log_is_sent_as_a_delta_and_resets_only_on_a_gap(workspace, request
     job["log"] += "다" * web.MAX_LIVE_LOG
     workspace.trim_log(job)
     over = workspace.snapshot(sid, 1)
-    assert over["log_reset"] and len(over["live_log"]) == web.MAX_LIVE_LOG
+    assert over["log_reset"] and over["live_log"].startswith("가" * 10 + "나" * 5)   # the start of the log stays visible
+    assert "24자 생략" in over["live_log"] and over["live_log"].endswith("다" * 1000)
+    assert len(job["log_head"]) + len(job["log"]) == web.MAX_LIVE_LOG
     assert over["log_cursor"] == delta["log_cursor"] + web.MAX_LIVE_LOG
     tail = workspace.snapshot(sid, over["log_cursor"] - 3)
     assert tail["live_log"] == "다다다" and not tail["log_reset"]

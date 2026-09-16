@@ -1,8 +1,69 @@
 """Markdown report rendering (최종안 → 핵심 판단 → 남은 REVIEW/BLOCK/UNVERIFIED)."""
 from __future__ import annotations
 
+import re
+
 from ..models.state import RunState
 from ..pipeline.locks import PROVISIONAL_LABEL
+
+_FEEDBACK_SECTION = re.compile(r"^#{2,4}\s*(?:\d+[.)]\s*)?사용자 피드백 처리[^\n]*\n(.*?)(?=^#{1,4}\s|\Z)", re.MULTILINE | re.DOTALL)
+FEEDBACK_ACTION_LABEL = {"style_fix": "스타일만 수정", "meaning_fix": "의미 수정", "redesign": "재설계", "none": "같은 단계 재실행", "add_source": "자료 추가 후 재설계"}
+FEEDBACK_NOTE_LIMIT = 600
+
+
+def feedback_section(report_markdown: str | None) -> str:
+    """The body of a role report's `### 사용자 피드백 처리` section, or ""."""
+    found = _FEEDBACK_SECTION.search(report_markdown or "")
+    return found.group(1).strip() if found else ""
+
+
+def _result_claims(state: RunState) -> dict[int, str]:
+    from ..pipeline.claimtext import ClaimParseError, parse_claim_set
+
+    texts = [edited_set_text(state)] if state.baseline_set else [
+        (state.candidate.current.exact_text if state.candidate.current else None),
+        (state.dependent.current.exact_text if state.dependent and state.dependent.current else None)]
+    out: dict[int, str] = {}
+    for text in texts:
+        try:
+            out.update({c.claim_no: c.text for c in parse_claim_set(text or "")})
+        except ClaimParseError:
+            continue
+    return out
+
+
+def feedback_lines(state: RunState) -> list[str]:
+    """The answer to the latest feedback: what was received, the path taken, what became of each pasted claim, and
+    each role's own account of how it handled the feedback. Empty when the turn was not a resume with feedback."""
+    from ..pipeline.claimtext import flatten, pasted_claims
+
+    fb = state.feedback
+    if not fb or not str(fb.get("text", "")).strip():
+        return []
+    out = ["## 피드백 반영", "", "- 받은 피드백: " + _clip(fb["text"], 200),
+           "- 적용 경로: " + FEEDBACK_ACTION_LABEL.get(fb.get("action"), str(fb.get("action")))]
+    base = {c.claim_no: c for c in state.baseline_set.claims} if state.baseline_set else {}
+    targets = set(state.baseline_set.edit_targets) if state.baseline_set else None
+    result = _result_claims(state)
+    for no, claim in sorted(pasted_claims(fb["text"]).items()):
+        proposed, got = flatten(claim.text), result.get(no)
+        if targets is not None and no not in targets:
+            if no in base and flatten(base[no].text) == proposed:
+                continue                                    # an unchanged claim pasted along with the set
+            verdict = "편집 대상 밖이라 반영 안 됨 — 기존 세트 원문 유지" if no in base else "기존 세트에 없는 항이라 반영 안 됨"
+        elif got is None:
+            verdict = "결과에 해당 항이 없어 반영 안 됨"
+        elif flatten(got) == proposed:
+            verdict = "제안 문언 그대로 채택"
+        else:
+            verdict = "제안과 다른 문언으로 작성됨 (위 최종안과 아래 역할 설명 참조)"
+        out.append(f"- 제안 제{no}항: {verdict}")
+    notes = fb.get("dispositions") or {}
+    for stage, text in notes.items():
+        out.append(f"- {stage} 역할의 피드백 처리: " + _clip(text, FEEDBACK_NOTE_LIMIT))
+    if not notes:
+        out.append("- 역할 보고서에 `사용자 피드백 처리` 절이 없습니다. 반영하지 않은 이유는 전체 보고서의 역할별 원 보고서에 있습니다.")
+    return out + [""]
 
 
 def _gate_table(state: RunState) -> str:
@@ -205,7 +266,7 @@ def render_chat_report(state: RunState) -> str:
     c = state.candidate
     cur = c.current
     dep = state.dependent
-    out: list[str] = []
+    out: list[str] = feedback_lines(state)     # a reply to feedback answers the feedback first
     if state.request_mode.value == "REVIEW_ONLY":
         out += ["## 검토 의견", "", "REVIEW_ONLY — 요청된 검수만 수행하며 청구항 작성·수정 또는 LOCK 발급 결과가 아닙니다.", ""]
         for role, report in state.review_reports.items():
@@ -294,6 +355,7 @@ def render_report(state: RunState, claims_only: bool = False) -> str:
         out.append("")
         out.append(dep_text or "종속항 문언 없음")
         out.append("")
+    out.extend(feedback_lines(state))
     out.append("## 핵심 판단")
     out.append("")
     out.append(_pending_stages(state))

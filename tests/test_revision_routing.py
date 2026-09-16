@@ -114,6 +114,17 @@ def test_dependent_only_mention_targets_the_dependent_revision(rt, request_dep, 
     assert roles[0] == "claim-style-adjuster" and "dependent-claim-strategy-architect" not in roles
 
 
+def test_pasted_dependent_claim_is_not_a_style_revision(rt, request_dep, tmp_path):
+    previous = _previous(rt, request_dep, "rev-dep-wording")
+    folder = tmp_path / "followup-w"
+    folder.mkdir()
+    request = dict(text="3항을 아래로 바꿨는데 어떨지?\n\n【청구항 3】\n제1항에 있어서,\n상기 기둥의 둘레면에는 상기 클립이 걸리는 걸림 홈이 형성되는 것을 특징으로 하는 클립 홀더.",
+                   files=[], history=[])
+    blocks, paths = intake(request, folder, previous)
+    route = RouteDecision(mode="AUTHORING_DRAFT", reason="종속항 표면 수정", revision_kind="STYLE_ONLY")
+    assert revision_path(route, request, blocks, paths, previous) == ("redesign", "DEPENDENT")
+
+
 def test_resume_command_flags_and_web_resume_endpoint(rt, request_indep, tmp_path, monkeypatch):
     cmd = resume_command(Path("/p"), "run-1", Path("/d.txt"), "style", "m", ["/a.png"], "DEPENDENT")
     assert "--apply-style-fix" in cmd and cmd[cmd.index("--add-source") + 1] == "/a.png" and cmd[cmd.index("--scope") + 1] == "DEPENDENT"
@@ -152,5 +163,11 @@ def test_resume_command_flags_and_web_resume_endpoint(rt, request_indep, tmp_pat
         assert job["mode"] == "RESUME" and job["run_id"] == "web-halted"
         assert "resume" in command and "web-halted" in command and "--redesign" in command
         assert workspace.sessions[sid]["messages"][-2]["text"].startswith("[재개 · 재설계]")
+        # A "style" decision that pastes claim wording skips the style adjuster, which could only return it.
+        workspace.resume(sid, {"kind": "style", "text": "아래로 했는데 어떨지?\n\n【청구항 1】\n기둥; 및 상기 기둥의 둘레면에 형성되는 오목면을 포함하는 클립 홀더."})
+        wait_for(lambda: len(captured) == 2)
+        command = captured[1][1]
+        assert "--redesign" in command and "--apply-style-fix" not in command and "--scope" not in command
+        assert "스타일 수정 대신 설계부터" in workspace.sessions[sid]["messages"][-2]["text"]
     finally:
         workspace.close()

@@ -165,7 +165,8 @@ async function fetchSession(id, incremental){
   const data=await api("/api/session?id="+encodeURIComponent(id)+cursor);
   if(!incremental||data.log_reset)state.log.text=data.live_log||"";
   else if(data.live_log)state.log.text+=data.live_log;
-  if(state.log.text.length>300000)state.log.text=state.log.text.slice(-300000);   // 서버 창과 같은 길이로 유지
+  // 서버 창과 같은 길이로 유지하되, 시작 부분(첫 역할 헤더)은 남기고 가운데를 잘라낸다.
+  if(state.log.text.length>300000)state.log.text=state.log.text.slice(0,60000)+"\n\n…(실시간 로그 일부 생략)…\n\n"+state.log.text.slice(-240000);
   state.log.cursor=data.log_cursor??null;
   return data;
 }

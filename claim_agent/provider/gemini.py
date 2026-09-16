@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from ..live_events import EventWriter, visible_text
-from .base import CallResult, CallSpec, ImagePart, ProviderError, parse_json_text
+from .base import CallResult, CallSpec, ImagePart, ProviderError, parse_json_text, request_summary
 from .cache import CacheManager
 from .files import FileStore
 
@@ -50,8 +50,8 @@ class GeminiProvider:
 
     def _emit(self, kind: str, spec: CallSpec, call_id: str, **data: Any) -> None:
         if self.events:
-            self.events.emit(kind, call_id=call_id, role=spec.role, scope=spec.scope, phase=spec.phase,
-                             target=spec.meta.get("target_claim_id"), **data)
+            self.events.emit(kind, call_id=call_id, role=spec.role, scope=spec.scope, phase=spec.phase, stage=spec.stage,
+                             run_id=spec.run_id, target=spec.meta.get("target_claim_id"), **data)
 
     def _stream(self, spec: CallSpec, contents: list[Any], config: Any, call_id: str) -> Any:
         chunks: list[str] = []
@@ -189,9 +189,8 @@ class GeminiProvider:
         last_exc: Exception | None = None
         for attempt in range(self.retry_attempts):
             call_id = uuid.uuid4().hex
-            self._emit("request", spec, call_id, attempt=attempt + 1,
-                       text=spec.packet_text, system=spec.system_instruction, sources=spec.sources_block,
-                       images=[img.label for img in spec.images])
+            # A cache hit sends no sources block (see _build_contents), so the event says so instead of listing them as sent.
+            self._emit("request", spec, call_id, attempt=attempt + 1, **request_summary(spec, sources_sent=cache_entry is None))
             contents = self._build_contents(spec, include_sources=cache_entry is None, shared_cached=bool(cache_entry and shared))
             config = self._config(spec, cache_entry.name if cache_entry else None, json_mode)
             t0 = time.time()

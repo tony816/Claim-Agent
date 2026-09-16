@@ -15,7 +15,7 @@ import time
 import uuid
 from pathlib import Path
 
-from .base import CallResult, CallSpec, ImagePart, ProviderError, parse_json_text
+from .base import CallResult, CallSpec, ImagePart, ProviderError, parse_json_text, request_summary
 
 KINDS = ("claude_oauth", "codex_oauth")
 
@@ -140,8 +140,7 @@ class SubscriptionProvider:
         if not status["connected"]:
             raise ProviderError(status["message"])
         call_id, started = uuid.uuid4().hex, time.monotonic()
-        self._emit("request", spec, call_id, text=spec.packet_text, system=spec.system_instruction,
-                   sources=spec.sources_block, images=[i.label for i in spec.images])
+        self._emit("request", spec, call_id, **request_summary(spec))
         images = []
         history = []
         for turn in spec.history:
