@@ -29,7 +29,7 @@ def run_doctor(rt: Runtime, live: bool = False, model: str | None = None, contra
     rows.append(("lessons", "OK", f"approved={len(rt.lessons.list('approved'))} pending={len(rt.lessons.list('pending'))} hash={rt.lessons_hash[:12]}"))
     depth = schema_depth(ENVELOPE_JSON_SCHEMA)
     rows.append(("envelope schema", "OK" if depth <= 3 else "WARN", f"depth={depth}, properties={len(ENVELOPE_JSON_SCHEMA['properties'])}"))
-    key_present = bool(os.environ.get(cfg.api_key_env) or (cfg.provider.kind == "gemini" and os.environ.get("GOOGLE_API_KEY")) or (cfg.provider.kind == "anthropic" and os.environ.get("ANTHROPIC_AUTH_TOKEN")))
+    key_present = bool(os.environ.get(cfg.api_key_env) or (cfg.provider.kind == "gemini" and os.environ.get("GOOGLE_API_KEY")))
     if cfg.provider.kind.endswith("_oauth"):
         from .model_settings import connection
 
@@ -56,18 +56,6 @@ def run_doctor(rt: Runtime, live: bool = False, model: str | None = None, contra
             return rows
         if not key_present:
             rows.append(("live probe", "SKIP", "no API key"))
-            return rows
-        if cfg.provider.kind == "anthropic":
-            try:
-                from .runtime import live_provider
-
-                names = live_provider(cfg).list_models()
-                target = model or cfg.default_model
-                rows.append(("models.list", "OK" if target in names else "WARN", f"{len(names)} models; configured '{target}' {'found' if target in names else 'NOT found'}" + ("" if target in names else suggest_model(target, names))))
-                if not cfg.telemetry.pricing.get(target):
-                    rows.append(("pricing", "WARN", f"telemetry.pricing has no entry for '{target}'; cost estimates will be empty"))
-            except Exception as exc:  # noqa: BLE001
-                rows.append(("live probe", "FAIL", str(exc)[:300]))
             return rows
         try:
             from .provider.gemini import GeminiProvider, make_client

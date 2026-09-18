@@ -11,6 +11,8 @@
 /eval/results/
 /eval/private/
 /reports/
+/improve/            # ACE 실패 기록·감사 로그·회귀 보고서 (로컬 운영 산출물)
+/eval/candidates/    # 승인 전 적대 평가 케이스 (승인 시 eval/cases/로 편입되어 커밋 대상이 된다)
 /fixtures/live/
 __pycache__/
 *.pyc

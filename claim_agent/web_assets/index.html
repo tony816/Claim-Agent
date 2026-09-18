@@ -6,12 +6,13 @@
   <a class="brand" href="/" aria-label="Claim-Agent 홈"><span class="mark">C</span> Claim-Agent</a>
   <button id="new-chat" class="new-chat">＋ 새 대화</button>
   <button id="model-settings-open" class="new-chat">⚙ 에이전트 모델 설정</button>
+  <button id="improve-open" class="new-chat">◧ 개선 / Approval Inbox<span id="improve-badge" class="improve-badge" hidden>0</span></button>
   <p class="side-label side-label-row">프로젝트<button id="new-project" title="새 프로젝트" aria-label="새 프로젝트">＋</button></p><nav id="projects" aria-label="프로젝트 목록"></nav>
   <p class="side-label">내 대화</p><nav id="sessions" aria-label="대화 목록"></nav>
   <div class="side-bottom"><span class="local-dot"></span> 이 컴퓨터에 저장됨<button id="shutdown">프로그램 종료</button></div>
 </aside>
 <main>
-  <header><div class="header-left"><button id="menu" aria-label="대화 목록 열기">☰</button><strong>Claim-Agent</strong><span id="model">Gemini</span><button id="project-chip" class="project-chip" hidden title="프로젝트 설정 열기"></button></div><span class="header-note">대화에서 초안까지</span></header>
+  <header><div class="header-left"><button id="menu" aria-label="대화 목록 열기">☰</button><strong>Claim-Agent</strong><div class="provider-switch"><select id="provider-kind" aria-label="연결 방식"></select><select id="provider-model" aria-label="사용 모델"></select><span id="provider-note" class="provider-note"></span></div><button id="project-chip" class="project-chip" hidden title="프로젝트 설정 열기"></button></div><span class="header-note">대화에서 초안까지</span></header>
   <section id="project-panel" aria-label="프로젝트 설정" hidden>
     <div class="project-inner">
       <div class="project-head"><h2 id="project-title">프로젝트</h2><div class="project-head-actions"><button type="button" id="project-new-chat" class="primary">＋ 이 프로젝트에서 새 대화</button><button type="button" id="project-delete" class="danger">프로젝트 삭제</button></div></div>
@@ -30,6 +31,27 @@
       </div>
       <div class="project-sessions"><strong>이 프로젝트의 대화</strong><ul id="project-session-list" class="project-session-list"></ul></div>
       <input id="project-file-picker" type="file" accept=".txt,.md,.json,.yaml,.yml,.csv,.pdf,.docx,.hwpx,.hwp,.png,.jpg,.jpeg,.webp" multiple hidden>
+    </div>
+  </section>
+  <section id="improve-panel" aria-label="개선 / Approval Inbox" hidden>
+    <div class="improve-inner">
+      <div class="improve-head">
+        <h2>개선 / Approval Inbox</h2>
+        <div class="improve-head-actions">
+          <button type="button" id="improve-mine" class="primary">실패 수집 · 회고 실행</button>
+          <button type="button" id="improve-refresh">새로고침</button>
+        </div>
+      </div>
+      <p class="improve-note">자동 제안은 전부 <strong>승인 대기</strong> 상태입니다. 사람이 승인해도 회귀 평가를 통과하기 전에는 역할 프롬프트에 주입되지 않습니다. 교훈은 절차·검수·표현에 관한 일반 규칙만 담으며, 발명의 기술내용은 근거로 쓰지 않습니다.</p>
+      <div id="improve-metrics" class="improve-metrics" aria-label="핵심 지표"></div>
+      <div class="improve-tabs" role="tablist">
+        <button type="button" class="improve-tab is-on" data-tab="lessons" role="tab">교훈 <span id="improve-count-lessons">0</span></button>
+        <button type="button" class="improve-tab" data-tab="cases" role="tab">적대 평가 케이스 <span id="improve-count-cases">0</span></button>
+        <button type="button" class="improve-tab" data-tab="audit" role="tab">감사 로그</button>
+      </div>
+      <div id="improve-lessons" class="improve-list" role="tabpanel"></div>
+      <div id="improve-cases" class="improve-list" role="tabpanel" hidden></div>
+      <div id="improve-audit" class="improve-list" role="tabpanel" hidden></div>
     </div>
   </section>
   <div id="conversation" tabindex="-1">

@@ -18,6 +18,15 @@ from ..models.ids import sha256_text
 
 STATES = ("pending", "approved", "rejected")
 
+# Regression gate states (ACE ⑤). The directory still decides injection — only `approved` is injected —
+# so a candidate a human approved sits in `pending` until the regression eval passes.
+GATE_PENDING = "PENDING"
+GATE_CANDIDATE = "CANDIDATE_APPROVED"        # human said yes; not injected yet
+GATE_ACTIVE = "ACTIVE_APPROVED"              # regression passed; injected
+GATE_FAILED_EVAL = "APPROVED_BUT_FAILED_EVAL"
+GATE_HELD = "HELD"
+GATE_STATES = (GATE_PENDING, GATE_CANDIDATE, GATE_ACTIVE, GATE_FAILED_EVAL, GATE_HELD)
+
 
 @dataclass
 class Lesson:
@@ -37,6 +46,26 @@ class Lesson:
     approved_at: str | None = None
     note: str | None = None
     llm_drafted: bool = False
+    # ---- ACE fields. Lessons written before ACE have source="manual" and requires_eval=False,
+    # so `approve()` keeps its old meaning for them.
+    source: str = "manual"                   # manual | rca | feedback | llm | ace
+    failure_mode_id: str = ""
+    failure_ids: list[str] = field(default_factory=list)
+    requires_eval: bool = False              # ACE-generated: never injected before a passing regression run
+    gate_status: str = ""                    # see GATE_* above; empty = derived from status
+    helpful: int = 0                         # ACE grow-and-refine counters
+    harmful: int = 0
+    approval: dict[str, Any] = field(default_factory=dict)   # approved_by/at, original_proposal, approved_content, approval_note
+    eval_record: dict[str, Any] = field(default_factory=dict)  # last regression gate verdict
+    reflection: dict[str, Any] = field(default_factory=dict)   # Reflector summary shown in the inbox
+
+    def __post_init__(self) -> None:
+        if not self.gate_status:
+            self.gate_status = GATE_ACTIVE if self.status == "approved" else GATE_PENDING
+
+    @property
+    def injected(self) -> bool:
+        return self.status == "approved"
 
     def to_yaml(self) -> str:
         return yaml.safe_dump(asdict(self), allow_unicode=True, sort_keys=False)
@@ -85,8 +114,9 @@ class LessonStore:
         p.write_text(lesson.to_yaml(), encoding="utf-8")
         return p
 
-    def propose(self, text_ko: str, target_roles: list[str], rationale: str, evidence: list[str], llm_drafted: bool = False, key: str = "") -> Lesson:
-        lesson = Lesson(id=self.next_id(), text_ko=text_ko, target_roles=target_roles, rationale=rationale, evidence=evidence, key=key, created_at=time.strftime("%Y-%m-%dT%H:%M:%S"), llm_drafted=llm_drafted)
+    def propose(self, text_ko: str, target_roles: list[str], rationale: str, evidence: list[str], llm_drafted: bool = False, key: str = "", **extra: Any) -> Lesson:
+        lesson = Lesson(id=self.next_id(), text_ko=text_ko, target_roles=target_roles, rationale=rationale, evidence=evidence, key=key, created_at=time.strftime("%Y-%m-%dT%H:%M:%S"), llm_drafted=llm_drafted,
+                        **{k: v for k, v in extra.items() if k in Lesson.__dataclass_fields__})
         self.save(lesson)
         return lesson
 
@@ -105,8 +135,17 @@ class LessonStore:
         return lesson
 
     def approve(self, lesson_id: str, by: str = "user", note: str | None = None) -> Lesson:
+        """Approve for injection.
+
+        A lesson marked `requires_eval` (everything the ACE curator produces) cannot reach the
+        injected `approved` state on a human yes alone: it stops at CANDIDATE_APPROVED until
+        `activate()` seals a passing regression run.
+        """
         lesson, _ = self.get(lesson_id)
+        if lesson.requires_eval and lesson.gate_status != GATE_ACTIVE:
+            return self.approve_candidate(lesson_id, by=by, note=note)
         lesson.status = "approved"
+        lesson.gate_status = GATE_ACTIVE
         lesson.version += 1 if lesson.approved_at else 0
         lesson.approved_by = by
         lesson.approved_at = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -114,12 +153,93 @@ class LessonStore:
         self.save(lesson)
         return lesson
 
-    def reject(self, lesson_id: str, note: str | None = None) -> Lesson:
+    def reject(self, lesson_id: str, note: str | None = None, by: str = "user") -> Lesson:
         lesson, _ = self.get(lesson_id)
         lesson.status = "rejected"
+        lesson.gate_status = GATE_PENDING
         lesson.note = note
+        lesson.approval = {**lesson.approval, "rejected_by": by, "rejected_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "approval_note": note}
         self.save(lesson)
         return lesson
+
+    # ------------------------------------------------------- ACE regression gate (운영 안전 규칙 ②③)
+    def approve_candidate(self, lesson_id: str, by: str = "user", note: str | None = None,
+                          text_ko: str | None = None, target_roles: list[str] | None = None) -> Lesson:
+        """Human approval. The lesson stays out of the injected set until the regression gate passes.
+
+        `text_ko`/`target_roles` implement '수정 후 승인': the original proposal is preserved in
+        `approval.original_proposal` so the audit trail shows what the model proposed and what the
+        human actually approved.
+        """
+        lesson, _ = self.get(lesson_id)
+        original = {"text_ko": lesson.text_ko, "target_roles": list(lesson.target_roles)}
+        edited = False
+        if text_ko is not None and text_ko.strip() and text_ko.strip() != lesson.text_ko.strip():
+            lesson.text_ko, edited = text_ko.strip(), True
+        if target_roles is not None and list(target_roles) != list(lesson.target_roles):
+            lesson.target_roles, edited = list(target_roles), True
+        lesson.status = "pending"
+        lesson.gate_status = GATE_CANDIDATE
+        lesson.approved_by = by
+        lesson.approved_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+        lesson.note = note
+        lesson.approval = {
+            "approved_by": by,
+            "approved_at": lesson.approved_at,
+            "original_proposal": original,
+            "approved_content": {"text_ko": lesson.text_ko, "target_roles": list(lesson.target_roles)},
+            "approval_note": note,
+            "edited": edited,
+        }
+        self.save(lesson)
+        return lesson
+
+    def hold(self, lesson_id: str, note: str | None = None, by: str = "user") -> Lesson:
+        lesson, _ = self.get(lesson_id)
+        lesson.status = "pending"
+        lesson.gate_status = GATE_HELD
+        lesson.note = note
+        lesson.approval = {**lesson.approval, "held_by": by, "held_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "approval_note": note}
+        self.save(lesson)
+        return lesson
+
+    def activate(self, lesson_id: str, eval_record: dict[str, Any]) -> Lesson:
+        """Regression gate passed: move the human-approved candidate into the injected set."""
+        lesson, _ = self.get(lesson_id)
+        if lesson.gate_status not in (GATE_CANDIDATE, GATE_FAILED_EVAL):
+            raise ValueError(f"{lesson_id}: 사람이 승인한 candidate만 활성화할 수 있다 (현재 {lesson.gate_status})")
+        lesson.status = "approved"
+        lesson.gate_status = GATE_ACTIVE
+        lesson.eval_record = eval_record
+        lesson.eval_evidence = list(dict.fromkeys(lesson.eval_evidence + list(eval_record.get("runs", []))))
+        self.save(lesson)
+        return lesson
+
+    def fail_eval(self, lesson_id: str, eval_record: dict[str, Any]) -> Lesson:
+        """Regression gate failed: keep the human approval on record but never inject it."""
+        lesson, _ = self.get(lesson_id)
+        lesson.status = "pending"
+        lesson.gate_status = GATE_FAILED_EVAL
+        lesson.eval_record = eval_record
+        self.save(lesson)
+        return lesson
+
+    def score(self, lesson_id: str, helpful: int = 0, harmful: int = 0) -> Lesson:
+        """ACE grow-and-refine counters. Scoring never changes the gate state on its own."""
+        lesson, _ = self.get(lesson_id)
+        lesson.helpful += helpful
+        lesson.harmful += harmful
+        self.save(lesson)
+        return lesson
+
+    def by_failure_mode(self) -> dict[str, str]:
+        """{failure_mode_id or key: lesson_id} — the Reflector's duplicate check."""
+        out: dict[str, str] = {}
+        for l in self.list():
+            for token in (l.failure_mode_id, l.key):
+                if token and token not in out:
+                    out[token] = l.id
+        return out
 
     # ------------------------------------------------------------ injection
     def approved_for_role(self, role: str, include: list[str] | None = None) -> list[Lesson]:

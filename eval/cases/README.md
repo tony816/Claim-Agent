@@ -42,3 +42,27 @@ claim-agent eval run --case my-invention          # 이후는 fixtures 리플레
 `authoring_scope: EXISTING_SET_EDIT` 케이스(`existing-set-edit-9`, `dep-target-single-9`, `no-merge-guard`)는 `claim_file`의 번호 세트에서 `dependent_target` 항만 고친다. fixtures가 없어 CI 리플레이에서는 SKIP되며, `tests/test_existing_set_edit.py`가 scripted 역할로 같은 기대값을 검사한다.
 
 fixtures는 `--record` 시점의 프롬프트·소스 해시를 담고 있으며, 프롬프트가 바뀌어도 느슨한 리플레이(역할·scope·phase 순서)로 엔진 회귀를 검사한다. 프롬프트 품질 자체는 `eval live`로 주기적으로 다시 측정한다.
+
+## 적대 평가 케이스 (ACE)
+
+`eval/candidates/<case_id>/`는 **승인 전** 적대 케이스다. `eval/cases/*/request.yaml` 글로브에 걸리지 않으므로
+CI와 `eval run --all`은 승인 전 케이스를 실행하지 않는다. 웹의 `개선 / Approval Inbox` 또는
+`claim-agent improve approve --case <id>`로 승인하면 `eval/cases/`로 복사되어 정식 회귀 세트가 된다.
+
+적대 케이스는 **통과가 정답이 아니라 걸리는 것이 정답**이다. 그래서 seed의 `outcome`·게이트 PASS 기대를 버리고
+아래 필드를 쓴다.
+
+| 필드 | 검사 |
+|---|---|
+| `adversarial: true` | 이 블록의 검사를 켠다. 없으면 일반 골든 케이스로 동작한다 |
+| `mutation_type` | 주입한 변형의 종류 (`curate.MUTATION_TYPES`) |
+| `seed_case` | 변형의 바탕이 된 정상 케이스 |
+| `injected_defect` | 사람이 읽는 결함 설명 |
+| `expected_first_detector: {role, stage, gate}` | 최초로 비-PASS를 내야 하는 지점 |
+| `must_not_pass_gates: [GATE]` | 이 게이트가 PASS로 끝나면 실패 |
+| `expected_return_to` | 기대 되돌림 경로 (`RETURN_TO_*`) |
+| `escaped_to_lock_must_be: false` | LOCK까지 가면 실패 |
+
+결함은 기계적으로 주입할 수 없으므로 seed의 `request_text`에 변형 지시를 덧붙이는 방식으로 만든다.
+따라서 **fixtures 리플레이로는 의미가 없다**(녹화된 응답이 지시와 무관하게 재생된다). 적대 케이스는
+`eval live`로 측정한다.

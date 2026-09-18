@@ -67,6 +67,7 @@ class Workspace:
         self.projects: dict[str, dict] = {}
         self.jobs: dict[str, dict] = {}
         self.auth_jobs: dict[str, dict] = {}
+        self.improve_jobs: dict[str, dict] = {}   # lesson_id -> running regression gate
         for path in (self.folder / "projects").glob("*/project.json"):
             data = read_state(path)
             if data and re.fullmatch(r"[a-f0-9]{32}", str(data.get("id", ""))):
@@ -83,7 +84,7 @@ class Workspace:
                 self.sessions[data["id"]] = data
 
     def redact(self, text: str) -> str:
-        for name in {self.cfg.model.api_key_env, self.cfg.provider.anthropic.api_key_env, "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"}:
+        for name in {self.cfg.model.api_key_env, "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"}:
             value = os.environ.get(name)
             if value:
                 text = text.replace(value, "[API KEY]")
@@ -105,6 +106,18 @@ class Workspace:
             save_json(self.root / ".tui" / "model-settings.json", overrides)
             self.cfg = load_config(self.config, self.root)
             return self.model_settings()
+
+    def switch_provider(self, data: dict) -> dict:
+        """Header switch: change the live provider (and its default model) mid-conversation, leaving role rows as they are."""
+        from .model_settings import connection, merge_settings_file, provider_overrides
+
+        with self.lock:
+            if self.running_count():
+                raise ValueError("실행 중에는 연결 방식을 바꿀 수 없습니다. 작업 완료 또는 중지 후 바꾸세요.")
+            merge_settings_file(self.root, provider_overrides(self.cfg, data))
+            self.cfg = load_config(self.config, self.root)
+            snapshot = self.model_settings()
+        return {**snapshot, "connection": connection(self.cfg, self.cfg.provider.kind)}
 
     def auth_status(self) -> dict:
         from .model_settings import PROVIDERS, connection
@@ -477,6 +490,65 @@ class Workspace:
         mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document" if fmt == "docx" else "text/markdown; charset=utf-8"
         return path.read_bytes(), path.name, mime
 
+    # ---------------------------------------------------------------- 개선 / Approval Inbox (ACE)
+    def improve_service(self):
+        from .improve.service import ImproveService
+
+        return ImproveService(self.root, self.config)
+
+    def improve_snapshot(self) -> dict:
+        """Inbox 화면 한 장: 승인 대기 교훈·적대 케이스·실패 기록·지표·감사 로그."""
+        with self.lock:
+            svc = self.improve_service()
+            data = svc.inbox()
+            data["metrics"] = svc.metrics().as_dict()
+            data["jobs"] = {lid: {k: v for k, v in job.items() if k != "thread"} for lid, job in self.improve_jobs.items()}
+            data["busy"] = bool(self.running_count())
+            return data
+
+    def improve_mine(self) -> dict:
+        """실패 수집 → 회고 → 큐레이션. 산출물은 전부 승인 대기 상태로만 만들어진다."""
+        with self.lock:
+            out = self.improve_service().mine_and_curate(actor="web")
+            return {"created": out["created"], "reinforced": out["reinforced"],
+                    "lessons": [l.id for l in out["lessons"]], "cases": [c.case_id for c in out["cases"]]}
+
+    def improve_decide(self, data: dict) -> dict:
+        with self.lock:
+            svc = self.improve_service()
+            action, note, by = str(data.get("action", "")), (data.get("note") or None), "web-user"
+            if data.get("case_id"):
+                return svc.decide_case(str(data["case_id"]), action, by=by, note=note, patch=data.get("patch") or None)
+            roles = data.get("target_roles")
+            return svc.decide_lesson(str(data.get("lesson_id", "")), action, by=by, note=note,
+                                     text_ko=data.get("text_ko"), target_roles=list(roles) if roles is not None else None)
+
+    def improve_regress(self, lesson_id: str, mode: str | None = None) -> dict:
+        """회귀 평가는 eval을 실제로 돌리므로 백그라운드 스레드에서 실행하고 화면은 폴링한다."""
+        with self.lock:
+            if not lesson_id:
+                raise ValueError("교훈을 선택하세요.")
+            running = self.improve_jobs.get(lesson_id)
+            if running and not running["done"]:
+                return {k: v for k, v in running.items() if k != "thread"}
+            job = {"lesson_id": lesson_id, "mode": mode or "", "done": False, "verdict": None, "error": None, "report": ""}
+            self.improve_jobs[lesson_id] = job
+
+        def work() -> None:
+            try:
+                out = self.improve_service().regress(lesson_id, mode=mode or None, by="web-user")
+                with self.lock:
+                    job.update(done=True, verdict=out["result"].verdict, report=self.redact(out["result"].render_md()),
+                               gate_status=out["lesson"]["gate_status"], gate_label=out["lesson"]["gate_label"])
+            except Exception as exc:  # noqa: BLE001
+                with self.lock:
+                    job.update(done=True, error=self.redact(str(exc)))
+
+        thread = threading.Thread(target=work, daemon=True)
+        job["thread"] = thread
+        thread.start()
+        return {k: v for k, v in job.items() if k != "thread"}
+
     def resume(self, sid: str, data: dict) -> None:
         """Continue the session's halted run with a user decision (same run, same USER_LOCK)."""
         with self.lock:
@@ -774,6 +846,10 @@ class Handler(BaseHTTPRequestHandler):
                                    sessions=[dict(id=s["id"], title=s["title"], project_id=s.get("project_id")) for s in sessions],
                                    projects=[dict(id=p["id"], name=p["name"], files=len(p["files"]),
                                                   sessions=sum(1 for s in sessions if s.get("project_id") == p["id"])) for p in projects]))
+            elif url.path == "/api/improve":
+                self.json(workspace.improve_snapshot())
+            elif url.path == "/api/improve/metrics":
+                self.json(workspace.improve_service().metrics(update_scores=query.get("update", ["0"])[0] == "1").as_dict())
             elif url.path == "/api/project":
                 self.json(workspace.project_snapshot(query.get("id", [""])[0]))
             elif url.path == "/api/session":
@@ -856,6 +932,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("잘못된 요청입니다.")
             if url.path == "/api/model-settings":
                 self.json(workspace.save_model_settings(data))
+            elif url.path == "/api/provider":
+                self.json(workspace.switch_provider(data))
             elif url.path == "/api/auth/login":
                 self.json(workspace.auth_login(str(data.get("provider", ""))))
             elif url.path == "/api/new":
@@ -863,6 +941,12 @@ class Handler(BaseHTTPRequestHandler):
                 if project_id is not None and not isinstance(project_id, str):
                     raise ValueError("프로젝트를 찾을 수 없습니다.")
                 self.json(workspace.create(project_id or None))
+            elif url.path == "/api/improve/mine":
+                self.json(workspace.improve_mine())
+            elif url.path == "/api/improve/decide":
+                self.json(workspace.improve_decide(data))
+            elif url.path == "/api/improve/regress":
+                self.json(workspace.improve_regress(str(data.get("lesson_id", "")), data.get("mode") or None))
             elif url.path == "/api/project/new":
                 self.json(workspace.create_project(data))
             elif url.path == "/api/project/update":

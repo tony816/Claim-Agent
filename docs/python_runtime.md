@@ -21,8 +21,8 @@
 웹챗의 모든 전송은 수동 모드 선택과 관계없이 요청 분류를 거친다. 선택값과 종속항 옵션은 `ui_hints`로만 전달하며, 현재 질문이 요구하는 산출물이 우선한다. “변경하라는 지시가 있는데 어느 방법이 적절한가”라는 질문은 수정본 생성과 구분하여 `REVIEW_ONLY`로 처리한다. 작성 게이트에서 중지된 경우에도 그 역할의 실제 분석 보고서를 결과 화면에 표시하되 후속 미검수 상태를 명시한다.
 
 ```bash
-pip install -e .            # google-genai, pydantic, pyyaml, python-dotenv, Pillow, pypdf, python-docx, olefile (+ anthropic: provider.kind=anthropic일 때)
-# 프로젝트 루트의 .env에 GEMINI_API_KEY=... 저장 (없으면 --replay만 가능). Anthropic은 ANTHROPIC_API_KEY.
+pip install -e .            # google-genai, pydantic, pyyaml, python-dotenv, Pillow, pypdf, python-docx, olefile
+# 프로젝트 루트의 .env에 GEMINI_API_KEY=... 저장 (없으면 --replay만 가능). Claude·Codex는 API 키 대신 공식 CLI 구독 로그인.
 claim-agent doctor --contracts      # 키·소스·역할·스키마 점검 (+ --live로 모델·JSON·캐시 프로브, 단가 누락 경고)
 claim-agent models                  # 실제 사용 가능한 모델 ID 확인 → claim-agent.yaml의 model.default 수정
 ```
@@ -121,19 +121,18 @@ claim-agent review --reviewers syntax-scope-reviewer,oa-strategy-reviewer --clai
 
 ## 프로바이더
 
-`provider.kind`가 실제 호출을 담당한다. 역할 파일·패킷·게이트·기록은 프로바이더 중립이며 fixtures/replay도 공통이다.
+`provider.kind`가 실제 호출을 담당한다. 역할 파일·패킷·게이트·기록은 프로바이더 중립이며 fixtures/replay도 공통이다. Claude와 Codex는 공식 CLI 구독 로그인으로만 호출하며 API 키 전송 경로는 없다(`docs/subscription-models.md`). 이전 설정의 `provider.kind: anthropic`은 로드 시 `claude_oauth`로 옮겨진다.
 
-| | `gemini` (기본) | `anthropic` |
+| | `gemini` (기본) | `claude_oauth` · `codex_oauth` |
 |---|---|---|
-| 클라이언트 | `google-genai`, `GEMINI_API_KEY` | `anthropic`, `ANTHROPIC_API_KEY`(또는 `ant auth login` 프로필) |
-| 모델 | `model.default`, 역할별 `model` | `provider.anthropic.model`(기본 `claude-opus-5`), 역할별 `model` |
-| 캐시 | 명시적 context cache(아래 정책) + Files API | `cache_control`(프롬프트 접두 캐시)을 시스템 지시·소스 블록에 표시 |
-| 사고 | `thinking_level` → `thinking_level`/`thinking_budget` | adaptive thinking + `output_config.effort`(HIGH→high 등); `temperature`는 보내지 않음 |
-| JSON | `response_json_schema` | `output_config.format`(구조화 출력); 거부되면 프롬프트 JSON 지시로 재시도 |
-| 도구 | SDK 자동 함수 호출 | 수동 tool_use→tool_result 루프(최대 6회) |
-| 거부 | — | `stop_reason: refusal`이면 ProviderError; `fallbacks: default`(베타)로 서버 측 대체 모델을 먼저 시도 |
+| 클라이언트 | `google-genai`, `GEMINI_API_KEY` | 공식 CLI 실행, 앱 전용 인증 폴더(키·부모 세션 미상속) |
+| 모델 | `model.default`, 역할별 `model` | `provider.<kind>.model`(`default`=계정 기본 모델), 역할별 `model` |
+| 캐시 | 명시적 context cache(아래 정책) + Files API | 없음. 호출마다 새 컨텍스트이며 사용량은 구독 한도로 집계 |
+| 사고 | `thinking_level` → `thinking_level`/`thinking_budget` | `--effort`(Claude) / `model_reasoning_effort`(Codex)로 전달 |
+| JSON | `response_json_schema` | 패킷 끝의 스키마 지시 + 동일 복구 파서 |
+| 도구 | SDK 자동 함수 호출 | `claim_agent_tool` 요청·결과 왕복(최대 5회), 허용된 callable만 실행 |
 
-`claim-agent models`·`doctor --live`는 설정된 프로바이더로 동작한다. 웹·TUI 대화 경로도 같은 프로바이더(`CallSpec.history`로 이전 턴 전달)를 쓴다.
+`claim-agent models`·`doctor --live`는 설정된 프로바이더로 동작한다(구독 CLI는 모델 목록 API가 없어 로그인 상태만 확인한다). 웹·TUI 대화 경로도 같은 프로바이더(`CallSpec.history`로 이전 턴 전달)를 쓴다. 웹 채팅 상단의 연결 방식·모델 선택은 대화 도중에도 바꿀 수 있고 다음 요청부터 적용된다(실행 중에는 잠긴다).
 
 ## 입력 형식과 도면
 
@@ -205,7 +204,7 @@ claim-agent review --reviewers syntax-scope-reviewer,oa-strategy-reviewer --clai
 ## 테스트
 
 ```bash
-python -m pytest            # 전체 테스트: 상태기계(scripted), 무효화·루프 한도·resume, 블라인드 격리, 코퍼스, 교훈, 피드백, RCA·선제 경고·역전파·도구 텔레메트리, 캐시 정책·전송, 예산, 파서, 문서 추출, 내보내기, diff·보관, 웹 API, Gemini·Anthropic provider 모킹
+python -m pytest            # 전체 테스트: 상태기계(scripted), 무효화·루프 한도·resume, 블라인드 격리, 코퍼스, 교훈, 피드백, RCA·선제 경고·역전파·도구 텔레메트리, 캐시 정책·전송, 예산, 파서, 문서 추출, 내보내기, diff·보관, 웹 API, Gemini·구독 CLI provider 모킹
 ruff check claim_agent tests scripts && python scripts/build_role_derivatives.py --check && claim-agent eval run --all --replay-only   # CI가 실행하는 나머지
 ```
 `tests/scripted_roles.py`의 canned 봉투가 각 역할의 PASS/RETURN/REVIEW 응답을 흉내 낸다. 실제 모델 응답은 `--record`로 녹화한 fixture로 대체한다. `mypy claim_agent`는 CI에서 권고(advisory)로 돌며 오류 수가 0이 되면 필수로 바꾼다.
@@ -214,7 +213,7 @@ ruff check claim_agent tests scripts && python scripts/build_role_derivatives.py
 
 **캐시 생성 정책.** Gemini의 명시적 context cache는 생성 시 일반 입력 단가, 저장 시간 과금, 적중 시 할인이므로 한 번만 쓰는 번들에는 손해다. `cache.warm: auto`(기본)는 같은 역할×scope 번들을 이번 run에서 `min_expected_reuse`회 이상 쓰는 경우(스타일 2단계, 종속항 picture 팬아웃)이거나 같은 번들이 TTL 안에 한 번 더 요청된 경우(두 번째 관측 = 실제 재사용)에만 캐시를 만든다. 살아 있는 항목을 늦게 재사용하면 TTL을 연장한다. `always`는 첫 사용부터 만들고(배치·eval), `never`는 만들지 않는다. `CallSpec.expected_reuse`가 계획된 재사용 횟수를 전달한다.
 
-**패킷 배치.** 모든 패킷은 안정 블록(USER_LOCK·원자료·run 불변 상위 보고서)을 앞에, 가변 블록(RUN_HEADER·요청·리비전별 보고서·출력 계약)을 뒤에 둔다. 사용자 결정 메모는 출력 계약 직전에 붙는다. 같은 역할의 반복 호출(루프·복구·도구 2단계)이 동일 접두를 공유하므로 암묵 캐시를 지원하는 모델이 이를 재사용할 수 있고, Anthropic 프로바이더에서는 `cache_control` 접두 캐시에 그대로 대응한다.
+**패킷 배치.** 모든 패킷은 안정 블록(USER_LOCK·원자료·run 불변 상위 보고서)을 앞에, 가변 블록(RUN_HEADER·요청·리비전별 보고서·출력 계약)을 뒤에 둔다. 사용자 결정 메모는 출력 계약 직전에 붙는다. 같은 역할의 반복 호출(루프·복구·도구 2단계)이 동일 접두를 공유하므로 암묵 캐시를 지원하는 모델이 이를 재사용할 수 있다.
 
 종속항별 도면 비교는 루트 LOCK·설계·종속항 설계·스타일·OA 보고서와 원자료·도면을 공통 캐시에 저장한다. 각 호출에는 부모항 체인, 목표항, 독립 blind snapshot 및 해당 호출 식별자만 별도로 보낸다. 캐시 키는 역할·scope·모델·system instruction·공통 텍스트·도면 내용/MIME/라벨·run_id에 결속된다. 보고서의 revision과 원자료가 바뀌면 키도 바뀐다. 동일 프로세스의 병렬 목표항은 하나의 캐시 생성 결과를 공유한다.
 

@@ -20,6 +20,7 @@ from textual.widgets import Button, Checkbox, DataTable, Footer, Header, Input, 
 from .config import load_config
 from .live_events import EventReader
 from .live_log import LiveLogFormatter
+from .model_settings import PROVIDERS, merge_settings_file
 from .tui_support import Attachment, child_options, feedback_command, native_input, parse_paths, prepare_request, read_state, run_command, validate_attachment
 
 STAGES = {
@@ -115,11 +116,15 @@ class ClaimAgentApp(App):
         self.last_pipeline_run: str | None = None
         self.previous_report_stamp = 0
 
+    def auth_note(self) -> str:
+        if self.cfg.provider.kind.endswith("_oauth"):
+            return "구독 OAuth · 웹 모델 설정에서 연결"
+        key = os.environ.get(self.cfg.api_key_env) or os.environ.get("GOOGLE_API_KEY")
+        return f"API 키 {'저장됨' if key else '없음 — .env에 입력 필요'}"
+
     def compose(self) -> ComposeResult:
         yield Header()
-        key = os.environ.get(self.cfg.api_key_env) or (self.cfg.provider.kind == "gemini" and os.environ.get("GOOGLE_API_KEY"))
-        auth = "구독 OAuth · 웹 모델 설정에서 연결" if self.cfg.provider.kind.endswith("_oauth") else f"API 키 {'저장됨' if key else '없음 — .env에 입력 필요'}"
-        yield Static(f"{self.cfg.default_model}  ·  {auth}  ·  준비", id="status", markup=False)
+        yield Static(f"{self.cfg.default_model}  ·  {self.auth_note()}  ·  준비", id="status", markup=False)
         with Horizontal(id="workspace"):
             with VerticalScroll(id="compose-pane"):
                 yield Label("01  프롬프트", classes="heading")
@@ -144,6 +149,7 @@ class ClaimAgentApp(App):
                     yield Button("전체 비우기", id="clear")
                 yield Static("TXT·MD·PNG·JPG·WEBP 등 지원. 모든 자료를 여기에 함께 넣으세요.", classes="hint")
                 yield Label("03  작성 설정", classes="heading")
+                yield Select([(meta["label"], kind) for kind, meta in PROVIDERS.items()], value=self.cfg.provider.kind, allow_blank=False, id="provider")
                 yield Input(value=self.cfg.default_model, placeholder="모델 ID", id="model")
                 with Horizontal(classes="row"):
                     yield Checkbox("종속항도 작성", id="dependent")
@@ -180,7 +186,7 @@ class ClaimAgentApp(App):
         self.set_interval(0.2, self.poll_state)
 
     def redact(self, text: str) -> str:
-        for name in {self.cfg.model.api_key_env, self.cfg.provider.anthropic.api_key_env, "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"}:
+        for name in {self.cfg.model.api_key_env, "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"}:
             value = os.environ.get(name)
             if value:
                 text = text.replace(value, "[API KEY]")
@@ -229,6 +235,24 @@ class ClaimAgentApp(App):
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "mode":
             self.update_mode()
+        elif event.select.id == "provider":
+            self.switch_provider(str(event.value))
+
+    def switch_provider(self, kind: str) -> None:
+        """대화·작성 사이 언제든 연결 방식을 바꾼다. 실행 중에는 같은 run이 섞이지 않도록 되돌린다."""
+        selector = self.query_one("#provider", Select)
+        if kind == self.cfg.provider.kind:
+            return
+        if self.running:
+            with selector.prevent(Select.Changed):
+                selector.value = self.cfg.provider.kind
+            self.notify("실행이 끝난 뒤 연결 방식을 바꿀 수 있습니다.", severity="warning")
+            return
+        merge_settings_file(self.root, {"provider.kind": kind})
+        self.cfg = load_config(self.config_path, self.root)
+        self.query_one("#model", Input).value = self.cfg.default_model
+        self.query_one("#status", Static).update(f"{self.cfg.default_model}  ·  {self.auth_note()}  ·  준비")
+        self.notify(f"{PROVIDERS[kind]['label']}로 바꿨습니다. 다음 실행부터 적용됩니다.")
 
     @staticmethod
     def chat_transcript(history: list[dict]) -> str:

@@ -11,22 +11,13 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 DEFAULT_CONFIG_NAME = "claim-agent.yaml"
-ProviderKind = Literal["gemini", "anthropic", "claude_oauth", "codex_oauth"]
+ProviderKind = Literal["gemini", "claude_oauth", "codex_oauth"]
 
 
 class ModelConfig(BaseModel):
     default: str = "gemini-3.8-flash"
     api_key_env: str = "GEMINI_API_KEY"
     max_output_tokens: int = 32768
-
-
-class AnthropicConfig(BaseModel):
-    model: str = "claude-opus-5"
-    api_key_env: str = "ANTHROPIC_API_KEY"
-    thinking: str = "adaptive"        # adaptive | off (Claude 4.6+ models; effort comes from the role's thinking_level)
-    fallbacks: str = "default"        # default | none — server-side refusal fallbacks (beta)
-    structured_outputs: bool = True   # output_config.format; falls back to a prompt JSON instruction if the schema is refused
-    send_temperature: bool = False    # sampling params are rejected on Claude Opus 5 / Fable 5
 
 
 class SubscriptionConfig(BaseModel):
@@ -36,8 +27,8 @@ class SubscriptionConfig(BaseModel):
 
 
 class ProviderConfig(BaseModel):
+    # Claude and Codex run through their official CLI on a subscription login; there is no API-key transport.
     kind: ProviderKind = "gemini"
-    anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
     claude_oauth: SubscriptionConfig = Field(default_factory=lambda: SubscriptionConfig(model="sonnet"))
     codex_oauth: SubscriptionConfig = Field(default_factory=lambda: SubscriptionConfig(model="default"))
 
@@ -91,6 +82,7 @@ class PathsConfig(BaseModel):
     lessons_dir: str = "lessons"
     eval_dir: str = "eval"
     experiments_dir: str = "experiments"
+    improve_dir: str = "improve"          # ACE failure records and the approval audit log
 
 
 class RetentionConfig(BaseModel):
@@ -107,6 +99,16 @@ class LessonsConfig(BaseModel):
     inject: str = "approved_only"     # approved_only | none
 
 
+class ImproveConfig(BaseModel):
+    """ACE 개선 루프. 수집·제안만 자동이고 승인·주입은 사람이 한다."""
+
+    auto_mine: bool = False           # run이 끝날 때 Failure Miner를 자동 실행할지
+    reflect_llm: bool = False         # 회고에 모델 한 문단을 덧붙일지 (기본은 규칙 기반)
+    min_repeat: int = 2               # 이 횟수 이상 반복해야 일반화 가능한 failure mode로 본다
+    regression_mode: str = "replay"   # replay | live — regression gate 기본 실행 모드
+    regression_cases: list[str] = Field(default_factory=list)   # 핵심 회귀 세트 (비우면 전체)
+
+
 class TelemetryConfig(BaseModel):
     enabled: bool = True
     pricing: dict[str, dict[str, float]] = Field(default_factory=dict)
@@ -119,6 +121,7 @@ class AppConfig(BaseModel):
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     lessons: LessonsConfig = Field(default_factory=LessonsConfig)
+    improve: ImproveConfig = Field(default_factory=ImproveConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     materials: MaterialsConfig = Field(default_factory=MaterialsConfig)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
@@ -147,7 +150,7 @@ class AppConfig(BaseModel):
 
     @property
     def api_key_env(self) -> str:
-        return self.provider.anthropic.api_key_env if self.provider.kind == "anthropic" else self.model.api_key_env
+        return self.model.api_key_env
 
     def path(self, key: str) -> Path:
         return (self.project_root / getattr(self.paths, key)).resolve()
@@ -181,6 +184,19 @@ def load_raw_config(path: Path | None, project_root: Path) -> dict[str, Any]:
     return {}
 
 
+def migrate_removed_providers(raw: dict[str, Any]) -> dict[str, Any]:
+    """Configs written before the API-key Claude transport was removed keep working on the official CLI."""
+    provider = raw.get("provider")
+    if isinstance(provider, dict):
+        provider.pop("anthropic", None)
+        if provider.get("kind") == "anthropic":
+            provider["kind"] = "claude_oauth"
+    for role in (raw.get("roles") or {}).values():
+        if isinstance(role, dict) and role.get("provider") == "anthropic":
+            role["provider"] = "claude_oauth"
+    return raw
+
+
 def load_config(
     path: Path | None = None,
     project_root: Path | None = None,
@@ -195,6 +211,6 @@ def load_config(
     if settings.exists():
         raw = apply_overrides(raw, json.loads(settings.read_text(encoding="utf-8")))
     raw = apply_overrides(raw, overrides)
-    cfg = AppConfig.model_validate(raw)
+    cfg = AppConfig.model_validate(migrate_removed_providers(raw))
     cfg.project_root = root
     return cfg

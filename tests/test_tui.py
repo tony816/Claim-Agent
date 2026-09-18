@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from textual.events import Paste
-from textual.widgets import Button, DataTable, Select, TextArea
+from textual.widgets import Button, DataTable, Input, Select, TextArea
 
 from claim_agent.models.request import RunRequest
 from claim_agent.tui import ClaimAgentApp, Composer
@@ -87,6 +87,25 @@ def test_headless_paste_attachment_removal_and_resize(tmp_path, monkeypatch):
             await pilot.pause()
             assert app.query_one("#start", Button).region.bottom <= 24
             assert app.query_one("#stop", Button).disabled
+    asyncio.run(scenario())
+
+
+def test_headless_provider_switch_persists_and_locks_while_running(tmp_path, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    async def scenario():
+        app = ClaimAgentApp(tmp_path)
+        async with app.run_test(size=(130, 45)) as pilot:
+            selector, model = app.query_one("#provider", Select), app.query_one("#model", Input)
+            assert selector.value == "gemini" and model.value == "gemini-3.8-flash"
+            selector.value = "claude_oauth"
+            await pilot.pause()
+            assert app.cfg.provider.kind == "claude_oauth" and model.value == "sonnet"
+            assert json.loads((tmp_path / ".tui" / "model-settings.json").read_text(encoding="utf-8"))["provider.kind"] == "claude_oauth"
+            app.running = True                      # 실행 중에는 같은 run이 섞이지 않도록 되돌린다
+            selector.value = "gemini"
+            await pilot.pause()
+            assert selector.value == "claude_oauth" and app.cfg.provider.kind == "claude_oauth"
     asyncio.run(scenario())
 
 

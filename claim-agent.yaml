@@ -9,19 +9,14 @@ model:
 # Which live provider runs the roles. Role files are provider-neutral; only transport, caching and
 # thinking mapping differ (docs/python_runtime.md → 프로바이더). Fixtures/replay work for both.
 provider:
-  kind: gemini                     # gemini | anthropic | claude_oauth | codex_oauth
+  kind: gemini                     # gemini | claude_oauth | codex_oauth (Claude·Codex는 공식 CLI 구독 로그인만 사용)
   claude_oauth:
     model: sonnet                  # default | sonnet | opus | haiku | account-accessible model ID
     timeout_s: 600
   codex_oauth:
     model: default                 # CLI account default, or account-accessible model ID
+    executable: 'C:\Users\mssong\.aside\runtime\node\codex.cmd'
     timeout_s: 600
-  anthropic:
-    model: claude-opus-5
-    api_key_env: ANTHROPIC_API_KEY
-    thinking: adaptive             # adaptive | off (effort follows each role's thinking_level)
-    fallbacks: default             # server-side refusal fallbacks (beta); none to disable
-    structured_outputs: true
 
 roles:
   # Each role can set provider + model independently. Omitted/null values inherit defaults.
@@ -60,9 +55,19 @@ paths:
   lessons_dir: lessons
   eval_dir: eval
   experiments_dir: experiments
+  improve_dir: improve            # ACE 실패 기록·감사 로그·회귀 보고서
 
 lessons:
   inject: approved_only   # approved_only | none
+
+# ACE 개선 루프. 수집·제안만 자동이고 승인과 주입은 사람이 결정한다.
+# 자동 생성 교훈은 사람이 승인해도 regression_mode: live 평가를 통과해야 lessons/approved/로 올라간다.
+improve:
+  auto_mine: false        # run 종료 시 Failure Miner 자동 실행
+  reflect_llm: false      # 회고에 모델 한 문단 보강 (기술내용이 섞이면 버려진다)
+  min_repeat: 2           # 일반화 가능한 failure mode로 보는 최소 반복 횟수
+  regression_mode: replay # replay | live — 리플레이는 프롬프트 변화를 반영하지 못해 판정 불가로 남는다
+  regression_cases: []    # 핵심 회귀 세트 (비우면 eval/cases 전체)
 
 telemetry:
   enabled: true
@@ -71,5 +76,3 @@ telemetry:
   pricing:
     gemini-2.5-flash: {input_per_m: 0.30, cached_per_m: 0.075, output_per_m: 2.50}
     gemini-2.5-pro:   {input_per_m: 1.25, cached_per_m: 0.31,  output_per_m: 10.00}
-    claude-opus-5:    {input_per_m: 5.00, cached_per_m: 0.50,  output_per_m: 25.00}
-    claude-sonnet-5:  {input_per_m: 2.00, cached_per_m: 0.20,  output_per_m: 10.00}
