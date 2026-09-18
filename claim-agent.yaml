@@ -62,8 +62,8 @@ lessons:
 
 # ACE 개선 루프. 수집·제안만 자동이고 승인과 주입은 사람이 결정한다.
 # 자동 생성 교훈은 사람이 승인해도 regression_mode: live 평가를 통과해야 lessons/approved/로 올라간다.
+# 루프는 `claim-agent improve mine` 또는 웹 Approval Inbox에서 부를 때만 돈다(파이프라인 종료 훅 없음).
 improve:
-  auto_mine: false        # run 종료 시 Failure Miner 자동 실행
   reflect_llm: false      # 회고에 모델 한 문단 보강 (기술내용이 섞이면 버려진다)
   min_repeat: 2           # 일반화 가능한 failure mode로 보는 최소 반복 횟수
   regression_mode: replay # replay | live — 리플레이는 프롬프트 변화를 반영하지 못해 판정 불가로 남는다

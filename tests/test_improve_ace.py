@@ -101,6 +101,30 @@ def test_reflector_names_the_owning_gate_and_stays_procedural():
     assert "청구항" not in refl.proposed_lesson_text and "mm" not in refl.proposed_lesson_text
 
 
+def test_min_repeat_threshold_is_read_from_config(rt, tmp_path):
+    """`improve.min_repeat`이 실제로 판정에 쓰이는지. 선언만 하고 읽지 않는 설정을 막는다."""
+    rec = FailureRecord(
+        failure_id="F-0010", source_run_ids=["r1", "r2"], failure_type="LATE_DETECTION",
+        expected_detector={"role": "claim-drafter", "stage": "DRAFT", "gate": "DRAFTER_GATE"},
+        signature="LATE_DETECTION|claim-drafter|DRAFTER_GATE|OTHER", repeat_count=2)
+    assert reflect(rec, min_repeat=2).generalizable          # 기본 임계
+    assert not reflect(rec, min_repeat=3).generalizable      # 임계를 올리면 단발성으로 본다
+
+    # 서비스가 config 값을 그대로 넘기는지
+    svc = ImproveService(rt.cfg.project_root, None, rt.cfg)
+    svc.improve_dir = tmp_path / "improve"
+    svc.improve_dir.mkdir(parents=True)
+    svc.failures = FailureStore(svc.improve_dir)
+    svc.audit = AuditLog(svc.improve_dir)
+    svc.candidates = EvalCandidateStore(tmp_path / "eval")
+    (tmp_path / "eval" / "cases").mkdir(parents=True, exist_ok=True)
+    svc.failures.upsert(rec)
+    svc.cfg.improve.min_repeat = 3
+    out = svc.mine_and_curate(runs=[])
+    reflected = next(r for r in out["reflections"] if r.failure_id == "F-0010")
+    assert reflected.generalizable is False
+
+
 def test_tech_leak_blocks_invention_content():
     assert tech_leak("상기 오목면은 3mm 깊이로 형성된다")
     assert tech_leak("【청구항 1】의 문언을 그대로 쓴다")

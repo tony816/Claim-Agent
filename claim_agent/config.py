@@ -100,9 +100,14 @@ class LessonsConfig(BaseModel):
 
 
 class ImproveConfig(BaseModel):
-    """ACE 개선 루프. 수집·제안만 자동이고 승인·주입은 사람이 한다."""
+    """ACE 개선 루프. 수집·제안만 자동이고 승인·주입은 사람이 한다.
 
-    auto_mine: bool = False           # run이 끝날 때 Failure Miner를 자동 실행할지
+    루프는 `claim-agent improve mine`이나 웹 Approval Inbox에서 부를 때만 돈다. 파이프라인
+    종료 훅으로 자동 실행하지 않는다: 회귀 게이트의 live 실행이 실제 API 호출을 쓰고, 신호가
+    대부분 여러 run에 걸친 반복이라 run마다 돌릴 실익이 없으며, engine을 건드리지 않기 위해서다.
+    주기 실행이 필요하면 engine 훅 대신 바깥에서 이 명령을 예약한다.
+    """
+
     reflect_llm: bool = False         # 회고에 모델 한 문단을 덧붙일지 (기본은 규칙 기반)
     min_repeat: int = 2               # 이 횟수 이상 반복해야 일반화 가능한 failure mode로 본다
     regression_mode: str = "replay"   # replay | live — regression gate 기본 실행 모드
