@@ -28,7 +28,7 @@ _TECH_PATTERNS = (
 
 # 실패 유형별 기본 일반화 판정. 반복 횟수가 임계 이상이면 일반화 가능으로 본다.
 GENERALIZABLE_TYPES = {"REPEATED_RETURN", "LATE_DETECTION", "ESCAPED_TO_LOCK", "EVAL_MISS"}
-MIN_REPEAT_FOR_GENERAL = 2
+MIN_REPEAT_FOR_GENERAL = 2      # `improve.min_repeat`의 기본값
 
 _WHY_BY_TYPE = {
     "ESCAPED_TO_LOCK": "게이트가 형식적으로 PASS를 냈지만 그 항목을 실제로 확인하는 시험이 보고서에 남지 않았다. 판정 근거를 기록하도록 요구하지 않으면 같은 누락이 반복된다.",
@@ -133,8 +133,13 @@ def _lesson_text(rec: FailureRecord, detector: Detector) -> str:
     )
 
 
-def reflect(rec: FailureRecord, existing_lesson_keys: dict[str, str] | None = None) -> Reflection:
-    """규칙 기반 회고. LLM 없이 저장된 기록만으로 판정한다."""
+def reflect(rec: FailureRecord, existing_lesson_keys: dict[str, str] | None = None,
+            min_repeat: int = MIN_REPEAT_FOR_GENERAL) -> Reflection:
+    """규칙 기반 회고. LLM 없이 저장된 기록만으로 판정한다.
+
+    `min_repeat`은 `improve.min_repeat`에서 온다. 이 횟수 이상 반복해야 단발성이 아닌
+    일반화 가능한 failure mode로 본다. LOCK을 빠져나간 실패는 한 번만으로도 일반화한다.
+    """
     detector = rec.expected
     if not detector.role and detector.gate in GATE_OWNER:
         role, stage = GATE_OWNER[detector.gate]
@@ -142,7 +147,7 @@ def reflect(rec: FailureRecord, existing_lesson_keys: dict[str, str] | None = No
     mode_id = failure_mode_id(rec)
     text = normalize_summary(_lesson_text(rec, detector))
     generalizable = rec.failure_type in GENERALIZABLE_TYPES and (
-        rec.repeat_count >= MIN_REPEAT_FOR_GENERAL or len(rec.source_run_ids) >= MIN_REPEAT_FOR_GENERAL or rec.escaped_to_lock
+        rec.repeat_count >= min_repeat or len(rec.source_run_ids) >= min_repeat or rec.escaped_to_lock
     )
     dupes = [lid for key, lid in (existing_lesson_keys or {}).items() if key == mode_id]
     return Reflection(
@@ -164,11 +169,12 @@ def reflect(rec: FailureRecord, existing_lesson_keys: dict[str, str] | None = No
     )
 
 
-def reflect_all(failures: FailureStore, existing_lesson_keys: dict[str, str] | None = None, status: str | None = "NEW") -> list[Reflection]:
+def reflect_all(failures: FailureStore, existing_lesson_keys: dict[str, str] | None = None, status: str | None = "NEW",
+                min_repeat: int = MIN_REPEAT_FOR_GENERAL) -> list[Reflection]:
     """아직 회고하지 않은 실패를 모두 분석하고 기록에 붙인다."""
     out: list[Reflection] = []
     for rec in failures.list(status):
-        refl = reflect(rec, existing_lesson_keys)
+        refl = reflect(rec, existing_lesson_keys, min_repeat)
         rec.reflection = refl.as_dict()
         rec.status = "REFLECTED"
         failures.save(rec)

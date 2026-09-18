@@ -65,7 +65,7 @@ class ImproveService:
         known = self.lessons.by_failure_mode()
         reflections = []
         for rec in self.failures.list("NEW"):
-            refl = reflect(rec, known)
+            refl = reflect(rec, known, self.cfg.improve.min_repeat)
             if provider is not None and self.cfg.improve.reflect_llm:
                 refl = reflect_with_llm(provider, self.cfg.default_model, rec, refl)
             rec.reflection = refl.as_dict()
