@@ -6,13 +6,13 @@ dropped the other changes silently and answered with the set alone.
 """
 from __future__ import annotations
 
+from claim_agent import web
 from claim_agent.conversation_pipeline import run_pipeline
 from claim_agent.pipeline.claimtext import parse_claim_set, proposal_outside_targets
 from claim_agent.pipeline.engine import FEEDBACK_INSTRUCTION, Decision
 from claim_agent.provider.scripted import ScriptedProvider
 from claim_agent.store.report import render_chat_report
 from claim_agent.tui_support import resume_command  # noqa: F401  (web resume builds this command)
-from claim_agent import web
 from tests.test_existing_set_edit import BASELINE, EDITED_9, _conversation, _route, edit_roles, edit_script  # noqa: F401
 from tests.test_web import wait_for  # noqa: F401
 
@@ -36,7 +36,7 @@ def test_proposal_changes_outside_the_edit_are_listed():
     assert proposal_outside_targets(base, [9], unchanged_8 + "\n\n" + EDITED_9) == []      # only the target, same citation
 
 
-def test_feedback_box_answers_at_once_when_the_paste_changes_the_read_only_set(rt, request_indep, tmp_path, monkeypatch, edit_roles):
+def test_feedback_box_answers_at_once_when_the_paste_changes_the_read_only_set(rt, request_indep, tmp_path, monkeypatch, edit_roles):  # noqa: F811  (pytest fixture, not a redefinition)
     state = _edit_run(rt, request_indep, tmp_path)
     monkeypatch.setenv("GEMINI_API_KEY", "offline-web-secret")
     config = tmp_path / "config.json"
@@ -58,7 +58,7 @@ def test_feedback_box_answers_at_once_when_the_paste_changes_the_read_only_set(r
         workspace.close()
 
 
-def test_resumed_answer_leads_with_what_became_of_the_feedback(rt, request_indep, tmp_path, edit_roles):
+def test_resumed_answer_leads_with_what_became_of_the_feedback(rt, request_indep, tmp_path, edit_roles):  # noqa: F811  (pytest fixture, not a redefinition)
     def design_with_account(spec):
         env = R.dep_architect()(spec)
         env["report_markdown"] += "\n\n### 사용자 피드백 처리\n\n- 질문한 제9항 문안: 인과사슬이 닫혀 그대로 채택\n- 이탈 허용 조건: 원자료 근거가 없어 미반영\n\n## 다음 절\n"

@@ -22,7 +22,7 @@ import yaml
 
 from ..store.runstore import RunStore
 from ..store.telemetry import read_telemetry
-from .feedback import PASSY, build_feedback, is_gating_failure
+from .feedback import build_feedback, is_gating_failure
 from .rca import build_rca
 
 # 파이프라인 단계 순서. Mean Detection Stage와 "예상보다 늦게 잡혔는가" 판정의 좌표계다.

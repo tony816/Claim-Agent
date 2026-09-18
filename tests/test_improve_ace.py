@@ -9,14 +9,13 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 import yaml
 
 from claim_agent.improve.audit import AuditLog
 from claim_agent.improve.curate import EvalCandidate, EvalCandidateStore, curate, curate_lesson
-from claim_agent.improve.failures import Detector, FailureRecord, FailureStore, mine
+from claim_agent.improve.failures import FailureRecord, FailureStore, mine
 from claim_agent.improve.lessons import GATE_ACTIVE, GATE_CANDIDATE, GATE_FAILED_EVAL, LessonStore
 from claim_agent.improve.metrics import build_metrics, false_blocks, regression_rate
 from claim_agent.improve.reflect import failure_mode_id, reflect, tech_leak

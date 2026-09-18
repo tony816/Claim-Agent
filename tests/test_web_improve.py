@@ -7,8 +7,6 @@ from urllib.request import Request, urlopen
 
 from claim_agent import web
 from claim_agent.improve.audit import AuditLog
-from claim_agent.improve.curate import EvalCandidateStore
-from claim_agent.improve.failures import FailureStore
 from claim_agent.provider.scripted import ScriptedProvider
 
 from . import scripted_roles as R
