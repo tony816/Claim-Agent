@@ -73,13 +73,6 @@ def _live_provider(cfg: AppConfig, kind: str, events=None, api_key: str | None =
         from .provider.subscription import SubscriptionProvider
 
         return SubscriptionProvider(kind, getattr(cfg.provider, kind), events)
-    if kind == "anthropic":
-        from .provider.anthropic_provider import AnthropicProvider, make_anthropic_client
-
-        a = cfg.provider.anthropic
-        return AnthropicProvider(make_anthropic_client(a.api_key_env, api_key), events=events, thinking=a.thinking, fallbacks=a.fallbacks,
-                                 structured_outputs=a.structured_outputs, send_temperature=a.send_temperature,
-                                 retry_attempts=cfg.pipeline.retry.max_attempts, backoff_s=cfg.pipeline.retry.backoff_s)
     if kind != "gemini":
         raise ValueError(f"unknown provider.kind: {kind}")
     from .provider.files import FileStore

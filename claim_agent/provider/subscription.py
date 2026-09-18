@@ -15,7 +15,7 @@ import time
 import uuid
 from pathlib import Path
 
-from .base import CallResult, CallSpec, ImagePart, ProviderError, parse_json_text, request_summary
+from .base import CallResult, CallSpec, ImagePart, ProviderError, parse_json_text, request_summary, tool_definitions
 
 KINDS = ("claude_oauth", "codex_oauth")
 
@@ -160,7 +160,6 @@ class SubscriptionProvider:
             packet += "\n\nReturn one JSON object matching this schema, without markdown:\n" + json.dumps(spec.json_schema, ensure_ascii=False)
         functions = {fn.__name__: fn for fn in (spec.tools or [])}
         if functions:
-            from .anthropic_provider import tool_definitions
             packet += ('\n\nTo use a permitted tool, return ONLY {"claim_agent_tool": {"name": "...", "arguments": {...}}}. '
                        'Otherwise return your final answer. No other tools are available. Definitions:\n'
                        + json.dumps(tool_definitions(spec.tools), ensure_ascii=False))

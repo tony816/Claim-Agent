@@ -13,7 +13,6 @@ from .roles.registry import ROLE_NAMES
 ROLE_LABELS = ["독립항 설계", "의미 초안 작성", "용어·스타일 조정", "성공조건 검수", "통사·범위 검수", "OA 전략 검수", "블라인드 복원", "도면·기준 비교", "종속항 전략 설계"]
 PROVIDERS = {
     "gemini": {"label": "Gemini · API 키", "models": []},
-    "anthropic": {"label": "Claude · API 키", "models": []},
     "claude_oauth": {"label": "Claude · 구독 OAuth", "models": ["default", "sonnet", "opus", "haiku"],
                      "install_url": "https://code.claude.com/docs/en/setup"},
     "codex_oauth": {"label": "Codex · 구독 OAuth", "models": ["default"],
@@ -39,6 +38,35 @@ def model_name(value) -> str:
     if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}", value):
         raise ValueError("모델 ID를 확인하세요. 공백 없이 모델 ID 또는 default를 입력하세요.")
     return value
+
+
+def merge_settings_file(root: Path, overrides: dict) -> Path:
+    """Merge dotted overrides into .tui/model-settings.json, the file every runtime reads while loading config."""
+    path = root / ".tui" / "model-settings.json"
+    stored = {}
+    if path.exists():
+        try:
+            stored = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            stored = {}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(".tmp")
+    temp.write_text(json.dumps({**stored, **overrides}, ensure_ascii=False), encoding="utf-8")
+    temp.replace(path)
+    return path
+
+
+def provider_overrides(cfg: AppConfig, data: dict) -> dict:
+    """The chat header switch: provider (and optionally its default model) only, role rows untouched."""
+    kind = data.get("provider")
+    if not isinstance(kind, str) or kind not in PROVIDERS:
+        raise ValueError("제공자를 선택하세요.")
+    result = {"provider.kind": kind}
+    model = data.get("model")
+    if model is not None:
+        result["model.default" if kind == "gemini" else f"provider.{kind}.model"] = model_name(model)
+    AppConfig.model_validate(apply_overrides(cfg.model_dump(), result))
+    return result
 
 
 def settings_overrides(cfg: AppConfig, data: dict) -> dict:
@@ -71,9 +99,8 @@ def settings_overrides(cfg: AppConfig, data: dict) -> dict:
 def connection(cfg, kind):
     if kind in KINDS:
         return connection_status(kind, getattr(cfg.provider, kind).executable)
-    key = cfg.model.api_key_env if kind == "gemini" else cfg.provider.anthropic.api_key_env
-    present = bool(os.environ.get(key) or (kind == "gemini" and os.environ.get("GOOGLE_API_KEY"))
-                   or (kind == "anthropic" and os.environ.get("ANTHROPIC_AUTH_TOKEN")))
+    key = cfg.model.api_key_env
+    present = bool(os.environ.get(key) or os.environ.get("GOOGLE_API_KEY"))
     return {"installed": True, "connected": present, "message": "API 키 설정됨" if present else f".env에 {key} 설정 필요"}
 
 

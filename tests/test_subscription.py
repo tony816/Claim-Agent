@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from claim_agent.config import AppConfig, SubscriptionConfig, load_config
-from claim_agent.model_settings import settings_overrides
+from claim_agent.model_settings import PROVIDERS, provider_overrides, settings_overrides
 from claim_agent.provider import subscription as sub
 from claim_agent.provider.base import CallResult, CallSpec, ImagePart, ProviderError
 from claim_agent.runtime import live_provider
@@ -82,6 +82,8 @@ def test_tool_roundtrip_only_executes_given_callable(monkeypatch):
         seen.append(query)
         return {"result": "허용된 정확 검색 결과"}
 
+    definitions = sub.tool_definitions([search_style_corpus])
+    assert definitions[0]["name"] == "search_style_corpus" and definitions[0]["input_schema"]["required"] == ["query"]
     replies = iter(['{"claim_agent_tool":{"name":"search_style_corpus","arguments":{"query":"조임나사"}}}', "SEARCH_DONE"])
     provider = sub.SubscriptionProvider("claude_oauth", SubscriptionConfig())
 
@@ -169,6 +171,45 @@ def test_settings_reject_invalid_inputs_and_running_save(tmp_path):
     workspace.jobs["running"] = {"done": False}
     with pytest.raises(ValueError, match="실행 중"):
         workspace.save_model_settings(settings_payload(workspace))
+
+
+def test_header_switch_changes_provider_mid_chat_and_keeps_role_rows(tmp_path, monkeypatch):
+    monkeypatch.setattr("claim_agent.model_settings.connection_status", lambda *a, **k: {"installed": True, "connected": False, "message": "구독 계정 로그인이 필요합니다."})
+    workspace = Workspace(tmp_path)
+    payload = settings_payload(workspace)
+    payload["roles"]["claim-drafter"].update(provider="claude_oauth", model="opus")
+    workspace.save_model_settings(payload)
+
+    snapshot = workspace.switch_provider({"provider": "gemini"})
+    assert snapshot["provider"] == "gemini" and set(snapshot["connection"]) >= {"connected", "message"}
+    cfg = load_config(project_root=tmp_path)
+    assert cfg.provider.kind == "gemini" and cfg.model_for("claim-drafter") == "opus"        # 역할별 지정은 그대로
+    assert cfg.provider_for("claim-drafter") == "claude_oauth"
+
+    snapshot = workspace.switch_provider({"provider": "claude_oauth", "model": "haiku"})
+    assert snapshot["connection"]["connected"] is False and "로그인" in snapshot["connection"]["message"]
+    cfg = load_config(project_root=tmp_path)
+    assert cfg.provider.kind == "claude_oauth" and cfg.default_model == "haiku" and cfg.role("claim-drafter").model == "opus"
+
+    with pytest.raises(ValueError, match="모델 ID"):
+        workspace.switch_provider({"provider": "claude_oauth", "model": "opus; echo token"})
+    workspace.jobs["running"] = {"done": False}
+    with pytest.raises(ValueError, match="실행 중"):
+        workspace.switch_provider({"provider": "gemini"})
+    assert load_config(project_root=tmp_path).provider.kind == "claude_oauth"
+
+
+def test_claude_api_key_provider_is_gone_and_old_configs_move_to_the_cli(tmp_path):
+    assert "anthropic" not in PROVIDERS and set(PROVIDERS) == {"gemini", "claude_oauth", "codex_oauth"}
+    workspace = Workspace(tmp_path)
+    with pytest.raises(ValueError, match="제공자"):
+        provider_overrides(workspace.cfg, {"provider": "anthropic"})
+    (tmp_path / "claim-agent.yaml").write_text(
+        "provider:\n  kind: anthropic\n  anthropic:\n    model: claude-opus-5\n    api_key_env: ANTHROPIC_API_KEY\n"
+        "roles:\n  claim-drafter: {provider: anthropic}\n", encoding="utf-8")
+    cfg = load_config(project_root=tmp_path)
+    assert cfg.provider.kind == "claude_oauth" and cfg.provider_for("claim-drafter") == "claude_oauth"
+    assert not hasattr(cfg.provider, "anthropic") and cfg.api_key_env == "GEMINI_API_KEY"
 
 
 def test_cli_failure_does_not_leak_raw_error(fake_cli, monkeypatch):

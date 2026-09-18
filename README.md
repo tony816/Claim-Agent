@@ -25,7 +25,7 @@
 
 **처음 쓰는 분은 [`사용법.md`](사용법.md)부터 보면 된다.** 설치·실행·결과 읽기·멈췄을 때 대처를 복사해 쓸 수 있는 명령으로 정리했다. 웹 채팅은 지침·USER_LOCK·소스 파일을 미리 설정하는 **프로젝트** 폴더를 지원하며, 프로젝트에 속한 여러 대화가 매 요청에 그 설정을 자동으로 사용한다.
 
-Claude Code 없이 같은 절차를 실행하는 독립 프로그램은 [`docs/python_runtime.md`](docs/python_runtime.md)를 따른다. `.claude/agents/*.md`를 그대로 system instruction으로 쓰고, 게이트 전제조건·record_id·revision 무효화·블라인드 격리·LOCK 조립·예산 가드·근거표 검사를 Python이 결정론적으로 수행하며, Gemini API(기본 `gemini-3.8-flash`, `claim-agent.yaml`에서 변경) 또는 Anthropic API(`provider.kind: anthropic`)로 각 역할을 호출한다. 원자료는 MD/TXT 외에 PDF·DOCX·HWPX·HWP를 받고, 도면은 한 번 정규화해 Files API로 전달한다.
+Claude Code 없이 같은 절차를 실행하는 독립 프로그램은 [`docs/python_runtime.md`](docs/python_runtime.md)를 따른다. `.claude/agents/*.md`를 그대로 system instruction으로 쓰고, 게이트 전제조건·record_id·revision 무효화·블라인드 격리·LOCK 조립·예산 가드·근거표 검사를 Python이 결정론적으로 수행하며, Gemini API(기본 `gemini-3.8-flash`, `claim-agent.yaml`에서 변경) 또는 Claude·Codex 공식 CLI 구독 로그인(`provider.kind: claude_oauth | codex_oauth`)으로 각 역할을 호출한다. 원자료는 MD/TXT 외에 PDF·DOCX·HWPX·HWP를 받고, 도면은 한 번 정규화해 Files API로 전달한다.
 
 ```bash
 pip install -e . && claim-agent doctor --contracts

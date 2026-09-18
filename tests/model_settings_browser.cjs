@@ -34,8 +34,21 @@ const fs=require('fs'),path=require('path'),assert=require('assert/strict');
     await page.locator('#models-apply-all').click();
     assert.equal(await page.getByLabel('의미 초안 작성 연결',{exact:true}).inputValue(),'');
     assert.equal(await page.getByLabel('통사·범위 검수 모델',{exact:true}).inputValue(),'');
+    await page.locator('#model-settings-close').click();
+    // 대화 화면 상단의 전환: 설정 창을 열지 않고 바로 바꾸고, 새로고침 뒤에도 남는다.
+    await page.setViewportSize({width:1440,height:1080});
+    await page.getByLabel('연결 방식',{exact:true}).selectOption('claude_oauth');
+    await page.waitForFunction(()=>document.getElementById('provider-model').value==='sonnet');
+    await page.getByLabel('사용 모델',{exact:true}).selectOption('haiku');
+    await page.waitForFunction(()=>document.getElementById('provider-note').textContent.includes('다음 요청부터'));
+    await page.reload();
+    await page.waitForFunction(()=>document.getElementById('provider-kind').value==='claude_oauth'&&document.getElementById('provider-model').value==='haiku');
+    await page.locator('#model-settings-open').click();
+    await page.locator('.role-model-row').first().waitFor();
+    assert.equal(await page.getByLabel('기본 연결 방식',{exact:true}).inputValue(),'claude_oauth');
+    assert.equal(await page.locator('#provider-kind option[value="anthropic"]').count(),0,'Claude API key provider is gone');
     assert.deepEqual(errors,[]);
-    console.log('Model settings browser checks passed: persistence, mixed roles, custom ID, bulk reset, mobile layout.');
+    console.log('Model settings browser checks passed: persistence, mixed roles, custom ID, bulk reset, mobile layout, header provider switch.');
   }finally{
     await page.request.post(info.origin+'/api/shutdown',{headers:{'X-Claim-Request':'1'},data:{}});
     await browser.close();

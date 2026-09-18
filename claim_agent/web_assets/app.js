@@ -69,9 +69,44 @@ $("model-settings-form").onsubmit=async event=>{
   try{
     const roles=Object.fromEntries(modelSettings.roles.map(r=>[r.id,{provider:r.provider,model:r.model,thinking_level:r.thinking_level}]));
     modelSettings=await api("/api/model-settings",{provider:modelSettings.provider,defaults:modelSettings.defaults,roles});renderModelSettings();
+    providerInfo=modelSettings;renderProviderSwitch();
     $("model-settings-saved").textContent="저장됨 · 다음 요청부터 적용됩니다";await list();
   }catch(e){settingsError(e.message);}finally{$("model-settings-save").disabled=!!modelSettings.busy;}
 };
+// 헤더의 연결 방식·모델 선택: 대화 도중에도 바꾸며, 서브에이전트별 개별 지정은 그대로 둔다.
+let providerInfo=null;
+function fillSelect(select,options,value){
+  select.replaceChildren();
+  for(const [id,title] of options){const option=el("option","",title);option.value=id;select.append(option);}
+  select.value=value;
+}
+function providerLock(){    // 목록을 다시 만들지 않는 잠금 갱신: 열려 있는 선택 상자를 건드리지 않는다.
+  const kinds=$("provider-kind"),models=$("provider-model");
+  const running=!!state.data?.running||!!providerInfo?.busy,fixed=providerInfo?providerInfo.roles.filter(r=>r.provider).length:0;
+  kinds.disabled=models.disabled=running||!providerInfo;
+  const note=!providerInfo?"":running?"응답이 끝난 뒤 바꿀 수 있습니다":fixed?`다음 요청부터 적용 · 서브에이전트 ${fixed}개는 개별 지정`:"다음 요청부터 적용됩니다";
+  $("provider-note").textContent=note;kinds.title=models.title=note;
+}
+function renderProviderSwitch(){
+  if(providerInfo){
+    fillSelect($("provider-kind"),Object.entries(providerInfo.providers).map(([id,p])=>[id,p.label]),providerInfo.provider);
+    const current=providerInfo.defaults[providerInfo.provider],names=providerInfo.providers[providerInfo.provider].models.slice();
+    if(!names.includes(current))names.unshift(current);
+    fillSelect($("provider-model"),names.map(m=>[m,m==="default"?"계정 기본 모델":m]),current);
+  }
+  providerLock();
+}
+async function loadProviderSwitch(){providerInfo=await api("/api/model-settings");renderProviderSwitch();}
+async function switchProvider(body){
+  const previous=providerInfo;
+  try{
+    providerInfo=await api("/api/provider",body);renderProviderSwitch();
+    const status=providerInfo.connection;
+    error(status&&!status.connected?"연결 방식을 바꿨지만 아직 사용할 수 없습니다. "+status.message:"");
+  }catch(e){providerInfo=previous;renderProviderSwitch();error(e.message);}
+}
+$("provider-kind").onchange=()=>switchProvider({provider:$("provider-kind").value});
+$("provider-model").onchange=()=>switchProvider({provider:providerInfo.provider,model:$("provider-model").value});
 const routeNames = {CHAT:"일반 대화",META:"설정·진행 확인",AUTHORING_DRAFT:"청구항 작성·수정",FINALIZATION:"출원용 최종 검증",REVIEW_ONLY:"특허 의견·제한 검수"};
 const el = (tag, cls, text) => {const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
 function error(message){$("error").textContent=message;$("error").hidden=!message;}
@@ -97,7 +132,7 @@ function markdown(node,text){
   }
 }
 function resize(){const p=$("prompt");p.style.height="auto";p.style.height=Math.min(p.scrollHeight,180)+"px";}
-function controls(){const running=!!state.data?.running;$("send").hidden=running;$("stop").hidden=!running;$("send").disabled=state.busy||state.uploading>0||!$("prompt").value.trim()||!claimTarget().ok;$("attach").disabled=state.uploading>0;$("mode").disabled=running||state.busy;$("options").hidden=$("mode").value!=="AUTHORING_DRAFT";$("prompt").placeholder=$("mode").value==="CHAT"?"무엇이든 물어보세요":state.data?.run_id?"수정하고 싶은 내용을 알려주세요":"발명을 설명하거나 자료를 첨부해 주세요";}
+function controls(){const running=!!state.data?.running;providerLock();$("send").hidden=running;$("stop").hidden=!running;$("send").disabled=state.busy||state.uploading>0||!$("prompt").value.trim()||!claimTarget().ok;$("attach").disabled=state.uploading>0;$("mode").disabled=running||state.busy;$("options").hidden=$("mode").value!=="AUTHORING_DRAFT";$("prompt").placeholder=$("mode").value==="CHAT"?"무엇이든 물어보세요":state.data?.run_id?"수정하고 싶은 내용을 알려주세요":"발명을 설명하거나 자료를 첨부해 주세요";}
 // ---- 작성 대상: 독립항만 / 특정 항 1개 / 종속항 범위. 서버의 resolve_claim_target와 같은 정규형(2~4,6)을 미리 보여 준다.
 const target={segments:[{from:2,to:8}]};
 function formatTarget(numbers){const a=[...numbers].sort((x,y)=>x-y);if(!a.length)return "";const parts=[];let start=a[0],prev=a[0];for(const n of a.slice(1).concat([null])){if(n!==null&&n===prev+1){prev=n;continue;}parts.push(start===prev?String(start):start+"~"+prev);if(n!==null)start=prev=n;}return parts.join(",");}
@@ -171,7 +206,8 @@ async function fetchSession(id, incremental){
   return data;
 }
 async function list(){
-  const data=await api("/api/sessions");$("model").textContent=data.model;
+  const data=await api("/api/sessions");
+  if(!providerInfo||providerInfo.defaults[providerInfo.provider]!==data.model)await loadProviderSwitch();
   const names=new Map(data.projects.map(p=>[p.id,p.name]));
   if(state.project&&!names.has(state.project))state.project=null;
   const projects=$("projects");projects.replaceChildren();
@@ -184,7 +220,7 @@ async function list(){
   $("new-chat").textContent=state.project&&names.has(state.project)?"＋ 새 대화 · "+names.get(state.project):"＋ 새 대화";
   return data.sessions;
 }
-function showChat(){state.view="chat";$("project-panel").hidden=true;$("conversation").hidden=false;document.querySelector("main footer").hidden=false;}
+function showChat(){state.view="chat";$("project-panel").hidden=true;$("improve-panel").hidden=true;$("conversation").hidden=false;document.querySelector("main footer").hidden=false;}
 async function open(id){
   if(state.busy||state.uploading)return;
   if(state.id)drafts.set(state.id,{text:$("prompt").value,files:state.pending,mode:$("mode").value});
@@ -269,7 +305,7 @@ async function openProject(id){
   if(state.busy||state.uploading)return;
   const p=await api("/api/project?id="+encodeURIComponent(id));
   state.project=id;state.view="project";localStorage.setItem("claim-project",id);
-  $("conversation").hidden=true;document.querySelector("main footer").hidden=true;$("project-panel").hidden=false;$("project-saved").textContent="";
+  $("conversation").hidden=true;document.querySelector("main footer").hidden=true;$("improve-panel").hidden=true;$("project-panel").hidden=false;$("project-saved").textContent="";
   document.body.classList.remove("sidebar-open");error("");renderProject(p);await list();
 }
 async function createProject(){if(state.busy||state.uploading)return;const p=await api("/api/project/new",{name:"새 프로젝트"});await openProject(p.id);$("project-name").select();}
@@ -335,4 +371,171 @@ $("resume-form").onsubmit=async event=>{
   try{await api("/api/resume",{id:state.id,kind:state.pending.length&&kind!=="none"&&kind!=="accept_unverified"?"restart":kind,text,files:state.pending.map(f=>f.id),scope:$("resume-scope").hidden?"":$("resume-scope").value});
     $("resume-text").value="";state.pending=[];pending();await refresh();restartPoll();$("conversation").scrollTop=$("conversation").scrollHeight;}
   catch(e){error(e.message);}finally{state.busy=false;controls();}
+};
+
+// ---- 개선 / Approval Inbox (ACE): 자동 제안은 전부 승인 대기. 승인해도 회귀 평가 전에는 주입되지 않는다.
+const GATE_CLASS={PENDING:"gate-pending",CANDIDATE_APPROVED:"gate-wait",ACTIVE_APPROVED:"gate-active",APPROVED_BUT_FAILED_EVAL:"gate-failed",HELD:"gate-held"};
+const METRIC_ROWS=[
+  ["escaped_to_lock_rate","Escaped-to-Lock Rate","LOCK까지 간 run 중 뒤에서 오류가 확인된 비율 — 최상위 품질 지표",true],
+  ["failure_detection_rate","Failure Detection Rate","파이프라인이 스스로 잡은 실패 비율",false],
+  ["first_correct_detector_rate","First Correct Detector","최초 탐지 지점이 기대 지점과 일치한 비율",false],
+  ["false_block_rate","False Block Rate","문언 변경 없이 뒤집힌 비-PASS 판정 비율",false],
+  ["regression_rate","Regression Rate","직전 eval에서 PASS였다가 최신에서 FAIL이 된 케이스",false],
+  ["lesson_hit_rate","Lesson Hit Rate","활성 교훈 중 같은 failure mode가 재발하지 않은 비율",false],
+];
+function pct(v){return v===null||v===undefined?"—":Math.round(v*100)+"%";}
+function renderImproveMetrics(m){
+  const box=$("improve-metrics");box.replaceChildren();
+  for(const [key,label,note,top] of METRIC_ROWS){
+    const card=el("div","metric-card"+(top?" metric-top":""));
+    card.append(el("span","metric-label",label),el("strong","metric-value",pct(m[key])),el("span","metric-note",note));
+    card.title=note;box.append(card);
+  }
+  const stage=el("div","metric-card");
+  stage.append(el("span","metric-label","Mean Detection Stage"),el("strong","metric-value",m.mean_detection_stage===null||m.mean_detection_stage===undefined?"—":String(m.mean_detection_stage)),
+    el("span","metric-note",(m.mean_detection_stage_label||"-")+" · 작을수록 이른 단계에서 잡힌다"));
+  box.append(stage);
+}
+function lessonCard(card){
+  const node=el("div","improve-card");
+  const head=el("div","improve-card-head");
+  head.append(el("strong","",card.id),el("span","gate-chip "+(GATE_CLASS[card.gate_status]||""),card.gate_label));
+  if(card.llm_drafted)head.append(el("span","tag","LLM 초안"));
+  if(card.source)head.append(el("span","tag",card.source));
+  node.append(head);
+  const text=el("textarea","improve-text");text.rows=3;text.value=card.text_ko;text.setAttribute("aria-label",card.id+" 교훈 문구");node.append(text);
+  const roles=el("input","improve-roles");roles.value=(card.target_roles||[]).join(",");roles.placeholder="대상 역할 (비우면 전체 역할)";roles.setAttribute("aria-label",card.id+" 대상 역할");node.append(roles);
+  const meta=el("div","improve-meta");
+  meta.append(el("span","","대상 역할 "+card.impact.role_count+"개"),el("span","","failure mode "+(card.failure_mode_id||"-")),
+              el("span","","근거 run "+((card.evidence||[]).slice(0,4).join(", ")||"-")));
+  if((card.similar||[]).length)meta.append(el("span","warn","유사·중복 교훈: "+card.similar.join(", ")));
+  meta.append(el("span","","helpful "+card.helpful+" / harmful "+card.harmful));
+  node.append(meta);
+  const refl=card.reflection||{};
+  if(refl.what_failed||refl.why_missed){
+    const d=el("details","improve-reflect");d.append(el("summary","","Reflector 요약"));
+    if(refl.what_failed)d.append(el("p","","무엇이 실패했나: "+refl.what_failed));
+    if(refl.why_missed)d.append(el("p","","왜 놓쳤나: "+refl.why_missed));
+    if(refl.first_detector)d.append(el("p","","기대 최초 탐지: "+[refl.first_detector.stage,refl.first_detector.role,refl.first_detector.gate].filter(Boolean).join(" / ")));
+    if(card.rationale)d.append(el("p","","근거: "+card.rationale));
+    node.append(d);
+  }
+  if(card.eval_record&&card.eval_record.verdict){
+    const d=el("details","improve-reflect");d.append(el("summary","","회귀 평가 결과 · "+card.eval_record.verdict));
+    for(const c of card.eval_record.criteria||[])d.append(el("p","",c.name+": baseline "+c.baseline+" → candidate "+c.candidate+" — "+c.verdict+(c.note?" ("+c.note+")":"")));
+    if(card.eval_record.note)d.append(el("p","warn",card.eval_record.note));
+    node.append(d);
+  }
+  const actions=el("div","improve-actions");
+  const decide=async(action)=>{
+    const body={lesson_id:card.id,action};
+    if(action==="edit_approve"){body.text_ko=text.value.trim();body.target_roles=roles.value.split(",").map(s=>s.trim()).filter(Boolean);}
+    if(action==="reject"||action==="hold"){const note=prompt(action==="reject"?"거절 사유 (선택)":"보류 사유 (선택)","");if(note===null)return;body.note=note||null;}
+    try{await api("/api/improve/decide",body);await loadImprove();}catch(e){error(e.message);}
+  };
+  const approve=el("button","primary","승인");approve.type="button";approve.onclick=()=>decide("approve");
+  const edit=el("button","","수정 후 승인");edit.type="button";edit.onclick=()=>decide("edit_approve");
+  const hold=el("button","","보류");hold.type="button";hold.onclick=()=>decide("hold");
+  const reject=el("button","danger","거절");reject.type="button";reject.onclick=()=>decide("reject");
+  if(card.gate_status==="PENDING"||card.gate_status==="HELD"||card.gate_status==="APPROVED_BUT_FAILED_EVAL")actions.append(approve,edit,hold,reject);
+  else actions.append(reject);
+  if(card.gate_status==="CANDIDATE_APPROVED"||card.gate_status==="APPROVED_BUT_FAILED_EVAL"){
+    const job=((state.improve||{}).jobs||{})[card.id];
+    const regress=el("button","primary",job&&!job.done?"회귀 평가 실행 중…":"회귀 평가 실행");
+    regress.type="button";regress.disabled=!!(job&&!job.done);
+    regress.onclick=async()=>{try{await api("/api/improve/regress",{lesson_id:card.id});await loadImprove();}catch(e){error(e.message);}};
+    actions.append(regress);
+    if(job&&job.done&&job.error)actions.append(el("span","warn",job.error));
+    if(job&&job.done&&job.verdict)actions.append(el("span","","판정 "+job.verdict));
+  }
+  node.append(actions);
+  if(card.gate_status==="CANDIDATE_APPROVED")node.append(el("p","improve-hint","사람이 승인했지만 아직 주입되지 않습니다. 회귀 평가를 통과해야 활성화됩니다."));
+  if(card.gate_status==="APPROVED_BUT_FAILED_EVAL")node.append(el("p","improve-hint warn",
+    (card.eval_record||{}).verdict==="UNVERIFIED"
+      ?"회귀 평가가 판정하지 못했습니다(대개 목표 적대 케이스가 없거나 리플레이 모드). 케이스를 승인한 뒤 live 모드로 다시 실행하세요. 현재 주입되지 않습니다."
+      :"회귀 평가에서 실패했습니다. 문구를 고쳐 다시 승인하거나 거절하세요. 현재 주입되지 않습니다."));
+  return node;
+}
+function caseCard(card){
+  const node=el("div","improve-card");
+  const head=el("div","improve-card-head");
+  head.append(el("strong","",card.case_id),el("span","gate-chip "+(card.status==="approved"?"gate-active":card.status==="rejected"?"gate-failed":"gate-pending"),
+    card.status==="approved"?"regression set에 편입됨":card.status==="rejected"?"거절됨":"승인 대기"));
+  node.append(head);
+  const meta=el("div","improve-meta");
+  meta.append(el("span","","seed 케이스 "+card.seed_case),el("span","","변형 "+card.mutation_type),
+              el("span","","기대 최초 탐지 "+card.expected_first_detector_label),
+              el("span","","통과하면 안 되는 게이트 "+((card.must_not_pass_gates||[]).join(", ")||"-")),
+              el("span","","expected_return_to "+(card.expected_return_to||"-")),
+              el("span","","escaped_to_lock_must_be "+(card.escaped_to_lock_must_be?"true":"false")));
+  node.append(meta);
+  node.append(el("p","improve-defect","주입한 결함: "+card.injected_defect));
+  if(card.failure){
+    const d=el("details","improve-reflect");d.append(el("summary","","근거 실패 "+card.failure.failure_id+" ("+card.failure.failure_type+")"));
+    d.append(el("p","",card.failure.root_cause_summary),el("p","","근거 run: "+(card.failure.source_run_ids||[]).join(", ")));
+    node.append(d);
+  }
+  if(card.status==="pending"){
+    const actions=el("div","improve-actions");
+    const decide=async(action,patch)=>{try{await api("/api/improve/decide",{case_id:card.case_id,action,patch:patch||null});await loadImprove();}catch(e){error(e.message);}};
+    const approve=el("button","primary","Regression Set에 승인");approve.type="button";
+    approve.onclick=()=>{if(confirm(card.case_id+" 케이스를 eval/cases/로 편입할까요? 이후 모든 회귀 평가가 이 케이스를 함께 돌립니다."))decide("approve");};
+    const edit=el("button","","수정 후 승인");edit.type="button";
+    edit.onclick=()=>{const gates=prompt("통과하면 안 되는 게이트 (쉼표)",(card.must_not_pass_gates||[]).join(","));if(gates===null)return;
+      const ret=prompt("expected_return_to",card.expected_return_to||"");if(ret===null)return;
+      decide("edit_approve",{must_not_pass_gates:gates.split(",").map(s=>s.trim()).filter(Boolean),expected_return_to:ret||null});};
+    const reject=el("button","danger","거절");reject.type="button";
+    reject.onclick=()=>{const note=prompt("거절 사유 (선택)","");if(note===null)return;decide("reject",null);};
+    actions.append(approve,edit,reject);node.append(actions);
+  }
+  return node;
+}
+function renderImprove(data){
+  state.improve=data;
+  renderImproveMetrics(data.metrics||{});
+  const c=data.counts||{};
+  $("improve-count-lessons").textContent=String((data.lessons||[]).length);
+  $("improve-count-cases").textContent=String((data.cases||[]).filter(x=>x.status==="pending").length);
+  const badge=$("improve-badge"),waiting=(c.pending_lessons||0)+(c.pending_cases||0);
+  badge.textContent=String(waiting);badge.hidden=!waiting;
+  const lessons=$("improve-lessons");lessons.replaceChildren();
+  for(const card of data.lessons||[])lessons.append(lessonCard(card));
+  if(!(data.lessons||[]).length)lessons.append(el("p","improve-empty","승인 대기 교훈이 없습니다. ‘실패 수집 · 회고 실행’을 눌러 최근 실행에서 실패 후보를 모아 보세요."));
+  if((data.active_lessons||[]).length){
+    lessons.append(el("h3","improve-subhead","활성 교훈 (후속 run에 주입됨)"));
+    for(const card of data.active_lessons)lessons.append(lessonCard(card));
+  }
+  const cases=$("improve-cases");cases.replaceChildren();
+  for(const card of data.cases||[])cases.append(caseCard(card));
+  if(!(data.cases||[]).length)cases.append(el("p","improve-empty","적대 평가 케이스 초안이 없습니다."));
+  const audit=$("improve-audit");audit.replaceChildren();
+  for(const row of [...(data.audit||[])].reverse()){
+    const line=el("div","audit-row");
+    line.append(el("span","audit-ts",row.ts),el("span","audit-action",row.action),el("span","audit-actor",row.actor||""),
+                el("span","",[row.lesson_id,row.case_id,row.failure_id,row.verdict].filter(Boolean).join(" · ")));
+    audit.append(line);
+  }
+  if(!(data.audit||[]).length)audit.append(el("p","improve-empty","기록된 승인·거절 이력이 없습니다."));
+}
+async function loadImprove(){const data=await api("/api/improve");renderImprove(data);return data;}
+async function openImprove(){
+  if(state.busy||state.uploading)return;
+  state.view="improve";
+  $("conversation").hidden=true;document.querySelector("main footer").hidden=true;$("project-panel").hidden=true;$("improve-panel").hidden=false;
+  document.body.classList.remove("sidebar-open");error("");
+  try{await loadImprove();}catch(e){error(e.message);}
+}
+$("improve-open").onclick=()=>openImprove();
+$("improve-refresh").onclick=()=>loadImprove().catch(e=>error(e.message));
+$("improve-mine").onclick=async()=>{
+  const button=$("improve-mine");button.disabled=true;button.textContent="분석 중…";
+  try{const out=await api("/api/improve/mine",{});
+    await loadImprove();error("");
+    if(!out.lessons.length&&!out.cases.length)error("새로 제안할 항목이 없습니다. 실패 기록 "+out.created.length+"건 신규, "+out.reinforced.length+"건 근거 보강.");
+  }catch(e){error(e.message);}
+  finally{button.disabled=false;button.textContent="실패 수집 · 회고 실행";}
+};
+for(const tab of document.querySelectorAll(".improve-tab"))tab.onclick=()=>{
+  for(const other of document.querySelectorAll(".improve-tab"))other.classList.toggle("is-on",other===tab);
+  for(const name of ["lessons","cases","audit"])$("improve-"+name).hidden=name!==tab.dataset.tab;
 };

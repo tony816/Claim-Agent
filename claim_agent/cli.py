@@ -424,6 +424,90 @@ def cmd_lessons(args) -> int:
     return 0
 
 
+def cmd_improve(args) -> int:
+    """ACE 개선 루프: 실패 수집 → 회고 → 큐레이션 → 승인함 → regression 게이트 → 지표."""
+    from .improve.service import ImproveService
+
+    svc = ImproveService(Path(args.project_root).resolve(), Path(args.config) if args.config else None)
+
+    if args.sub == "mine":
+        provider = _provider(_rt(args), args) if getattr(args, "llm", False) else None
+        if provider is not None:
+            svc.cfg.improve.reflect_llm = True
+        out = svc.mine_and_curate(runs=[args.run] if args.run else None, since=args.since, provider=provider)
+        path = svc.improve_dir / f"mine-{time.strftime('%Y%m%d-%H%M%S')}.md"
+        path.write_text(out["report"], encoding="utf-8")
+        print(f"실패 기록: 신규 {len(out['created'])}건 / 근거 보강 {len(out['reinforced'])}건")
+        print(f"교훈 초안 {len(out['lessons'])}건, 적대 케이스 초안 {len(out['cases'])}건 — 모두 pending")
+        for l in out["lessons"]:
+            print(f"  {l.id} ({', '.join(l.target_roles) or '전체'}): {l.text_ko[:90]}")
+        for c in out["cases"]:
+            print(f"  {c.case_id} (seed {c.seed_case}, {c.mutation_type})")
+        print(f"written: {path}\n승인은 `claim-agent improve inbox` 또는 웹의 ‘개선 / Approval Inbox’에서 한다.")
+        return 0
+
+    if args.sub == "inbox":
+        data = svc.inbox()
+        c = data["counts"]
+        print(f"승인 대기 교훈 {c['pending_lessons']} / eval 대기 {c['awaiting_eval']} / eval 실패 {c['failed_eval']} / 활성 {c['active_lessons']}")
+        print(f"승인 대기 적대 케이스 {c['pending_cases']} / 열린 실패 기록 {c['open_failures']}")
+        print("")
+        for card in data["lessons"]:
+            print(f"[{card['id']}] {card['gate_label']}  대상: {', '.join(card['target_roles']) or '전체 역할'}")
+            print(f"  {card['text_ko'][:160]}")
+            print(f"  failure mode `{card['failure_mode_id'] or '-'}` / 근거 {', '.join(card['evidence'][:4]) or '-'}"
+                  + (f" / 유사 {', '.join(card['similar'])}" if card["similar"] else ""))
+        for card in data["cases"]:
+            if card["status"] != "pending":
+                continue
+            print(f"[{card['case_id']}] seed {card['seed_case']} / {card['mutation_type']} → 기대 탐지 {card['expected_first_detector_label']}")
+        return 0
+
+    if args.sub in ("approve", "reject", "edit-approve", "hold"):
+        action = {"approve": "approve", "reject": "reject", "edit-approve": "edit_approve", "hold": "hold"}[args.sub]
+        if args.case:
+            patch = None
+            if action == "edit_approve":
+                patch = {k: v for k, v in (("mutation_type", args.mutation), ("injected_defect", args.defect),
+                                           ("expected_return_to", args.return_to)) if v}
+                if args.gates:
+                    patch["must_not_pass_gates"] = args.gates.split(",")
+            card = svc.decide_case(args.case, "approve" if action == "hold" else action, by=args.by, note=args.note, patch=patch)
+            print(f"{card['case_id']}: {card['status']}")
+            if card["status"] == "approved":
+                print("eval/cases/로 편입되었다. 이후 `claim-agent eval run --all`이 이 케이스를 함께 돌린다.")
+            return 0
+        card = svc.decide_lesson(args.id, action, by=args.by, note=args.note,
+                                 text_ko=args.text, target_roles=args.roles.split(",") if args.roles else None)
+        print(f"{card['id']}: {card['gate_label']}")
+        if card["gate_status"] == "CANDIDATE_APPROVED":
+            print(f"아직 주입되지 않는다. `claim-agent improve regress {card['id']}`로 회귀 평가를 통과해야 활성화된다.")
+        return 0
+
+    if args.sub == "regress":
+        out = svc.regress(args.id, mode=args.mode, by=args.by)
+        result = out["result"]
+        print(result.render_md())
+        print(f"written: {out['report_path']}")
+        print(f"{out['lesson']['id']}: {out['lesson']['gate_label']}")
+        return 0 if result.verdict == "PASS" else 1
+
+    if args.sub == "metrics":
+        m = svc.metrics(update_scores=args.update_scores)
+        out = Path(args.out) if args.out else svc.improve_dir / f"metrics-{time.strftime('%Y%m%d')}.md"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(m.render_md(), encoding="utf-8")
+        print(m.render_md())
+        print(f"written: {out}")
+        return 0
+
+    if args.sub == "audit":
+        for row in svc.audit.read(limit=args.limit, action=args.action, subject=args.subject):
+            print(json.dumps(row, ensure_ascii=False))
+        return 0
+    return 1
+
+
 def cmd_fixtures(args) -> int:
     d = Path(args.dir)
     n = 0
@@ -646,6 +730,44 @@ def build_parser() -> argparse.ArgumentParser:
     lp.add_argument("--roles")
     lp.add_argument("--rationale")
     l.set_defaults(func=cmd_lessons)
+
+    im = sub.add_parser("improve", help="ACE 개선 루프: 실패 수집·회고·큐레이션·승인함·회귀 게이트·지표")
+    ims = im.add_subparsers(dest="sub", required=True)
+    imm = ims.add_parser("mine", help="telemetry·피드백·eval에서 실패를 모아 pending 교훈·적대 케이스 초안을 만든다")
+    imm.add_argument("--run", help="이 run만 분석 (기본: 전체)")
+    imm.add_argument("--since")
+    imm.add_argument("--llm", action="store_true", help="회고에 모델 한 문단을 덧붙인다 (기술내용이 섞이면 버려진다)")
+    imm.add_argument("--model")
+    imm.add_argument("--replay")
+    imm.add_argument("--strict-replay", action="store_true")
+    imm.add_argument("--record")
+    imm.add_argument("--no-cache", action="store_true")
+    ims.add_parser("inbox", help="승인 대기 교훈·적대 케이스 목록")
+    for name, helptext in (("approve", "승인 (regression 통과 전에는 주입되지 않는다)"), ("reject", "거절"),
+                           ("edit-approve", "수정 후 승인"), ("hold", "보류")):
+        sp = ims.add_parser(name, help=helptext)
+        sp.add_argument("id", nargs="?", help="교훈 id (L-NNNN)")
+        sp.add_argument("--case", help="교훈 대신 적대 eval 케이스 id")
+        sp.add_argument("--note")
+        sp.add_argument("--by", default="user")
+        sp.add_argument("--text", help="수정 후 승인: 교훈 문구")
+        sp.add_argument("--roles", help="수정 후 승인: 대상 역할 (쉼표)")
+        sp.add_argument("--mutation", help="케이스 수정 후 승인: mutation_type")
+        sp.add_argument("--defect", help="케이스 수정 후 승인: injected_defect")
+        sp.add_argument("--gates", help="케이스 수정 후 승인: must_not_pass_gates (쉼표)")
+        sp.add_argument("--return-to", dest="return_to", help="케이스 수정 후 승인: expected_return_to")
+    imr = ims.add_parser("regress", help="승인된 교훈을 baseline과 비교해 회귀 평가한다")
+    imr.add_argument("id")
+    imr.add_argument("--mode", choices=["replay", "live"], help="기본은 improve.regression_mode")
+    imr.add_argument("--by", default="user")
+    imx = ims.add_parser("metrics", help="Escaped-to-Lock 등 핵심 지표")
+    imx.add_argument("--out")
+    imx.add_argument("--update-scores", action="store_true", help="교훈별 helpful/harmful 카운터를 갱신")
+    ima = ims.add_parser("audit", help="자동 제안·승인·거절 이력")
+    ima.add_argument("--limit", type=int, default=50)
+    ima.add_argument("--action")
+    ima.add_argument("--subject", help="교훈·케이스·실패 id")
+    im.set_defaults(func=cmd_improve)
 
     fx = sub.add_parser("fixtures", help="sanitize recorded fixtures (strip request previews)")
     fx.add_argument("sub", choices=["sanitize"])

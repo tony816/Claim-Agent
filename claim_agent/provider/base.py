@@ -1,6 +1,7 @@
 """Provider abstraction shared by Gemini, replay and scripted providers."""
 from __future__ import annotations
 
+import inspect
 import json
 import re
 from collections.abc import Callable
@@ -8,6 +9,8 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from ..models.ids import sha256_text
+
+_PY_JSON = {str: "string", int: "integer", float: "number", bool: "boolean"}
 
 
 @dataclass
@@ -147,6 +150,28 @@ class LLMProvider(Protocol):
     name: str
 
     def generate(self, spec: CallSpec) -> CallResult: ...
+
+
+def tool_definitions(funcs: list[Any]) -> list[dict[str, Any]]:
+    """Tool definitions from python callables (name, docstring, typed parameters)."""
+    import typing
+
+    out = []
+    for fn in funcs:
+        props: dict[str, Any] = {}
+        required: list[str] = []
+        try:
+            hints = typing.get_type_hints(fn)
+        except Exception:  # noqa: BLE001 - unresolvable forward references default to string
+            hints = {}
+        for name, param in inspect.signature(fn).parameters.items():
+            ann = hints.get(name, param.annotation)
+            props[name] = {"type": _PY_JSON.get(ann, "string")}
+            if param.default is inspect.Parameter.empty:
+                required.append(name)
+        doc = (fn.__doc__ or fn.__name__).strip()
+        out.append({"name": fn.__name__, "description": doc, "input_schema": {"type": "object", "properties": props, "required": required, "additionalProperties": False}})
+    return out
 
 
 class ProviderError(RuntimeError):
