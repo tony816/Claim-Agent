@@ -13,7 +13,8 @@ from .roles.registry import ROLE_NAMES
 ROLE_LABELS = ["독립항 설계", "의미 초안 작성", "용어·스타일 조정", "성공조건 검수", "통사·범위 검수", "OA 전략 검수", "블라인드 복원", "도면·기준 비교", "종속항 전략 설계"]
 PROVIDERS = {
     "gemini": {"label": "Gemini · API 키", "models": []},
-    "claude_oauth": {"label": "Claude · 구독 OAuth", "models": ["default", "sonnet", "opus", "haiku"],
+    # CLI가 받는 별칭 프리셋(`claude --model`). 목록에 없는 ID는 모델 ID 직접 입력으로 지정한다.
+    "claude_oauth": {"label": "Claude · 구독 OAuth", "models": ["default", "fable", "opus", "sonnet", "haiku"],
                      "install_url": "https://code.claude.com/docs/en/setup"},
     "codex_oauth": {"label": "Codex · 구독 OAuth", "models": ["default"],
                     "install_url": "https://developers.openai.com/codex/cli/"},
