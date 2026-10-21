@@ -400,7 +400,7 @@ def test_composer_claim_target_reaches_ui_hints_and_message(workspace, monkeypat
     workspace.start(sid, {"mode": "AUTHORING_DRAFT", "text": "청구항 작성", "target_mode": "single", "target_claim": 3})
     wait_for(lambda: len(commands) == 1)
     req = json.loads(Path(commands[0][commands[0].index("--request") + 1]).read_text(encoding="utf-8"))
-    assert req["ui_hints"] == dict(selected_mode="AUTHORING_DRAFT", dependent=True, target="3", target_mode="single")
+    assert req["ui_hints"] == dict(selected_mode="AUTHORING_DRAFT", dependent=True, target="3", target_mode="single", prior_search=False)
     assert workspace.snapshot(sid)["messages"][-2]["claim_target"] == dict(mode="single", dependent=True, target="3")
     workspace.start(sid, {"mode": "AUTHORING_DRAFT", "text": "청구항 작성", "target_mode": "range", "target_segments": [{"from": 2, "to": 4}, {"from": 6, "to": 6}]})
     wait_for(lambda: len(commands) == 2)
@@ -409,7 +409,7 @@ def test_composer_claim_target_reaches_ui_hints_and_message(workspace, monkeypat
     workspace.start(sid, {"text": "안녕", "dependent": False, "target": "2~8"})      # legacy composer payload
     wait_for(lambda: len(commands) == 3)
     req = json.loads(Path(commands[2][commands[2].index("--request") + 1]).read_text(encoding="utf-8"))
-    assert req["ui_hints"] == dict(selected_mode="CHAT", dependent=False, target="", target_mode="independent")
+    assert req["ui_hints"] == dict(selected_mode="CHAT", dependent=False, target="", target_mode="independent", prior_search=False)
     with pytest.raises(ValueError, match="2항 이상"):
         workspace.start(sid, {"mode": "AUTHORING_DRAFT", "text": "청구항 작성", "target_mode": "range", "target_segments": [{"from": 1, "to": 3}]})
     assert len(workspace.sessions[sid]["messages"]) == 6

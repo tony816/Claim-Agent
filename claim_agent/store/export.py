@@ -5,6 +5,7 @@ identifiers and the exact-text sha256 so a reader can tie the document back to t
 """
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 
@@ -49,9 +50,24 @@ def _unverified(state: RunState) -> list[str]:
     out = []
     if not state.spec_present:
         out.append("OA_FINAL_GATE / DEPENDENT_OA_FINAL_GATE: UNVERIFIED — SPEC_NOT_PROVIDED")
-    if not state.prior_art_present:
+    label = state.prior_art_label()
+    if label == "NONE":
         out.append("신규성·진보성: UNVERIFIED — PRIOR_ART_NOT_PROVIDED")
+    elif "SEARCHED" in label:
+        out.append(f"신규성·진보성: {label} — 검색 집합 기준 결과뿐, 전수 조사 아님")
     return out
+
+
+def _handoff_rows(store, state: RunState) -> list[dict]:
+    """명세서 작성 인계표 rows written at LOCK (runs/<id>/handoff/spec_materials.json), independent first."""
+    from ..pipeline.handoff import COLUMNS
+
+    path = store.run_dir(state.run_id) / "handoff" / "spec_materials.json"
+    if not path.exists():
+        return []
+    data = json.loads(path.read_text(encoding="utf-8"))
+    rows = (data.get("independent") or []) + (data.get("dependent") or [])
+    return [{"한정": r.get("limitation", ""), **{c: r.get(c, "") for c in COLUMNS}, "명세서에 적을 것": "; ".join(r.get("명세서에 적을 것") or [])} for r in rows]
 
 
 def _evidence_rows(store, state: RunState) -> list[dict]:
@@ -93,6 +109,13 @@ def render_markdown(store, state: RunState, with_evidence: bool = False) -> str:
             out += ["## 부록: 한정별 근거표", "", "| 기록 | 한정 | 역할 | 근거 자료 | 위치 | 근거 종류 | 비고 |", "|---|---|---|---|---|---|---|"]
             for e in rows:
                 out.append(f"| {e.get('record', '')} | {e.get('limitation', '')} | {e.get('role', '')} | {e.get('source_name', '')} | {e.get('location', '')} | {e.get('basis', '')} | {e.get('note', '') or ''} |")
+            out.append("")
+        handoff = _handoff_rows(store, state)
+        if handoff:
+            cols = list(handoff[0])
+            out += ["## 부록: 명세서 작성 인계", "", "LOCK 조건이 아닌 기록이다. 원자료에 없는 효과·수치는 '작성자 확인 필요'로만 남긴다.", "",
+                    "| " + " | ".join(cols) + " |", "|---" * len(cols) + "|"]
+            out += ["| " + " | ".join(str(r[c]).replace("|", "/") for c in cols) + " |" for r in handoff]
             out.append("")
         for u in _unverified(state):
             out.append(f"- {u}")
@@ -164,6 +187,20 @@ def render_docx(store, state: RunState, path: Path, with_evidence: bool = False)
                 cells = t2.add_row().cells
                 for i, key in enumerate(("limitation", "role", "source_name", "location", "basis", "note")):
                     cells[i].text = str(e.get(key) or "")
+        handoff = _handoff_rows(store, state)
+        if handoff:
+            h4 = document.add_heading("부록: 명세서 작성 인계", level=2)
+            for r in h4.runs:
+                _set_font(r, 13)
+            cols = list(handoff[0])
+            t3 = document.add_table(rows=1, cols=len(cols))
+            t3.style = "Table Grid"
+            for i, name in enumerate(cols):
+                t3.rows[0].cells[i].text = name
+            for row in handoff:
+                cells = t3.add_row().cells
+                for i, key in enumerate(cols):
+                    cells[i].text = str(row[key])
         for u in _unverified(state):
             p = document.add_paragraph(u)
             for r in p.runs:

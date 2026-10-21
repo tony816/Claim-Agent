@@ -142,6 +142,18 @@ claim-agent review --reviewers syntax-scope-reviewer,oa-strategy-reviewer --clai
 
 도면은 intake에서 한 번 정규화한다(`materials.max_image_side`, 기본 2048px, 도면 부호 판독을 위해 더 줄이지 않음). 원본·정규화본 sha가 모두 기록되어 `input_revision`에 반영된다. `materials.files_api`가 켜져 있으면 Gemini Files API에 콘텐츠 해시당 1회 업로드하고 이후 호출은 URI로 참조한다(레지스트리 `runs/.files-registry.json`, 보존 기간 내 프로세스 간 재사용, 실패 시 inline 폴백). 호출 기록의 `context_transport.image_transport`로 확인한다.
 
+## 선행기술 검색과 사전 심사
+
+설계([`docs/선행기술조사_사전심사_설계_2026-10.md`](선행기술조사_사전심사_설계_2026-10.md))대로 동작한다. 기본은 꺼짐이며, `run --prior-search`, 요청 YAML의 `prior_search: {enabled: true}`, 웹 작성 옵션의 **선행기술** 체크, MCP `claim_send(prior_search=true)`로 켠다. 나머지 값은 `claim-agent.yaml`의 `prior_search` 블록(6개국, 국가당 10건, `max_docs: 5`, 자동 선택, `inventive_high: note`)이다.
+
+- 흐름: `PRIOR_QUERY`(searcher 모델이 국문·영문 검색 문장) → `PRIOR_SEARCH`(WIPS AI 검색·서지, `claim_agent/prior_art/wips.py`) → `PRIOR_SCREEN`(Jev 확률로 선별) → `PRIOR_FETCH`(전문 수집, `runs/<id>/prior_art/`) → `PRIOR_TRIM`(청구범위·요약 기준 Jev 확률로 거르고 `PRIOR_ART_SET` 봉인) → `ARCHITECT`(조건 6·8) → `PRE_EXAM`(문헌별 COMPARE + JUDGE) → `DRAFT`. 사용자가 파일로 준 선행기술만 있어도 `PRE_EXAM`은 돈다.
+- 키: WIPS는 `.env`의 `WIPS_API_KEY`(OAuth 과정을 코드가 대행), Jev는 OpenRouter로만 실행하며 `OPENROUTER_API_KEY`를 쓴다. jev-cli는 Python 3.13 이상에서 설치된다. `claim-agent doctor`가 두 연결 상태를 알린다(값은 출력하지 않는다).
+- 판정: 인용 원문은 엔진이 문헌에서 다시 찾고 못 찾은 개시는 `확인 필요`로 내린다. 한 문헌에 독립항 필수 요소가 모두 개시(인용 확인)되고 사전 심사자도 부정 우려로 보면 새 design_revision으로 architect에 되돌린다(`pipeline.max_return_loops.PREEXAM`, 기본 2). 모델·코드 불일치(`PREEXAM_MODEL_CODE_MISMATCH`), 실질적 동일 확인(`PREEXAM_SUBSTANTIAL_IDENTITY`), 인용 미확인(`PREEXAM_EVIDENCE_UNCONFIRMED`), 남는 차이 없음(`NO_SOURCE_DIFFERENTIATOR`)은 멈춘다.
+- 재개: 검색 불가(`PRIOR_SEARCH_UNAVAILABLE`)는 `resume --accept-unverified`로 검색 없이 진행. 문헌 선택은 `resume <run_id> --select-prior-art KR1,KR2 [--base-date YYYY-MM-DD]`(웹: 재개 종류 '선행기술 문헌 선택', MCP: `claim_select_prior_art`). 봉인 뒤 바꾸면 설계부터 다시 한다.
+- 비용: WIPS·Jev 호출은 `pipeline.max_calls`에 세지 않는다. WIPS는 `prior_search.max_wips_calls`(기본 40)로 따로 막고, Jev의 OpenRouter 요금은 `cost_usd`에 더해진다. 텔레메트리 `phase: wips | jev` 행에는 검색 문장·키·토큰이 남지 않는다.
+- 결과: 보고서의 **선행기술 조사·사전 심사** 절, `records/pset-*.md`(봉인 집합), `records/pej-*.md`(사전 심사 판정과 문헌별 대비표). 신규성·진보성은 언제나 "검색 집합 기준"이며 전수 조사가 아니다.
+- 명세서 작성 인계표: LOCK마다 `runs/<id>/handoff/spec_materials.json`과 LOCK 보고서·`export --with-evidence` 부록에 한정별 심사대응 재료 상태를 남긴다(LOCK 조건 아님).
+
 ## 예산 가드와 성능 요약
 
 `pipeline.max_calls`·`max_total_tokens`·`max_cost_usd`(또는 `run/resume --max-calls …`)를 넘으면 다음 호출 전에 `HALTED_BUDGET_LIMIT`(종료 코드 4)로 중지한다. 완료된 호출은 버리지 않으며, 한도를 올린 뒤 `claim-agent resume <run_id>`로 이어서 진행한다. `report.md`의 **성능 요약**은 단계별 호출·지연·입력/캐시/출력 토큰·캐시 적중·추정 비용을 표로 보여 주고, CLI 요약도 한 줄을 출력한다. 비용은 `telemetry.pricing`에 사용 모델이 있어야 산정된다.

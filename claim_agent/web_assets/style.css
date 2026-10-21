@@ -75,3 +75,4 @@ nav .session-row{display:flex;align-items:center;border-radius:8px;margin-bottom
 .improve-empty{font-size:12px;color:#a0a0a0;line-height:1.8;padding:14px 0}
 .audit-row{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:#6b6b6b;border-bottom:1px solid #f1f1f1;padding:7px 2px}.audit-ts{color:#a0a0a0;font-family:ui-monospace,Menlo,Consolas,monospace}.audit-action{color:#284b42;font-weight:600;min-width:150px}.audit-actor{color:#8a8a8a}
 @media(max-width:760px){#improve-panel{padding:8px 18px 24px}.improve-metrics{grid-template-columns:1fr 1fr}.audit-action{min-width:0}}
+.prior-candidates{white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;max-height:240px;overflow:auto;background:#fff;border:1px solid #eee;border-radius:8px;padding:8px;margin:8px 0 0}

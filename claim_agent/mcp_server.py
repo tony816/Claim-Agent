@@ -254,11 +254,12 @@ def build_server(service: ClaimAgentService, public_url: str, passphrase: str, s
 
     @server.tool()
     async def claim_send(conversation_id: str, text: str, attachment_ids: list[str] | None = None, target_mode: str | None = None,
-                         target_claim: int | None = None, target_segments: str | None = None) -> dict:
+                         target_claim: int | None = None, target_segments: str | None = None, prior_search: bool = False) -> dict:
         """요청 한 턴을 시작한다. 요청은 자동 분류되어 일반 답변·청구항 작성·검토 파이프라인으로 간다.
         target_mode(independent | single | range)는 작성 대상 힌트다: single은 target_claim(항 번호), range는 target_segments('2~4,6').
+        prior_search=true이면 새 작성 run이 설계 전에 WIPS 선행기술 검색·Jev 선별·사전 심사를 한다(검색 집합 기준, 전수 조사 아님).
         반환된 message_id로 claim_status를 wait_seconds=120으로 호출해 결과를 기다린다."""
-        return await call(service.send, conversation_id, text, attachment_ids, target_mode, target_claim, target_segments)
+        return await call(service.send, conversation_id, text, attachment_ids, target_mode, target_claim, target_segments, prior_search)
 
     @server.tool()
     async def claim_status(conversation_id: str, message_id: str | None = None, wait_seconds: float = 120) -> dict:
@@ -280,6 +281,12 @@ def build_server(service: ClaimAgentService, public_url: str, passphrase: str, s
         """중지되었거나 끝난 작업을 사용자 결정으로 이어 간다. kind: none(같은 단계 재실행) | style(스타일만) | meaning(의미 수정) |
         redesign(재설계) | restart(처음부터) | accept_unverified(비게이팅 미검증 수용). scope: INDEPENDENT | DEPENDENT."""
         return await call(service.resume, conversation_id, kind, decision, attachment_ids, scope)
+
+    @server.tool()
+    async def claim_select_prior_art(conversation_id: str, skeys: list[str], base_date: str | None = None) -> dict:
+        """선행기술 검색 후보(skey) 중 대비할 문헌과 기준일(출원 예정일 YYYY-MM-DD)을 고른다. 확인 단계에서 멈춘 run은 그 문헌으로
+        이어 가고, 이미 봉인된 run은 문헌 집합이 바뀌므로 설계부터 다시 한다. 빈 목록이면 검색 문헌 없이 진행한다."""
+        return await call(service.select_prior_art, conversation_id, skeys, base_date)
 
     @server.tool()
     async def claim_stop(conversation_id: str) -> dict:

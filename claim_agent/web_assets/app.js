@@ -279,7 +279,7 @@ async function send(event){
   event.preventDefault();if(state.composing||state.busy||state.uploading||state.data?.running||!$("prompt").value.trim())return;
   state.busy=true;controls();error("");const id=state.id,text=$("prompt").value;
   const t=claimTarget();if(!t.ok){error(t.error);return;}
-  try{await api("/api/send",{id,text,mode:$("mode").value,files:state.pending.map(f=>f.id),target_mode:t.target_mode,target_claim:t.target_claim,target_segments:t.target_segments,dependent:t.dependent,target:t.target});$("prompt").value="";localStorage.removeItem("draft-"+id);state.pending=[];drafts.delete(id);pending();resize();await refresh();restartPoll();await list();$("conversation").scrollTop=$("conversation").scrollHeight;}
+  try{await api("/api/send",{id,text,mode:$("mode").value,files:state.pending.map(f=>f.id),target_mode:t.target_mode,target_claim:t.target_claim,target_segments:t.target_segments,dependent:t.dependent,target:t.target,prior_search:$("prior-search").checked});$("prompt").value="";localStorage.removeItem("draft-"+id);state.pending=[];drafts.delete(id);pending();resize();await refresh();restartPoll();await list();$("conversation").scrollTop=$("conversation").scrollHeight;}
   catch(e){error(e.message);}finally{state.busy=false;controls();$("prompt").focus();}
 }
 $("composer").onsubmit=send;
@@ -356,7 +356,7 @@ $("project-delete").onclick=async()=>{const p=state.projectData;if(!p)return;if(
 // ---- 작업 상태 패널: 단계 스텝퍼 · 게이트 표 · 중지 사유 · 재개 · 내보내기 · 리비전 대조
 const STAGES_ROOT=["ARCHITECT","DRAFT","STYLE","SUCCESS","SYNTAX","OA","BLIND","PICTURE","LOCK"],STAGES_DEP=["DEP_ARCHITECT","DEP_DRAFT","DEP_STYLE","DEP_SUCCESS","DEP_SYNTAX","DEP_OA","DEP_RECON","DEP_LOCK"];
 const STAGE_LABEL={ARCHITECT:"설계",DRAFT:"의미 초안",STYLE:"문체",SUCCESS:"성공조건",SYNTAX:"통사",OA:"OA",BLIND:"블라인드",PICTURE:"기준 비교",LOCK:"독립항 LOCK",DEP_ARCHITECT:"종속 설계",DEP_DRAFT:"종속 초안",DEP_STYLE:"종속 문체",DEP_SUCCESS:"종속 성공조건",DEP_SYNTAX:"종속 통사",DEP_OA:"종속 OA",DEP_RECON:"종속 역구성",DEP_LOCK:"종속 LOCK"};
-const KIND_LABEL={none:"같은 단계 재실행",accept_unverified:"미검증 수용(명세서·선행기술 부재만)",style:"스타일만 수정 (r+1)",meaning:"의미 수정 (r+1)",redesign:"재설계 (d+1)",restart:"처음부터"};
+const KIND_LABEL={none:"같은 단계 재실행",accept_unverified:"미검증 수용(명세서·선행기술 부재만)",style:"스타일만 수정 (r+1)",meaning:"의미 수정 (r+1)",redesign:"재설계 (d+1)",restart:"처음부터",select_prior_art:"선행기술 문헌 선택"};
 let runKey="";
 function renderRun(data){
   const panel=$("run-panel"),run=data.run;
@@ -380,7 +380,9 @@ function renderRun(data){
   for(const r of run.stages||[]){const tr=el("tr");tr.className=r.superseded||r.stale?"superseded":"";for(const v of [r.stage,r.role,r.status,Object.entries(r.gates||{}).map(([k,v])=>k+": "+v).join(", "),(r.superseded?"superseded ":"")+(r.stale?"STALE":"")])tr.append(el("td","",v||""));table.append(tr);}
   const base=`/api/export?id=${encodeURIComponent(data.id)}`;
   $("export-docx").href=base+"&format=docx";$("export-md").href=base+"&format=md";$("export-evidence").href=base+"&format=docx&evidence=1";
-  const kinds=run.halt?["none","style","meaning","redesign","accept_unverified"]:["style","meaning","redesign"];
+  const kinds=(run.halt?["none","style","meaning","redesign","accept_unverified"]:["style","meaning","redesign"]).concat(run.prior_art?["select_prior_art"]:[]);
+  const pc=$("prior-candidates");pc.hidden=!run.prior_art;
+  if(run.prior_art)pc.textContent=`선행기술 후보 (선별 ${run.prior_art.screening||"-"}, 기준일 ${run.prior_art.base_date}) — '선행기술 문헌 선택'에 skey를 쉼표로, 기준일을 YYYY-MM-DD로 적으세요\n`+run.prior_art.candidates.map(c=>`${c.sealed?"●":"○"} ${c.skey}  ${c.number}  ${c.title}  ${c.published||"-"}  Jev ${c.p_screen==null?"-":c.p_screen.toFixed(2)}  ${c.relevance||""}`).join("\n");
   const select=$("resume-kind");const current=select.value;select.replaceChildren();
   for(const k of kinds){const o=el("option","",KIND_LABEL[k]);o.value=k;select.append(o);}
   if(kinds.includes(current))select.value=current;

@@ -13,7 +13,7 @@ from .model_catalog import gemini_models, openrouter_catalog, openrouter_models
 from .provider.subscription import KINDS, auth_home, connection_status
 from .roles.registry import ROLE_NAMES
 
-ROLE_LABELS = ["독립항 설계", "의미 초안 작성", "용어·스타일 조정", "성공조건 검수", "통사·범위 검수", "OA 전략 검수", "블라인드 복원", "도면·기준 비교", "종속항 전략 설계"]
+ROLE_LABELS = ["독립항 설계", "의미 초안 작성", "용어·스타일 조정", "성공조건 검수", "통사·범위 검수", "OA 전략 검수", "블라인드 복원", "도면·기준 비교", "종속항 전략 설계", "선행기술 검색 문장", "사전 심사"]
 PROVIDERS = {
     "gemini": {"label": "Gemini · API 키", "models": []},     # models.list로 채운다(model_catalog)
     # CLI가 받는 별칭 프리셋(`claude --model`, 별칭은 늘 최신판)과 최신 정확 ID. Claude CLI에는 모델 목록 명령이 없다.
@@ -98,7 +98,7 @@ def settings_overrides(cfg: AppConfig, data: dict) -> dict:
         result[key] = model_name(model)
     rows = data.get("roles")
     if not isinstance(rows, dict) or set(rows) != set(ROLE_NAMES):
-        raise ValueError("9개 서브에이전트 설정을 모두 전달하세요.")
+        raise ValueError(f"{len(ROLE_NAMES)}개 서브에이전트 설정을 모두 전달하세요.")
     for name, row in rows.items():
         if not isinstance(row, dict) or set(row) != {"provider", "model", "thinking_level"}:
             raise ValueError("에이전트에는 제공자·모델·추론 강도만 설정할 수 있습니다.")

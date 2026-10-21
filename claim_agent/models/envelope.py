@@ -13,13 +13,18 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .enums import (
+    EFFECT_LINKS,
+    EXAM_PATTERN_RISK,
     GATE_NAMES,
     CandidateClass,
+    DisclosureStatus,
     ExecStatus,
     FinalizedStatus,
     GateValue,
     InventionPrimary,
     NextStep,
+    NoveltyConclusion,
+    RiskLevel,
     Sketchability,
     Status,
     normalize_reason,
@@ -54,6 +59,7 @@ class Gates(BaseModel):
     INVENTIVE_STEP: GateValue | None = None
     PRE_STYLE_NON_PATENT_TECHNICAL_READER_CHECK: GateValue | None = None
     PRE_STYLE_GEOMETRIC_OBJECT_CHECK: GateValue | None = None
+    PREEXAM_NOVELTY_GATE: GateValue | None = None   # the pre-examiner's suggestion; the engine decides (설계 5.3)
 
     def get(self, name: str) -> GateValue | None:
         return getattr(self, name, None)
@@ -109,6 +115,61 @@ class CandidateItem(BaseModel):
     PRIOR_ART_CONTRIBUTION_GATE: GateValue | None = None
     planned_claim_no: int | None = None
     parent_claim_no: int | None = None
+    # 10_심사이력_경험기준 ordering signal (설계 14.2); never changes the classification or the 08 gates.
+    exam_pattern: str | None = None
+    design_change_risk: str | None = None
+    exam_pattern_basis: str | None = None
+
+
+class DesignElement(BaseModel):
+    """One unit of the design contract that PRE_EXAM compares and the spec handoff table lists (설계 5·14.4)."""
+    model_config = ConfigDict(extra="ignore")
+    element_id: str
+    kind: str = "LIMITATION"         # SKELETON (주골격 명제) | LIMITATION (독립항 한정)
+    text: str
+    in_independent: bool = True
+    source_location: str | None = None
+    basis: str | None = None         # DIRECT | DERIVED | UNCONFIRMED
+
+
+class PreexamRow(BaseModel):
+    """COMPARE: one design element against one document (09 P1·P2)."""
+    model_config = ConfigDict(extra="ignore")
+    element_id: str
+    status: DisclosureStatus
+    quote: str = ""
+    where: str = ""
+    note: str = ""
+
+
+class NoveltyItem(BaseModel):
+    """JUDGE: novelty against one document (09 P3·P4·P6)."""
+    model_config = ConfigDict(extra="ignore")
+    doc_id: str
+    conclusion: NoveltyConclusion
+    missing: str = ""                # element ids absent from this document, comma separated
+    reason: str = ""
+
+
+class RemainingDifference(BaseModel):
+    """JUDGE: a design element no sealed document discloses, with its invention-material location (09 P12, 10 E7·E8)."""
+    model_config = ConfigDict(extra="ignore")
+    element_id: str
+    source_location: str = ""
+    note: str = ""
+    exam_pattern: str | None = None
+    design_change_risk: str | None = None
+    effect_link: str | None = None
+    why_not_simple: str | None = None
+    numeric_basis: str | None = None
+
+
+class ScreenItem(BaseModel):
+    """PRIOR_SCREEN model fallback: one candidate's relevance from its title and abstract."""
+    model_config = ConfigDict(extra="ignore")
+    skey: str
+    relevance: str
+    reason: str = ""
 
 
 class EvidenceBasis(str, Enum):  # noqa: UP042
@@ -156,6 +217,22 @@ class RoleEnvelope(BaseModel):
     sketchability: Sketchability | None = None
     open_issues: list[OpenIssue] = Field(default_factory=list)
     limitation_evidence: list[LimitationEvidence] = Field(default_factory=list)
+    # Prior-art search and pre-exam (설계 8절); empty for every other role.
+    design_elements: list[DesignElement] = Field(default_factory=list)
+    queries_ko: list[str] = Field(default_factory=list)
+    queries_en: list[str] = Field(default_factory=list)
+    provisional_elements: list[str] = Field(default_factory=list)
+    problem: str | None = None
+    screened: list[ScreenItem] = Field(default_factory=list)
+    preexam_rows: list[PreexamRow] = Field(default_factory=list)
+    doc_published: str | None = None
+    doc_field: str | None = None
+    doc_summary: str | None = None
+    novelty: list[NoveltyItem] = Field(default_factory=list)
+    inventive_primary_doc: str | None = None
+    inventive_risk: RiskLevel | None = None
+    inventive_reason: str | None = None
+    remaining_differences: list[RemainingDifference] = Field(default_factory=list)
     sources_read: list[str] = Field(default_factory=list)
     aux_source_usage: str | None = None   # NOT_ACTIVATED | USED
     report_markdown: str = ""
@@ -187,6 +264,7 @@ class RoleEnvelope(BaseModel):
 
 _GATE_ENUM = [g.value for g in GateValue]
 _STATUS_ENUM = [s.value for s in Status]
+_RISK3 = ["LOW", "MEDIUM", "HIGH"]
 
 
 def _str(desc: str = "", nullable: bool = False) -> dict[str, Any]:
@@ -282,8 +360,68 @@ ENVELOPE_JSON_SCHEMA: dict[str, Any] = _obj(
                     "PRIOR_ART_CONTRIBUTION_GATE": _enum(_GATE_ENUM, nullable=True),
                     "planned_claim_no": _int(nullable=True),
                     "parent_claim_no": _int(nullable=True),
+                    "exam_pattern": _enum(list(EXAM_PATTERN_RISK), nullable=True, desc="10_심사이력_경험기준 유형(순위 신호, 게이트 아님)"),
+                    "design_change_risk": _enum(_RISK3, nullable=True),
+                    "exam_pattern_basis": _str("유형 분류의 원자료 근거 위치", nullable=True),
                 },
                 ["dc_id", "classification"],
+            )
+        ),
+        "design_elements": _arr(
+            _obj(
+                {
+                    "element_id": _str("E1, E2 … 설계 안에서 고유"),
+                    "kind": _enum(["SKELETON", "LIMITATION"]),
+                    "text": _str("주골격 명제 또는 독립항 한정의 요지"),
+                    "in_independent": {"type": "boolean"},
+                    "source_location": _str("발명 원자료 근거 위치", nullable=True),
+                    "basis": _enum([b.value for b in EvidenceBasis], nullable=True),
+                },
+                ["element_id", "kind", "text", "in_independent"],
+            )
+        ),
+        "queries_ko": _arr(_str()),
+        "queries_en": _arr(_str()),
+        "provisional_elements": _arr(_str()),
+        "problem": _str("해결 과제 요지 한두 문장", nullable=True),
+        "screened": _arr(_obj({"skey": _str(), "relevance": _enum(["높음", "중간", "낮음"]), "reason": _str()}, ["skey", "relevance"])),
+        "preexam_rows": _arr(
+            _obj(
+                {
+                    "element_id": _str(),
+                    "status": _enum([s.value for s in DisclosureStatus if s != DisclosureStatus.UNCONFIRMED]),
+                    "quote": _str("선행문헌 원문 그대로 30~200자, 미개시면 빈 문자열"),
+                    "where": _str("문단 번호 [0012] 등"),
+                    "note": _str(),
+                },
+                ["element_id", "status", "quote"],
+            )
+        ),
+        "doc_published": _str("문헌에 적힌 공개일", nullable=True),
+        "doc_field": _str(nullable=True),
+        "doc_summary": _str(nullable=True),
+        "novelty": _arr(
+            _obj(
+                {"doc_id": _str(), "conclusion": _enum([c.value for c in NoveltyConclusion]), "missing": _str("그 문헌에 없는 요소 id, 쉼표 구분"), "reason": _str()},
+                ["doc_id", "conclusion"],
+            )
+        ),
+        "inventive_primary_doc": _str(nullable=True),
+        "inventive_risk": _enum([r.value for r in RiskLevel], nullable=True),
+        "inventive_reason": _str(nullable=True),
+        "remaining_differences": _arr(
+            _obj(
+                {
+                    "element_id": _str(),
+                    "source_location": _str("발명 원자료 위치"),
+                    "note": _str(),
+                    "exam_pattern": _enum(list(EXAM_PATTERN_RISK), nullable=True),
+                    "design_change_risk": _enum(_RISK3, nullable=True),
+                    "effect_link": _enum(EFFECT_LINKS, nullable=True),
+                    "why_not_simple": _str("단순 결합으로 안 되는 이유의 원자료 위치, 없으면 NONE", nullable=True),
+                    "numeric_basis": _str("수치 요소의 이유·비교 원자료 위치, 없으면 NONE", nullable=True),
+                },
+                ["element_id", "source_location"],
             )
         ),
         "sketchability": _enum([s.value for s in Sketchability], nullable=True),

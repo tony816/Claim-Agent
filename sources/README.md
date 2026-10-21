@@ -5,6 +5,7 @@
 | 파일 | 역할 | 필수 소비·검증 역할 | 활성 시점 | 기술내용 근거로 사용 |
 |---|---|---|---|---|
 | `독립항_작성_성공조건.md` | 생성 방향·판정 기준 | claim-architect·claim-drafter; exact 문언은 claim-success-reviewer가 독립 재검사 | 독립항 작업 시작 전부터 최종 재검사까지 | 불가 |
+| `09_사전심사_기준.md` | 봉인된 선행기술 집합과 설계 계약 `design_elements`의 문헌별 대비·신규성 위협·진보성 위험 판정 기준(P1~P12) | prior-art-pre-examiner만(COMPARE·JUDGE); claim-architect에는 이 문서가 아니라 판정 보고서만 전달 | 단계 2a 사전 심사: `PRIOR_ART_SET`이 `NONE`이 아닐 때 DESIGN_GATE LOCKED 뒤, drafter 전 | 불가 — 발명 원자료 아님 |
 | `07_용어표현_출처게이트.md` | 확정 기술 개념의 최종 용어·표현·띄어쓰기 출처 검증 | claim-style-adjuster; claim-success-reviewer·syntax-scope-reviewer가 기록 검증 | drafter의 PRE_STYLE 의미 초안 확정 후 | 불가 |
 | `04_청구항_스타일가이드.md` | 문체·조사·분절·문장부호 후처리 | claim-style-adjuster; claim-success-reviewer·syntax-scope-reviewer가 기록 검증 | drafter의 PRE_STYLE 의미 초안 뒤 | 불가 |
 | `청구항_예시검색_라우팅인덱스.md` | 국소 통사 문제용 검색 목차 | claim-style-adjuster가 조건부 하드 로딩; 사용 시 claim-success-reviewer가 기록 검증 | 기본 비활성, 특정 통사 문제가 남은 경우만 | 불가 |
@@ -12,13 +13,14 @@
 | `06_OA_심사리스크_체크리스트.md` | 잠정 문언 검수 + 정식 명세서 최종 검수 | oa-strategy-reviewer | 독립항 success·syntax 또는 종속항 dependent success·syntax를 통과한 동일 문언에만 | 불가 |
 | `08_종속항_기술기여_게이트.md` | 종속항 후보의 과제–추가 기술특징–작동·협동 원리–효과 및 단순 도면 묘사 배제 검증 | dependent-claim-strategy-architect·claim-drafter; dependent success·syntax·OA reviewer가 검증 | DRAFT 또는 FINAL 독립항 LOCK 뒤, 종속항 트리·문언 작성 전 | 불가 |
 | `05_종속항_전개패턴_가이드.md` | 기술기여 후보의 부모항·권리화 축·종속항 트리 설계 | dependent-claim-strategy-architect·claim-drafter; claim-success-reviewer·syntax-scope-reviewer가 독립 검증 | 후보별 세 기술기여 게이트 PASS 뒤부터 dependent syntax까지 | 불가 |
+| `10_심사이력_경험기준.md` | 등록 특허 30건 심사 이력의 경험 통계; 최신 성공조건 미검증, 판정 기준·게이트 아님 | dependent-claim-strategy-architect(후보 순위)와 prior-art-pre-examiner의 JUDGE(남는 차이의 설계변경 위험)만; 독립항 설계·작성·스타일 역할에는 이 문서와 그 분류 값을 전달하지 않음 | 종속항 후보 순위 결정과 사전 심사 JUDGE 때만; 독립항 생성에는 활성화하지 않음 | 불가 — 발명 원자료 아님 |
 
 현재 발명의 명세서, 도면, 발명 설명, 구성요소 관계표, 선행기술 및 확정 문언은 별도의 발명 원자료다. 현재 이 폴더에 그러한 원자료가 없으면 예시 코퍼스나 가이드로 기술내용을 보충하지 않고 `근거 미확인` 또는 `BLOCK`으로 처리한다.
 
 기본 활성 순서는 다음과 같다.
 
 1. 생성 방향: 현재 발명 원자료 + `독립항_작성_성공조건.md`
-2. 권리범위 결정: 성공조건의 조건 6(선행기술이 있을 때만) + 조건 8
+2. 권리범위 결정: 성공조건의 조건 6(선행기술이 있을 때만 — 사용자 제공 또는 봉인된 검색 집합) + 조건 8. 선행기술이 있으면 drafter 전에 별도 `prior-art-pre-examiner`가 `09_사전심사_기준.md`로 2a 사전 심사 감사를 한다
 3. `claim-drafter`의 보조 예시 없는 PRE_STYLE 의미 초안 작성
 4. 별도 `claim-style-adjuster`의 용어·표현·스타일 후처리: `07_용어표현_출처게이트.md` + 조건 7 + `04_청구항_스타일가이드.md` + `CLAIM_STYLE_GATE`
 5. 선택적 예시 검색: 해결되지 않은 국소 통사 문제 또는 확정 개념의 표면 표현 정확 검색이 필요한 경우에만 claim-style-adjuster가 라우팅 인덱스 전문과 역사 코퍼스의 정확한 조각·최소 문맥을 조건부로 읽음

@@ -54,11 +54,27 @@ def _provider(rt: Runtime, args):
     return make_provider(rt, mode, fixtures, strict_replay=getattr(args, "strict_replay", False))
 
 
+def _prior_search_args(args, current):
+    """--prior-search / --prior-confirm / --base-date on top of a request's own `prior_search` block."""
+    if not getattr(args, "prior_search", False):
+        return current
+    from .models.prior_art import PriorSearchOptions
+
+    data = current.model_dump(exclude_unset=True) if current is not None else {}
+    data["enabled"] = True
+    if getattr(args, "prior_confirm", False):
+        data["confirm"] = True
+    if getattr(args, "base_date", None):
+        data["base_date"] = args.base_date
+    return PriorSearchOptions.model_validate(data)
+
+
 def _request_from_args(args) -> RunRequest:
     if args.request_yaml:
         req = RunRequest.from_yaml(Path(args.request_yaml))
         if args.mode:
             req.request_mode = RequestMode(args.mode)
+        req.prior_search = _prior_search_args(args, req.prior_search)
         return req
     text = Path(args.request_file).read_text(encoding="utf-8") if args.request_file else (args.request or "")
     if not text:
@@ -69,6 +85,7 @@ def _request_from_args(args) -> RunRequest:
         request_mode=RequestMode(args.mode or "AUTHORING_DRAFT"), request_text=text, candidate_id=args.candidate_id or "cand-01", user_lock=user_lock,
         invention_sources=args.source or [], spec_path=args.spec, drawings=args.drawing or [], prior_art=prior, dependent=bool(args.dependent),
         dependent_target=args.dependent_target, dependent_set_id=args.dependent_set_id, claim_file=args.claim_file,
+        prior_search=_prior_search_args(args, None),
     )
 
 
@@ -116,7 +133,18 @@ def cmd_resume(args) -> int:
         if getattr(args, flag, False):
             action = name
     text = Path(args.decision_file).read_text(encoding="utf-8") if args.decision_file else (args.decide or "")
-    decision = Decision(text=text, action=action, add_sources=args.add_source or None, restart_from=args.restart_from, scope=args.scope)
+    selection = [s.strip() for s in (args.select_prior_art or "").split(",") if s.strip()] if args.select_prior_art is not None else None
+    base_date = args.base_date
+    if args.select_prior_art_from_decision:      # web/MCP: the decision text carries the skeys and the base date
+        from .tui_support import parse_prior_art_decision
+
+        selection, base_date = parse_prior_art_decision(text)
+        base_date = args.base_date or base_date
+        text = ""
+    if selection is not None:
+        action = "select_prior_art"
+    decision = Decision(text=text, action=action, add_sources=args.add_source or None, restart_from=args.restart_from, scope=args.scope,
+                        prior_art_selection=selection, base_date=base_date)
     state = engine.resume(args.run_id, decision)
     _print_summary(state)
     return _exit_code(state.outcome)
@@ -576,6 +604,9 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--spec")
     r.add_argument("--drawing", action="append")
     r.add_argument("--prior-art", action="append")
+    r.add_argument("--prior-search", action="store_true", help="WIPS 선행기술 검색 + Jev 선별 + 사전 심사 (WIPS_API_KEY, OPENROUTER_API_KEY)")
+    r.add_argument("--prior-confirm", action="store_true", help="with --prior-search: stop after screening so the user picks documents")
+    r.add_argument("--base-date", help="with --prior-search: 출원 예정일 YYYY-MM-DD (default: the run date)")
     r.add_argument("--user-lock")
     r.add_argument("--user-lock-file")
     r.add_argument("--candidate-id")
@@ -600,6 +631,9 @@ def build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--accept-unverified", action="store_true")
     rs.add_argument("--restart-from", choices=["ARCHITECT", "DEP_ARCHITECT"])
     rs.add_argument("--scope", choices=["INDEPENDENT", "DEPENDENT"], help="which revision a style/meaning fix targets on a finished run")
+    rs.add_argument("--select-prior-art", help="comma-separated WIPS skeys to compare (empty string = none); a sealed set restarts the design")
+    rs.add_argument("--base-date", help="출원 예정일 YYYY-MM-DD for --select-prior-art")
+    rs.add_argument("--select-prior-art-from-decision", action="store_true", help="read the skeys (and an optional YYYY-MM-DD) from the decision text")
     rs.set_defaults(func=cmd_resume)
 
     rv = sub.add_parser("revise", help="user-initiated new revision of a finished run")

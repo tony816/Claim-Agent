@@ -19,6 +19,8 @@ ROLE_NAMES = [
     "blind-claim-reconstruction-reviewer",
     "picture-claim-reconstruction-reviewer",
     "dependent-claim-strategy-architect",
+    "prior-art-searcher",
+    "prior-art-pre-examiner",
 ]
 
 _FRONTMATTER = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)

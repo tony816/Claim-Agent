@@ -20,6 +20,11 @@ class Scope(StrEnum):
     INDEPENDENT = "INDEPENDENT"
     DEPENDENT_SET = "DEPENDENT_SET"
     DEPENDENT_SINGLE = "DEPENDENT_SINGLE"
+    # Prior-art search and pre-exam (설계 4·8절): each scope has its own role contract and source whitelist.
+    PRIOR_QUERY = "PRIOR_QUERY"
+    PRIOR_SCREEN = "PRIOR_SCREEN"
+    PREEXAM_COMPARE = "PREEXAM_COMPARE"
+    PREEXAM_JUDGE = "PREEXAM_JUDGE"
 
 
 class Status(StrEnum):
@@ -116,6 +121,9 @@ REASON_CODES = {
     "AUXILIARY_SOURCE_MISSING",
     "REQUEST_MODE_MISSING_OR_INVALID",
     "CONFIG_VERSION_MISMATCH",
+    "PRIOR_SEARCH_UNAVAILABLE",
+    "NO_SOURCE_DIFFERENTIATOR",
+    "DESIGN_ELEMENTS_MISSING",
     "OTHER",
 }
 
@@ -134,7 +142,50 @@ GATE_NAMES = [
     "INVENTIVE_STEP",
     "PRE_STYLE_NON_PATENT_TECHNICAL_READER_CHECK",
     "PRE_STYLE_GEOMETRIC_OBJECT_CHECK",
+    "PREEXAM_NOVELTY_GATE",
 ]
+
+
+class DisclosureStatus(StrEnum):
+    """COMPARE row status (09 P2). UNCONFIRMED is set by the engine when a quote is not found in the document."""
+
+    DISCLOSED = "DISCLOSED"
+    PARTIALLY_DISCLOSED = "PARTIALLY_DISCLOSED"
+    NOT_DISCLOSED = "NOT_DISCLOSED"
+    UNCONFIRMED = "UNCONFIRMED"
+
+
+class NoveltyConclusion(StrEnum):
+    NEGATED_RISK = "NEGATED_RISK"      # 부정 우려
+    NOT_NEGATED = "NOT_NEGATED"        # 인정 가능
+    UNDETERMINED = "UNDETERMINED"      # 판단 보류
+
+
+class RiskLevel(StrEnum):
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+    UNVERIFIED = "UNVERIFIED"
+
+
+# 10_심사이력_경험기준 exam_pattern codes (설계 14.2) and their default design-change risk.
+EXAM_PATTERN_RISK = {
+    "REL_POSITION_COUPLING": "LOW",
+    "SUBASSEMBLY_ACTION": "LOW",
+    "CONDITIONAL_BRANCH": "LOW",
+    "MODE_OPERATION": "LOW",
+    "OPERATION_ORDER": "LOW",
+    "PURPOSE_POSITION_MATERIAL": "LOW",
+    "NUMERIC_WITH_REASON": "MEDIUM",
+    "NUMERIC_NO_REASON": "HIGH",
+    "SELECTION_MATERIAL": "HIGH",
+    "SELECTION_SHAPE": "HIGH",
+    "SELECTION_METHOD": "HIGH",
+    "SELECTION_INPUT_DATA": "HIGH",
+    "KNOWN_ITEM": "HIGH",
+    "OTHER": "MEDIUM",
+}
+EFFECT_LINKS = ["RELATION", "PRESENCE", "NONE"]
 
 RETURN_STEPS = {
     NextStep.RETURN_TO_DRAFTER,

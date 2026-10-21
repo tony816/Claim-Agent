@@ -123,7 +123,20 @@ RESUME_KINDS = {
     "redesign": ["--redesign"],                  # design_revision d+1, architect first
     "restart": ["--restart-from", "ARCHITECT"],  # full restart (materials changed)
     "accept_unverified": ["--accept-unverified"],
+    "select_prior_art": ["--select-prior-art-from-decision"],   # decision text: skeys (comma/space) and an optional YYYY-MM-DD
 }
+
+
+def prior_art_decision(skeys: list[str], base_date: str | None = None) -> str:
+    """The decision text of a select_prior_art resume; `none` picks no searched document."""
+    return (", ".join(skeys) or "none") + (f" {base_date}" if base_date else "")
+
+
+def parse_prior_art_decision(text: str) -> tuple[list[str], str | None]:
+    """(skeys, base_date) from a select_prior_art decision text."""
+    tokens = [t for t in re.split(r"[\s,]+", text.strip()) if t]
+    dates = [t for t in tokens if re.fullmatch(r"\d{4}-\d{2}-\d{2}", t)]
+    return [t for t in tokens if t not in dates and t.lower() != "none"], (dates[-1] if dates else None)
 
 
 def claim_proposal_route(kind: str, text: str, scope: str | None, dependent_live: bool) -> tuple[str, str | None]:

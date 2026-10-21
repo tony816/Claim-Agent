@@ -339,7 +339,22 @@ class Workspace:
                     for r in (state.get("records") or {}).values()],
             dependent=dict(reconstruction_gate=(dep.get("current") or {}).get("reconstruction_gate"), draft_set_lock=dep.get("draft_set_lock"), final_set_lock=dep.get("final_set_lock")) if dep else None,
             draft_claim_lock=cand.get("draft_claim_lock"), final_claim_lock=cand.get("final_claim_lock"),
+            prior_art=self.prior_art_status(state.get("prior_art")),
         )
+
+    @staticmethod
+    def prior_art_status(pa: dict | None) -> dict | None:
+        """Search candidates for the 선행기술 선택 resume (skey, number, title, Jev probability, chosen), no document text."""
+        if not pa or not pa.get("hits"):
+            return None
+        screened = pa.get("screened") or {}
+        kept = {d.get("skey") for d in pa.get("docs") or []} - {t.get("skey") for t in pa.get("trimmed") or []}
+        rows = []
+        for h in pa["hits"][:30]:
+            s = screened.get(h.get("skey"), {})
+            rows.append(dict(skey=h.get("skey"), number=" ".join(x for x in (h.get("ctry"), h.get("number"), h.get("kind")) if x), title=h.get("title", ""),
+                             published=h.get("published", ""), p_screen=s.get("p_screen"), relevance=s.get("relevance"), sealed=h.get("skey") in kept))
+        return dict(base_date=pa.get("base_date"), set_id=pa.get("set_id"), screening=pa.get("screening"), candidates=rows)
 
     def snapshot(self, sid: str, log_from: int | None = None) -> dict:
         """Session state for one poll. `log_from` is the client's live-log cursor: only what came after it is sent.
@@ -453,7 +468,8 @@ class Workspace:
             save_json(req, dict(text=text, material=material, reference=context,
                                 files=all_files, attachments=preset["attachments"], history=history, model=model, run_id=session["run_id"],
                                 instructions=preset["instructions"], user_lock=preset["user_lock"], project=preset["project"],
-                                ui_hints=dict(selected_mode=mode, dependent=dependent, target=target or "", target_mode=target_mode)))
+                                ui_hints=dict(selected_mode=mode, dependent=dependent, target=target or "", target_mode=target_mode,
+                                              prior_search=bool(data.get("prior_search")))))
             command = [sys.executable, "-u", "-m", "claim_agent.chat", "--project-root", str(self.root), "--request", str(req)]
             if self.config:
                 command += ["--config", str(self.config)]

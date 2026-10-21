@@ -125,6 +125,23 @@ def _dep_success(env: RoleEnvelope, mode: RequestMode) -> bool:
     return env.status == Status.PASS and env.handoff_ready
 
 
+def _prior_query(env: RoleEnvelope, mode: RequestMode) -> bool:
+    return env.status == Status.PASS and bool([q for q in env.queries_ko if q.strip()])
+
+
+def _prior_screen(env: RoleEnvelope, mode: RequestMode) -> bool:
+    return env.status == Status.PASS
+
+
+def _preexam_compare(env: RoleEnvelope, mode: RequestMode) -> bool:
+    return env.status == Status.PASS and bool(env.preexam_rows)
+
+
+def _preexam_judge(env: RoleEnvelope, mode: RequestMode) -> bool:
+    # The role's PREEXAM_NOVELTY_GATE is only a suggestion: the engine applies 설계 5.3 to its rows and the code tally.
+    return env.status in (Status.PASS, Status.REVIEW, Status.BLOCK) and env.execution_status == ExecStatus.RUN
+
+
 CONTRACTS: dict[tuple[str, Scope], GateContract] = {
     ("claim-architect", Scope.INDEPENDENT): GateContract(
         "claim-architect", ["DESIGN_GATE"], _architect, ["DESIGN_GATE"]
@@ -201,6 +218,10 @@ CONTRACTS: dict[tuple[str, Scope], GateContract] = {
     ("dependent-claim-strategy-architect", Scope.DEPENDENT_SET): GateContract(
         "dependent-claim-strategy-architect", ["DEPENDENT_DESIGN_GATE"], _dep_architect, ["DEPENDENT_DESIGN_GATE"]
     ),
+    ("prior-art-searcher", Scope.PRIOR_QUERY): GateContract("prior-art-searcher", [], _prior_query, []),
+    ("prior-art-searcher", Scope.PRIOR_SCREEN): GateContract("prior-art-searcher", [], _prior_screen, []),
+    ("prior-art-pre-examiner", Scope.PREEXAM_COMPARE): GateContract("prior-art-pre-examiner", [], _preexam_compare, []),
+    ("prior-art-pre-examiner", Scope.PREEXAM_JUDGE): GateContract("prior-art-pre-examiner", ["PREEXAM_NOVELTY_GATE"], _preexam_judge, ["PREEXAM_NOVELTY_GATE"]),
 }
 
 

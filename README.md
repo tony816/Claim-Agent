@@ -18,6 +18,10 @@
 - `oa-strategy-reviewer`: 독립항 및 종속항 세트의 분리된 DRAFT·FINAL OA·회피설계 감사
 - `blind-claim-reconstruction-reviewer`: 파일·검색·웹 도구 없이 독립항 또는 부모항 체인을 포함한 개별 종속항 문언만으로 비특허 기술 독자의 관계·형상 snapshot을 봉인하는 독립 감사
 - `picture-claim-reconstruction-reviewer`: 봉인 snapshot을 DESIGN_GATE 또는 목표 `DC-NN`·DEPENDENT_DESIGN_GATE·도면과 비교하는 최종 관계·형상 감사
+- `prior-art-searcher`: (선택) 설계 전에 발명 원자료로 WIPS 검색 문장을 쓰고, Jev 선별이 실패할 때만 후보를 명칭·요약으로 선별
+- `prior-art-pre-examiner`: (선행기술이 있을 때) drafter 전에 설계 요소를 봉인 선행기술 집합과 문헌별로 대비하고 신규성 위협·진보성 위험을 증거와 함께 판정. 한정을 만들지 않는다
+
+선행기술 검색(`--prior-search`)을 켜면 architect 전에 WIPS 6개국 검색 → OpenRouter Jev 선별·거르기 → `PRIOR_ART_SET` 봉인을 하고, architect 뒤 drafter 전에 사전 심사를 한다. 결과는 언제나 검색 집합 기준이며 전수 조사가 아니다. 자세한 내용은 [`docs/선행기술조사_사전심사_설계_2026-10.md`](docs/선행기술조사_사전심사_설계_2026-10.md)와 [`docs/python_runtime.md`](docs/python_runtime.md)의 "선행기술 검색과 사전 심사".
 
 청구항 작성은 `AUTHORING_DRAFT`, 출원용 최종 검증은 `FINALIZATION`으로 분리한다. 독립항은 architect → drafter의 PRE_STYLE 의미 초안 → 별도 style adjuster의 용어·스타일 후처리 → 별도 success reviewer → syntax → OA → blind → 기준 비교 순서로 검수한다. 유효한 독립항 LOCK 뒤 종속항을 요청하면 별도 `dependent_set_id`에 대해 기술기여 설계 → PRE_STYLE 문언 작성 → 별도 dependent style 조정 → 별도 dependent success reviewer → syntax → OA → 종속항별 blind → 기준·도면 비교를 수행한다. `CLAIM_STYLE_GATE: PASS` 전에는 PRE_STYLE 초안을 exact revision으로 취급하지 않고, 유효한 success record 전에는 syntax로 진행하지 않으며, `DEPENDENT_DESIGN_GATE`가 잠기기 전에는 종속항을 작성하지 않고 `DEPENDENT_RECONSTRUCTION_GATE: PASS` 전에는 종속항 세트 LOCK을 만들지 않는다. PHYSICAL/HYBRID 문언은 일반 기계 개발자의 1회독 도식화와 실제 물체·면/관찰 단면·기준/단면 윤곽/형상 술어 주체의 분리까지 검사한다. 기술기여 후보가 없으면 형상 항으로 수를 채우지 않는다. 잠정·최종 종속항 세트는 각각 `DRAFT_DEPENDENT_SET_LOCK`과 `FINAL_DEPENDENT_SET_LOCK`으로 독립항 LOCK과 분리한다.
 

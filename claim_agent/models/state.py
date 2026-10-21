@@ -8,10 +8,17 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from .enums import RequestMode, StyleChangeMode
+from .prior_art import PriorArtState
 
 
 class Stage(str, Enum):  # noqa: UP042
+    PRIOR_QUERY = "PRIOR_QUERY"
+    PRIOR_SEARCH = "PRIOR_SEARCH"
+    PRIOR_SCREEN = "PRIOR_SCREEN"
+    PRIOR_FETCH = "PRIOR_FETCH"
+    PRIOR_TRIM = "PRIOR_TRIM"
     ARCHITECT = "ARCHITECT"
+    PRE_EXAM = "PRE_EXAM"
     DRAFT = "DRAFT"
     STYLE = "STYLE"
     SUCCESS = "SUCCESS"
@@ -33,7 +40,8 @@ class Stage(str, Enum):  # noqa: UP042
     HALTED = "HALTED"
 
 
-INDEPENDENT_ORDER = [Stage.ARCHITECT, Stage.DRAFT, Stage.STYLE, Stage.SUCCESS, Stage.SYNTAX, Stage.OA, Stage.BLIND, Stage.PICTURE, Stage.LOCK]
+PRIOR_ORDER = [Stage.PRIOR_QUERY, Stage.PRIOR_SEARCH, Stage.PRIOR_SCREEN, Stage.PRIOR_FETCH, Stage.PRIOR_TRIM]
+INDEPENDENT_ORDER = [Stage.ARCHITECT, Stage.PRE_EXAM, Stage.DRAFT, Stage.STYLE, Stage.SUCCESS, Stage.SYNTAX, Stage.OA, Stage.BLIND, Stage.PICTURE, Stage.LOCK]
 DEPENDENT_ORDER = [Stage.DEP_ARCHITECT, Stage.DEP_DRAFT, Stage.DEP_STYLE, Stage.DEP_SUCCESS, Stage.DEP_SYNTAX, Stage.DEP_OA, Stage.DEP_RECON, Stage.DEP_LOCK]
 
 
@@ -80,6 +88,10 @@ class CandidateState(BaseModel):
     draft_claim_lock: str | None = None
     final_claim_lock: str | None = None
     loop_counts: dict[str, int] = Field(default_factory=dict)
+    # PRE_EXAM (설계 5절): the latest judge record of the current design, and COMPARE rows reused across
+    # design revisions keyed by "<doc sha256>:<element text sha256>" (설계 5.5).
+    preexam_record_id: str | None = None
+    preexam_rows: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class TargetRecon(BaseModel):
@@ -170,6 +182,7 @@ class RunState(BaseModel):
     candidate: CandidateState
     dependent: DependentSetState | None = None
     baseline_set: BaselineSet | None = None      # EXISTING_SET_EDIT only
+    prior_art: PriorArtState | None = None       # prior_search.enabled only
     records: dict[str, RecordRef] = Field(default_factory=dict)
     halt: Halt | None = None
     outcome: str = "RUNNING"
@@ -192,6 +205,17 @@ class RunState(BaseModel):
 
     def record(self, record_id: str | None) -> RecordRef | None:
         return self.records.get(record_id) if record_id else None
+
+    def prior_art_label(self) -> str:
+        """PRIOR_ART_SET label (설계 5.1): user files, a sealed WIPS set, both, or none."""
+        from .prior_art import LABEL_BOTH, LABEL_NONE, LABEL_PROVIDED, LABEL_SEARCHED
+
+        searched = self.prior_art is not None and self.prior_art.set_id is not None and not self.prior_art.skipped
+        searched_paths = {d.path for d in self.prior_art.kept()} if searched and self.prior_art else set()
+        provided = any(m.get("category") == "prior_art" and m.get("path") not in searched_paths for m in self.material_meta)
+        if searched:
+            return LABEL_BOTH if provided else LABEL_SEARCHED
+        return LABEL_PROVIDED if provided else LABEL_NONE
 
     def mark_superseded(self, record_ids: list[str]) -> None:
         for rid in record_ids:

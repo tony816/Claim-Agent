@@ -10,6 +10,8 @@ import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
+from .models.prior_art import PriorSearchOptions
+
 DEFAULT_CONFIG_NAME = "claim-agent.yaml"
 ProviderKind = Literal["gemini", "claude_oauth", "codex_oauth", "openrouter", "antigravity"]
 
@@ -74,7 +76,7 @@ class RetryConfig(BaseModel):
 
 class PipelineConfig(BaseModel):
     max_return_loops: dict[str, int] = Field(
-        default_factory=lambda: {"STYLE_ONLY": 2, "DRAFTER": 2, "ARCHITECT": 1, "DEPENDENT_ARCHITECT": 1}
+        default_factory=lambda: {"STYLE_ONLY": 2, "DRAFTER": 2, "ARCHITECT": 1, "DEPENDENT_ARCHITECT": 1, "PREEXAM": 2}
     )
     max_concurrency: int = 3
     expand_multi_dependent: bool = False
@@ -150,6 +152,8 @@ class AppConfig(BaseModel):
     improve: ImproveConfig = Field(default_factory=ImproveConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     graph: GraphConfig = Field(default_factory=GraphConfig)
+    # WIPS search + Jev screening before the design (docs/선행기술조사_사전심사_설계_2026-10.md); off unless a request enables it.
+    prior_search: PriorSearchOptions = Field(default_factory=PriorSearchOptions)
     materials: MaterialsConfig = Field(default_factory=MaterialsConfig)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
     provider: ProviderConfig = Field(default_factory=ProviderConfig)

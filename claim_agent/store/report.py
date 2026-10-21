@@ -257,6 +257,52 @@ def _edit_section(state: RunState) -> list[str]:
     return out
 
 
+def prior_art_line(state: RunState) -> str:
+    """One line for the conversation answer: which set the novelty checks rest on and the pre-exam result."""
+    label = state.prior_art_label()
+    if label == "NONE":
+        return ""
+    pa = state.prior_art
+    pre = state.record(state.candidate.preexam_record_id)
+    parts = [f"선행기술: {label}"]
+    if pa is not None and pa.set_id and not pa.skipped:
+        parts.append(f"WIPS {', '.join(pa.options.countries)} 검색 후보 {len(pa.hits)}건 중 {len(pa.kept())}건 봉인(기준일 {pa.base_date})")
+    if pre is not None:
+        parts.append(f"사전 심사 {pre.gates.get('PREEXAM_NOVELTY_GATE', '-')} · 진보성 위험 {pre.gates.get('INVENTIVE_RISK', '-')}")
+    return "※ " + " · ".join(parts) + " — 이 집합 기준이며 등록 가능성을 뜻하지 않습니다."
+
+
+def render_prior_art(state: RunState) -> str:
+    """The full report's prior-art section: sealed set, screening and the pre-exam decision (설계 5·5.6)."""
+    label = state.prior_art_label()
+    pa = state.prior_art
+    pre_id = state.candidate.preexam_record_id
+    if label == "NONE" and (pa is None or not pa.hits):
+        return ""
+    out = ["## 선행기술 조사·사전 심사", "", f"- PRIOR_ART_SET: {label}"]
+    if pa is not None:
+        if pa.skipped:
+            out.append("- WIPS 검색 불가를 받아들여 검색 없이 진행")
+        out.append(f"- 검색: {', '.join(pa.options.countries)} · 국문 {len(pa.queries_ko)}·영문 {len(pa.queries_en)} 문장 · 후보 {len(pa.hits)}건 · WIPS 호출 {pa.wips_calls}회")
+        out.append(f"- 선별: {pa.screening or '-'} · 선택 규칙: {pa.selection_rule or '-'} · 거르기: {pa.trim or '-'} · 기준일 {pa.base_date}"
+                   + ("" if pa.base_date_source == "REQUEST" else " (실행일 — 출원 예정일 미지정)"))
+        if pa.set_id:
+            out.append(f"- 봉인: `{pa.set_id}` (`{pa.set_record_id}`) — 문헌 {len(pa.kept())}건, Jev 확률은 문헌 선택 도구이며 개시 근거가 아님")
+        if pa.docs:
+            out += ["", "| 문헌 | 명칭 | 공개일 | Jev 선별 | Jev 거르기 | 결과 |", "|---|---|---|---|---|---|"]
+            kept = {d.skey for d in pa.kept()}
+            for d in pa.docs:
+                ps = f"{d.p_screen:.2f}" if d.p_screen is not None else "-"
+                pt = f"{d.p_trim:.2f}" if d.p_trim is not None else "-"
+                out.append(f"| {d.number} | {d.title} | {d.published or '-'} | {ps} | {pt} | {'봉인' if d.skey in kept else '제외'} |")
+    pre = state.record(pre_id)
+    if pre is not None:
+        out += ["", f"사전 심사 `{pre_id}`: PREEXAM_NOVELTY_GATE **{pre.gates.get('PREEXAM_NOVELTY_GATE', '-')}**, "
+                    f"INVENTIVE_RISK {pre.gates.get('INVENTIVE_RISK', '-')} (비게이팅). 문헌별 대비표는 `records/{pre_id}.md`."]
+    out.append("")
+    return "\n".join(out)
+
+
 def render_chat_report(state: RunState) -> str:
     """The conversation answer: the deliverable first, then a summary of at most 500 characters and a usage footnote.
 
@@ -291,6 +337,9 @@ def render_chat_report(state: RunState) -> str:
             label = "출원용 최종 종속항 세트" if dep.final_set_lock else PROVISIONAL_LABEL
             out += [f"### 종속항 세트 ({lock}; {label})", "",
                     (dep.current.exact_text if dep.current and dep.current.exact_text else None) or "종속항 문언 없음", ""]
+    prior = prior_art_line(state)
+    if prior:
+        out += [prior, ""]
     out += ["## 요약 코멘트", "", summary_comment(state), ""]
     usage, seconds = turn_usage(state)
     out += [usage_note(usage, seconds),
@@ -371,6 +420,9 @@ def render_report(state: RunState, claims_only: bool = False) -> str:
             out.append(f"| {tid} | `{t.blind_record_id}` | `{t.picture_record_id}` | {t.picture_status or '-'} |")
         out.append(f"\nDEPENDENT_RECONSTRUCTION_GATE: {dep.current.reconstruction_gate or 'N/A'}")
         out.append("")
+    prior = render_prior_art(state)
+    if prior:
+        out.append(prior)
     perf = render_performance(state)
     if perf:
         out.append(perf)
@@ -390,8 +442,11 @@ def render_report(state: RunState, claims_only: bool = False) -> str:
         out.append("재개: `claim-agent resume " + state.run_id + " --decide \"<결정>\" [--apply-style-fix|--apply-meaning-fix|--redesign|--add-source PATH]`")
     if not state.spec_present:
         out.append("- OA_FINAL_GATE / DEPENDENT_OA_FINAL_GATE: UNVERIFIED — SPEC_NOT_PROVIDED (정식 명세서 미제공; DRAFT 게이트와 공존)")
-    if not state.prior_art_present:
+    label = state.prior_art_label()
+    if label == "NONE":
         out.append("- 신규성·진보성: UNVERIFIED — PRIOR_ART_NOT_PROVIDED (등록 가능성을 단정하지 않음)")
+    elif "SEARCHED" in label:
+        out.append(f"- 신규성·진보성: {label} — 검색 집합 기준 결과뿐이며 전수 조사가 아니다 (등록 가능성을 단정하지 않음)")
     for n in state.notes:
         out.append(f"- {n}")
     out.append("")

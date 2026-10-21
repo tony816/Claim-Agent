@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from ..sources.extract import DOC_EXT, ExtractionError, extract_text
 from ..sources.images import DEFAULT_MAX_SIDE, normalize_image
 from .enums import RequestMode
+from .prior_art import PriorSearchOptions
 
 IMAGE_EXT = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 TEXT_EXT = {".md", ".txt", ".yaml", ".yml", ".json", ".csv"}
@@ -27,6 +28,8 @@ class RunRequest(BaseModel):
     spec_path: str | None = None            # 정식 명세서 (FINALIZATION)
     drawings: list[str] = Field(default_factory=list)
     prior_art: list[str] = Field(default_factory=list)   # empty -> PRIOR_ART_SET: NONE
+    # WIPS search before the design (설계 4절); None keeps claim-agent.yaml `prior_search` (off by default).
+    prior_search: PriorSearchOptions | None = None
     dependent: bool = False
     dependent_target: str | None = None    # e.g. "2~10"
     dependent_set_id: str | None = None

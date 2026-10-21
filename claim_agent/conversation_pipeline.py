@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 from .claim_scope import apply_ui_target, constrain_target, find_existing_set, parse_target, ui_target_set
+from .models.prior_art import PriorSearchOptions
 from .models.request import IMAGE_EXT, RunRequest
 from .pipeline.engine import Decision
 from .routing import RouteDecision
@@ -232,6 +233,8 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
         reviewers=list(dict.fromkeys(route.reviewers)), review_scope=route.review_scope,
         claim_file=baseline[0] if baseline else (source["path"] if source else None),
         authoring_scope=route.authoring_scope if authoring else None, **paths,
+        # 선행기술 검색 체크(웹 작성 창·MCP claim_send): WIPS 검색 + Jev 선별 + 사전 심사, 나머지 값은 claim-agent.yaml prior_search
+        prior_search=PriorSearchOptions(enabled=True) if (request.get("ui_hints") or {}).get("prior_search") and authoring and not previous else None,
     )
     # Existing model claims can be a review/edit target, but are not evidence of
     # new technical facts. The packet builder passes claim_file separately.

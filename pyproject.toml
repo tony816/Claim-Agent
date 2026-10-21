@@ -18,6 +18,9 @@ dependencies = [
     "pypdf>=4",
     "python-docx>=1.1",
     "olefile>=0.47",
+    "requests>=2.31",
+    # Jev (prior-art screening) via OpenRouter; jev-cli 0.6.3 itself requires Python >= 3.13, so older interpreters skip it.
+    "jev-cli==0.6.3; python_version >= '3.13'",
 ]
 
 [project.optional-dependencies]

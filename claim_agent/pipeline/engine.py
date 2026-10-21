@@ -51,7 +51,9 @@ from .claimtext import (
     validate_parent_refs,
 )
 from .corpus_tool import ToolLog, make_tools
+from .handoff import write_handoff
 from .locks import build_baseline_record, build_claim_lock, build_dependent_set_lock
+from .prior_steps import PriorArtSteps, PriorArtTools, stage_is_prior
 from .transitions import LOOP_KEY, Transition, decide
 
 ROLE_BY_STAGE = {
@@ -73,7 +75,7 @@ ROLE_BY_STAGE = {
 }
 
 REVIEWER_ROLES = {"claim-success-reviewer", "syntax-scope-reviewer", "oa-strategy-reviewer", "picture-claim-reconstruction-reviewer"}
-NON_GATING_UNVERIFIED = {"SPEC_NOT_PROVIDED", "PRIOR_ART_NOT_PROVIDED"}
+NON_GATING_UNVERIFIED = {"SPEC_NOT_PROVIDED", "PRIOR_ART_NOT_PROVIDED", "PRIOR_SEARCH_UNAVAILABLE"}
 
 
 class PipelineHalt(Exception):
@@ -103,12 +105,14 @@ def budget_violation(usage: dict[str, float], cfg: AppConfig) -> str | None:
 @dataclass
 class Decision:
     text: str = ""
-    action: str = "none"      # none | style_fix | meaning_fix | redesign | add_source | accept_unverified | restart
+    action: str = "none"      # none | style_fix | meaning_fix | redesign | add_source | accept_unverified | restart | select_prior_art
     add_sources: list[str] | None = None
     restart_from: str | None = None
     request_update: RunRequest | None = None  # conversational scope/source update; always redesign
     scope: str | None = None                  # INDEPENDENT | DEPENDENT: which revision a style/meaning fix targets on a finished run
     feedback_text: str | None = None          # the user's own words when `text` also carries project instructions
+    prior_art_selection: list[str] | None = None   # select_prior_art: WIPS skeys the user picked (설계 4절)
+    base_date: str | None = None              # select_prior_art: 출원 예정일 (YYYY-MM-DD)
 
 
 FEEDBACK_INSTRUCTION = (
@@ -117,7 +121,7 @@ FEEDBACK_INSTRUCTION = (
 )
 
 
-class PipelineEngine:
+class PipelineEngine(PriorArtSteps):
     def __init__(
         self,
         cfg: AppConfig,
@@ -130,6 +134,7 @@ class PipelineEngine:
         variant_id: str = "default",
         lessons_hash: str = "none",
         shadow_hook: Callable[[CallSpec, RoleEnvelope, RunState], None] | None = None,
+        prior_art_tools: PriorArtTools | None = None,
     ):
         self.cfg = cfg
         self.provider = provider
@@ -141,6 +146,7 @@ class PipelineEngine:
         self.variant_id = variant_id
         self.lessons_hash = lessons_hash
         self.shadow_hook = shadow_hook
+        self.prior_art_tools = prior_art_tools
         self._bundle: MaterialBundle | None = None
         self._tool_logs: dict[str, ToolLog] = {}
         self._lock = threading.Lock()
@@ -166,6 +172,7 @@ class PipelineEngine:
             prior_art_present=bundle.prior_art_present,
             candidate=CandidateState(candidate_id=request.candidate_id),
         )
+        self._init_prior_art(state, request)
         if request.request_mode == RequestMode.REVIEW_ONLY:
             state.stage = Stage.REVIEW_ONLY
         elif request.authoring_scope == EXISTING_SET_EDIT:
@@ -362,7 +369,9 @@ class PipelineEngine:
         # The answer to this turn must say what became of the feedback, not only redraw the claims.
         words = decision.feedback_text if decision.feedback_text is not None else decision.text
         state.feedback = dict(text=words, action=decision.action, dispositions={}) if words.strip() and decision.action != "accept_unverified" else None
-        if decision.restart_from:
+        if self._resume_prior_art(state, decision, halted_stage):
+            pass
+        elif decision.restart_from:
             state.stage = Stage(decision.restart_from)
             if state.stage == Stage.ARCHITECT:
                 self._bump_design(state, decision.text or "사용자 재시작", full_reset=True)
@@ -553,6 +562,10 @@ class PipelineEngine:
             "claims": [c.model_dump() for c in env.claims], "candidates": [c.model_dump() for c in env.candidates],
             "per_claim_gates": [g.model_dump() for g in env.per_claim_gates], "open_issues": [o.model_dump() for o in env.open_issues],
             "limitation_evidence": [e.model_dump(mode="json") for e in env.limitation_evidence], "evidence_problem": evidence_problem,
+            "design_elements": [e.model_dump(mode="json") for e in env.design_elements],
+            "preexam_rows": [r.model_dump(mode="json") for r in env.preexam_rows], "novelty": [n.model_dump(mode="json") for n in env.novelty],
+            "remaining_differences": [r.model_dump(mode="json") for r in env.remaining_differences],
+            "inventive_risk": env.inventive_risk.value if env.inventive_risk else None, "inventive_primary_doc": env.inventive_primary_doc,
             "source_set_id": state.source_set_id, "call_file": ref.call_file, "aux_source_usage": env.aux_source_usage,
             "tool_log": tool_log.render() if tool_log.calls else "조건부 보조 소스: NOT_ACTIVATED", "report_markdown": env.report_markdown,
         }
@@ -815,7 +828,12 @@ class PipelineEngine:
             if state.total_loops > sum(self.cfg.pipeline.max_return_loops.values()) + 2:
                 raise PipelineHalt(Halt(stage=state.stage.value, role="engine", kind="LOOP_LIMIT", message="total return loops exceeded"))
             st = state.stage
-            if st in (Stage.ARCHITECT, Stage.DRAFT, Stage.STYLE, Stage.SUCCESS, Stage.SYNTAX, Stage.OA, Stage.BLIND, Stage.PICTURE, Stage.LOCK):
+            bundle = self._bundle or bundle      # PRIOR_TRIM reloads the bundle with the sealed documents
+            if stage_is_prior(st):
+                self._prior_step(state, bundle)
+            elif st == Stage.PRE_EXAM:
+                self._preexam_step(state, bundle)
+            elif st in (Stage.ARCHITECT, Stage.DRAFT, Stage.STYLE, Stage.SUCCESS, Stage.SYNTAX, Stage.OA, Stage.BLIND, Stage.PICTURE, Stage.LOCK):
                 self._independent_step(state, bundle)
             else:
                 self._dependent_step(state, bundle)
@@ -837,7 +855,7 @@ class PipelineEngine:
                 return
             c.design_record_id = rid
             c.current = RevisionState(revision=c.revision, design_revision=c.design_revision)
-            state.stage = Stage.DRAFT
+            state.stage = Stage.PRE_EXAM if self._needs_preexam(state, bundle) else Stage.DRAFT
             return
 
         cur = c.current
@@ -945,6 +963,8 @@ class PipelineEngine:
             kind = "final_claim_lock" if final else "draft_claim_lock"
             lock_id = record_id(kind, ids)
             lock, md = build_claim_lock(state, lock_id, final, exact, [m["name"] for m in state.material_meta])
+            lock["spec_handoff"], handoff_md = write_handoff(state, self.store, "INDEPENDENT")
+            md += ("\n" + handoff_md) if handoff_md else ""
             self.store.write_record(state.run_id, lock_id, {**lock, "report_markdown": md}, md)
             state.records[lock_id] = RecordRef(record_id=lock_id, kind=kind, role="engine", scope="INDEPENDENT", stage=st.value, status="LOCKED", gates={}, text_sha256=cur.exact_sha256, ids=ids.as_dict(), source_set_id=state.source_set_id)
             cur.records[kind] = lock_id
@@ -1206,6 +1226,8 @@ class PipelineEngine:
             kind = "final_dependent_set_lock" if final else "draft_dependent_set_lock"
             lock_id = record_id(kind, ids)
             lock, md = build_dependent_set_lock(state, lock_id, final, root_text, set_text, [m["name"] for m in state.material_meta])
+            lock["spec_handoff"], handoff_md = write_handoff(state, self.store, "DEPENDENT")
+            md += ("\n" + handoff_md) if handoff_md else ""
             self.store.write_record(state.run_id, lock_id, {**lock, "report_markdown": md}, md)
             state.records[lock_id] = RecordRef(record_id=lock_id, kind=kind, role="engine", scope="DEPENDENT_SET", stage=st.value, status="LOCKED", gates={}, text_sha256=cur.exact_sha256, ids=ids.as_dict(), source_set_id=state.source_set_id)
             cur.records[kind] = lock_id
