@@ -84,7 +84,7 @@ class Workspace:
                 self.sessions[data["id"]] = data
 
     def redact(self, text: str) -> str:
-        for name in {self.cfg.model.api_key_env, "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"}:
+        for name in {self.cfg.model.api_key_env, self.cfg.provider.openrouter.api_key_env, "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"}:
             value = os.environ.get(name)
             if value:
                 text = text.replace(value, "[API KEY]")

@@ -32,7 +32,7 @@ class EventWriter:
         path = os.environ.get("CLAIM_AGENT_EVENT_LOG") or os.environ.get("CLAIM_COPA_EVENT_LOG")
         if not path:
             return None
-        return cls(Path(path), [os.environ.get(n, "") for n in {api_key_env, "GEMINI_API_KEY", "GOOGLE_API_KEY"}])
+        return cls(Path(path), [os.environ.get(n, "") for n in {api_key_env, "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY"}])
 
     def emit(self, kind: str, **data: Any) -> None:
         line = json.dumps({"kind": kind, "time": time.time(), **data}, ensure_ascii=False)

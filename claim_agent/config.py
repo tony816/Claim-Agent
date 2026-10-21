@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 DEFAULT_CONFIG_NAME = "claim-agent.yaml"
-ProviderKind = Literal["gemini", "claude_oauth", "codex_oauth"]
+ProviderKind = Literal["gemini", "claude_oauth", "codex_oauth", "openrouter", "antigravity"]
 
 
 class ModelConfig(BaseModel):
@@ -26,11 +26,21 @@ class SubscriptionConfig(BaseModel):
     timeout_s: int = Field(default=600, ge=10, le=3600)
 
 
+class OpenRouterConfig(BaseModel):
+    model: str = "deepseek/deepseek-v4.1-flash-1017"
+    api_key_env: str = "OPENROUTER_API_KEY"
+    max_output_tokens: int = 32000
+    timeout_s: int = Field(default=900, ge=10, le=3600)
+
+
 class ProviderConfig(BaseModel):
     # Claude and Codex run through their official CLI on a subscription login; there is no API-key transport.
     kind: ProviderKind = "gemini"
     claude_oauth: SubscriptionConfig = Field(default_factory=lambda: SubscriptionConfig(model="sonnet"))
     codex_oauth: SubscriptionConfig = Field(default_factory=lambda: SubscriptionConfig(model="default"))
+    # Antigravity runs its official `agy` CLI on the account login that `agy` itself stores.
+    antigravity: SubscriptionConfig = Field(default_factory=lambda: SubscriptionConfig(model="gemini-3.1-pro-high", timeout_s=900))
+    openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)
 
 
 class RoleConfig(BaseModel):

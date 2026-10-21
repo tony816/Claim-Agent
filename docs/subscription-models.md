@@ -52,6 +52,21 @@ roles:
 
 Claude를 앱 전용 폴더에 설치하려면 `npm install --prefix "%USERPROFILE%\.claim-agent\tools" @anthropic-ai/claude-code`를 실행할 수도 있습니다. 이 위치의 CLI는 실행기가 자동으로 찾습니다.
 
+## Antigravity·OpenRouter (cs2-spec-writer와 같은 모델)
+
+- **Antigravity · 구독 로그인** (`antigravity`): 공식 `agy` CLI가 자기 저장소(`%USERPROFILE%\.gemini\antigravity-cli`)에 둔 계정 로그인을 씁니다. 앱에는 로그인 버튼이 없으니 터미널에서 `agy`를 한 번 실행해 직접 로그인하세요. 연결 확인은 `agy models`로 합니다. 기본 모델은 `gemini-3.1-pro-high`입니다. `agy`는 프롬프트를 명령행 인자로만 받는데, 역할 패킷은 원자료 전문을 담아 Windows 명령행 한도(약 3만 자)를 넘습니다. 그래서 패킷과 도면은 `%USERPROFILE%\.claim-agent\agy_ws\…` 파일로 넘기고 plan 모드에서 `view_file`로 읽게 합니다. 이렇게 하려면 agy `settings.json`의 `permissions.allow`에 `read_file(C:\Users\<사용자>\.claim-agent\agy_ws)` 규칙이 있어야 합니다. 규칙이 없으면 짧은 요청만 실행되고 도면 입력은 거부됩니다. 환경의 `GEMINI_API_KEY`·`GOOGLE_API_KEY`는 agy에 넘기지 않습니다(키 과금 방지).
+- **OpenRouter · API 키** (`openrouter`): `.env`의 `OPENROUTER_API_KEY`로 `https://openrouter.ai/api/v1/chat/completions`를 호출합니다. 모델은 OpenRouter의 `제공사/모델` ID(기본 `deepseek/deepseek-v4.1-flash-1017`)이며, 그 밖의 ID는 **모델 ID 직접 입력**으로 지정합니다. OpenRouter가 응답에 넣어 주는 USD 비용을 그대로 기록하므로 `pipeline.max_cost_usd` 예산 가드가 적용됩니다. Windows에서는 Gemini 클라이언트와 같이 Windows 인증서 저장소로 TLS를 검증합니다. 키는 이벤트 로그·화면 출력에서 `[API KEY]`로 가립니다.
+- Claude 모델 선택기에는 별칭(`fable`·`opus`·`sonnet`·`haiku`)과 함께 `claude-fable-5-1`·`claude-opus-5-5`·`claude-opus-5`·`claude-sonnet-5-5` 정확 ID가 있습니다. Codex는 CLI 모델 캐시(`gpt-6.1-sol` 등)를 그대로 보여 줍니다.
+
+```yaml
+provider:
+  antigravity: {model: gemini-3.1-pro-high, timeout_s: 900}
+  openrouter: {model: deepseek/deepseek-v4.1-flash-1017, api_key_env: OPENROUTER_API_KEY, timeout_s: 900}
+roles:
+  claim-drafter: {provider: openrouter, model: deepseek/deepseek-v4.1-flash-1017}
+  claim-architect: {provider: claude_oauth, model: claude-fable-5-1}
+```
+
 ## 실행 계약
 
 - 매 호출은 새 임시 작업 폴더에서 실행됩니다. 역할 지침은 별도 시스템 지침으로, 원자료·이전 단계 보고서는 기존 패킷 그대로 전달합니다. 긴 본문은 명령행이 아닌 stdin으로 전달합니다.

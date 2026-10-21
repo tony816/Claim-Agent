@@ -215,9 +215,9 @@ def cmd_doctor(args) -> int:
 
 def cmd_models(args) -> int:
     rt = _rt(args)
-    if rt.cfg.provider.kind.endswith("_oauth"):
+    if rt.cfg.provider.kind != "gemini":
         print(f"provider: {rt.cfg.provider.kind}\nconfigured model: {rt.cfg.default_model}")
-        print("구독 CLI: 웹 모델 설정에서 계정 기본 모델 또는 사용 가능한 모델 ID를 지정하세요. API models.list는 사용하지 않습니다.")
+        print("웹 모델 설정에서 모델을 고르거나 모델 ID를 직접 입력하세요. 이 연결에서는 API models.list를 사용하지 않습니다.")
         return 0
     from .runtime import live_provider
 

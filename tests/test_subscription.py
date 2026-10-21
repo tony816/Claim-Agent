@@ -200,7 +200,7 @@ def test_header_switch_changes_provider_mid_chat_and_keeps_role_rows(tmp_path, m
 
 
 def test_claude_api_key_provider_is_gone_and_old_configs_move_to_the_cli(tmp_path):
-    assert "anthropic" not in PROVIDERS and set(PROVIDERS) == {"gemini", "claude_oauth", "codex_oauth"}
+    assert "anthropic" not in PROVIDERS and set(PROVIDERS) == {"gemini", "claude_oauth", "codex_oauth", "antigravity", "openrouter"}
     workspace = Workspace(tmp_path)
     with pytest.raises(ValueError, match="제공자"):
         provider_overrides(workspace.cfg, {"provider": "anthropic"})

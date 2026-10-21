@@ -55,6 +55,8 @@ class TelemetryRow:
 def estimate_cost(model: str, usage: dict[str, int], pricing: dict[str, dict[str, float]]) -> float | None:
     if usage.get("subscription_calls"):
         return None
+    if usage.get("cost_usd") is not None:      # the provider reported its own USD bill (OpenRouter)
+        return round(float(usage["cost_usd"]), 6)
     p = pricing.get(model)
     if not p:
         return None

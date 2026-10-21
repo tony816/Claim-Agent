@@ -73,11 +73,11 @@ def npm_entry(package: Path, name: str) -> list[str] | None:
     return None
 
 
-def run_cli(command: list[str], kind: str, *, cwd: Path, stdin: str = "", timeout: int = 20):
+def run_cli(command: list[str], kind: str, *, cwd: Path, stdin: str = "", timeout: int = 20, env: dict[str, str] | None = None):
     options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
     try:
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   text=True, encoding="utf-8", errors="replace", cwd=cwd, env=cli_env(kind), **options)
+                                   text=True, encoding="utf-8", errors="replace", cwd=cwd, env=env or cli_env(kind), **options)
         try:
             stdout, stderr = process.communicate(stdin, timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -121,8 +121,15 @@ def login(kind: str, configured: str | None = None) -> dict:
 
 
 class SubscriptionProvider:
+    """Packet assembly, the permitted-tool loop and events; `_once` is the transport (one fresh-context call)."""
+
+    transport, billing = "official_cli", "subscription"
+
     def __init__(self, kind: str, config, events=None):
         self.name, self.config, self.events = kind, config, events
+
+    def status(self) -> dict:
+        return connection_status(self.name, self.config.executable)
 
     def list_models(self):
         raise ProviderError("구독 CLI는 API 모델 목록을 제공하지 않습니다. 모델 설정에서 계정 기본 모델 또는 계정에서 사용 가능한 모델 ID를 선택하세요.")
@@ -136,7 +143,7 @@ class SubscriptionProvider:
         blind = spec.role == "blind-claim-reconstruction-reviewer"
         if blind and (spec.sources_block or spec.images or spec.history or spec.tools or spec.cache_packet_text):
             raise ProviderError("blind call must contain only its sealed instructions and packet")
-        status = connection_status(self.name, self.config.executable)
+        status = self.status()
         if not status["connected"]:
             raise ProviderError(status["message"])
         call_id, started = uuid.uuid4().hex, time.monotonic()
@@ -186,13 +193,14 @@ class SubscriptionProvider:
         except Exception as exc:
             self._emit("error", spec, call_id, text=str(exc))
             raise
-        # Subscription usage is not a USD API bill, even if the same model is in pricing.
-        usage["subscription_calls"] = 1
+        if self.billing == "subscription":
+            # Subscription usage is not a USD API bill, even if the same model is in pricing.
+            usage["subscription_calls"] = 1
         self._emit("delta", spec, call_id, text=text)
         self._emit("response_end", spec, call_id, finish_reason="STOP", function_calls=calls)
         return CallResult(text=text, parsed=parsed if spec.json_schema else None, usage=usage, latency_ms=int((time.monotonic()-started)*1000),
                           function_calls=calls, finish_reason="STOP", model=spec.model, provider=self.name,
-                          raw={"transport": "official_cli", "billing": "subscription", "fresh_context": True})
+                          raw={"transport": self.transport, "billing": self.billing, "fresh_context": True})
 
     def _once(self, spec: CallSpec, packet: str, images: list[ImagePart]) -> tuple[str, dict]:
         command = executable(self.name, self.config.executable)
