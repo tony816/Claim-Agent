@@ -45,6 +45,21 @@ def test_openrouter_list_is_newest_first_cached_and_survives_outages(tmp_path, m
     assert catalog.openrouter_models(cfg_at(tmp_path / "fresh")) == []
 
 
+def test_openrouter_labels_carry_name_price_and_context_for_search(tmp_path, monkeypatch):
+    assert catalog.openrouter_label({"id": "deepseek/v4", "name": "DeepSeek: V4 Flash", "context_length": 1048576,
+                                     "pricing": {"prompt": "0.00000015", "completion": "0.0000006"}}) == "V4 Flash · $0.15/$0.6 per 1M · 1M ctx"
+    assert catalog.openrouter_label({"id": "x/free", "context_length": 262144, "pricing": {"prompt": "0", "completion": "0"}}) == "x/free · 무료 · 262K ctx"
+    assert catalog.openrouter_label({"id": "x/bare"}) == "x/bare"
+    # Lists cached by earlier versions (bare IDs, preformatted pairs) still load.
+    (tmp_path / ".tui").mkdir()
+    (tmp_path / ".tui" / "model-catalog.json").write_text(json.dumps({"openrouter": {"fetched_at": time.time(), "models": [
+        "old/id", ["pair/id", "Pair"], {"id": "raw/id", "name": "V: Raw", "pricing": {"prompt": "0", "completion": "0"}}]}}), encoding="utf-8")
+    cfg = cfg_at(tmp_path)
+    assert catalog.openrouter_catalog(cfg) == [["old/id", ""], ["pair/id", "Pair"], ["raw/id", "Raw · 무료"]]
+    monkeypatch.setattr(ms, "openrouter_catalog", catalog.openrouter_catalog)
+    assert ms.openrouter_labels(cfg) == {"pair/id": "Pair", "raw/id": "Raw · 무료"}
+
+
 def test_gemini_list_keeps_text_models_newest_first(tmp_path, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "offline")
     rows = [SimpleNamespace(name=f"models/{n}", supported_actions=a) for n, a in [

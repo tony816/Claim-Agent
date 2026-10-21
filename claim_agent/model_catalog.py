@@ -69,7 +69,31 @@ def gemini_models(cfg, refresh: bool = False) -> list[str]:
     return _cached(cfg.project_root, "gemini", fetch, refresh)
 
 
-def openrouter_models(cfg, refresh: bool = False) -> list[str]:
+def _price(per_token) -> str:
+    try:
+        value = float(per_token) * 1e6
+    except (TypeError, ValueError):
+        return "?"
+    return "0" if value == 0 else f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def _context(tokens) -> str:
+    if not isinstance(tokens, int) or tokens <= 0:
+        return ""
+    return (f"{round(tokens / 1_000_000, 1):g}M" if tokens >= 1_000_000 else f"{tokens // 1000}K") + " ctx"
+
+
+def openrouter_label(model: dict) -> str:
+    """'DeepSeek V4.1 Flash 1017 · $0.15/$0.6 per 1M · 1M ctx' — name without the vendor prefix, input/output price."""
+    name = str(model.get("name") or model["id"]).split(": ", 1)[-1]
+    pricing = model.get("pricing") or {}
+    prompt, completion = _price(pricing.get("prompt")), _price(pricing.get("completion"))
+    price = "무료" if prompt == completion == "0" else "" if prompt == completion == "?" else f"${prompt}/${completion} per 1M"
+    return " · ".join(part for part in (name, price, _context(model.get("context_length"))) if part)
+
+
+def openrouter_catalog(cfg, refresh: bool = False) -> list[list[str]]:
+    """[[id, label], …] newest first. The label carries the display name, price and context for the picker's search."""
     def fetch():
         from .provider.openrouter import tls_verify
 
@@ -77,6 +101,14 @@ def openrouter_models(cfg, refresh: bool = False) -> list[str]:
         response.raise_for_status()
         rows = [m for m in response.json()["data"]
                 if not m["id"].endswith(":batch") and "text" in ((m.get("architecture") or {}).get("output_modalities") or ["text"])]
-        return [m["id"] for m in sorted(rows, key=lambda m: (-(m.get("created") or 0), m["id"]))]
+        # Raw fields, not the label: a later label format applies to a list cached before it.
+        return [{"id": m["id"], "name": m.get("name"), "pricing": {k: (m.get("pricing") or {}).get(k) for k in ("prompt", "completion")},
+                 "context_length": m.get("context_length")} for m in sorted(rows, key=lambda m: (-(m.get("created") or 0), m["id"]))]
 
-    return _cached(cfg.project_root, "openrouter", fetch, refresh)
+    # Lists cached by earlier versions hold bare IDs or preformatted [id, label] pairs.
+    rows = _cached(cfg.project_root, "openrouter", fetch, refresh)
+    return [[row["id"], openrouter_label(row)] if isinstance(row, dict) else row if isinstance(row, list) else [row, ""] for row in rows]
+
+
+def openrouter_models(cfg, refresh: bool = False) -> list[str]:
+    return [model_id for model_id, _ in openrouter_catalog(cfg, refresh)]

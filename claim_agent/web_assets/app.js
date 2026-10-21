@@ -8,17 +8,40 @@ function settingsError(text){$("model-settings-error").textContent=text;$("model
 function settingsChanged(){$("model-settings-saved").textContent="저장하지 않은 변경사항";}
 function settingSelect(label, options, value, change){
   const wrap=el("label","model-field",label),select=el("select");select.setAttribute("aria-label",label);
-  for(const [id,title] of options){const option=el("option","",title);option.value=id;select.append(option);}
+  for(const [id,title] of options){const option=el("option","",title);option.value=id;option.title=title;select.append(option);}
   select.value=value;select.onchange=()=>{change(select.value);settingsChanged();};wrap.append(select);return wrap;
+}
+// OpenRouter처럼 모델이 많은 목록은 검색 칸을 붙인다. 검색어(공백으로 나눈 낱말 모두)가 ID·이름·가격·컨텍스트에 들어 있는 모델만 남긴다.
+const SEARCH_MIN=20;
+function modelTitle(providers,kind,model){const label=providers[kind]?.labels?.[model];return label?`${model} — ${label}`:model;}
+function modelSearch(select,choices,fixed,total,label,expand){
+  const box=el("input"),count=el("small","model-search-count");box.type="search";box.className="model-search";
+  box.placeholder="모델 검색 — 이름·제공사·가격 (예: claude opus, free, 1M)";box.setAttribute("aria-label",label+" 검색");
+  const apply=()=>{
+    const words=box.value.toLowerCase().split(/\s+/).filter(Boolean),current=select.value;
+    const shown=choices.filter(([id,title])=>fixed.includes(id)||id===current||words.every(w=>(id+" "+title).toLowerCase().includes(w)));
+    fillSelect(select,shown,current);
+    const hits=shown.filter(([id])=>!fixed.includes(id)).length;
+    count.textContent=words.length?`${total}개 중 ${hits}개`:`${total}개`;
+    if(expand)select.size=words.length?Math.max(2,Math.min(8,shown.length)):0;
+  };
+  box.oninput=apply;
+  box.onkeydown=e=>{    // Enter: 첫 검색 결과 선택, ↓: 결과 목록으로 이동
+    const first=[...select.options].find(o=>!fixed.includes(o.value)&&o.value!==select.value)||[...select.options].find(o=>!fixed.includes(o.value));
+    if(e.key==="Enter"){e.preventDefault();if(first){select.value=first.value;select.dispatchEvent(new Event("change"));}}
+    else if(e.key==="ArrowDown"){e.preventDefault();select.focus();}
+  };
+  apply();return [box,count];
 }
 function modelPicker(kind,value,label,inherit,onchange){
   const models=modelSettings.providers[kind].models,choices=inherit?[["","기본 모델 따름 · "+modelSettings.defaults[kind]]]:[];
-  for(const model of models)choices.push([model,model==="default"?"계정 기본 모델 (CLI 자동 선택)":model]);
+  for(const model of models)choices.push([model,model==="default"?"계정 기본 모델 (CLI 자동 선택)":modelTitle(modelSettings.providers,kind,model)]);
   choices.push(["__custom","모델 ID 직접 입력…"]);
   const custom=value!==null&&!models.includes(value), wrap=settingSelect(label,choices,custom?"__custom":value||"",v=>{
     input.hidden=v!=="__custom";input.required=v==="__custom";
     onchange(v==="__custom"?input.value:v||null);if(v==="__custom")input.focus();
   });
+  if(models.length>SEARCH_MIN){const select=wrap.querySelector("select");select.before(...modelSearch(select,choices,["","__custom"],models.length,label,true));}
   const input=el("input");input.placeholder="모델 ID 입력";input.setAttribute("aria-label",label+" 직접 입력");input.value=custom?value:"";input.hidden=!custom;input.required=custom;input.maxLength=160;
   input.oninput=()=>{onchange(input.value.trim());settingsChanged();};wrap.append(input);return wrap;
 }
@@ -77,13 +100,14 @@ $("model-settings-form").onsubmit=async event=>{
 let providerInfo=null;
 function fillSelect(select,options,value){
   select.replaceChildren();
-  for(const [id,title] of options){const option=el("option","",title);option.value=id;select.append(option);}
+  for(const [id,title] of options){const option=el("option","",title);option.value=id;option.title=title;select.append(option);}
   select.value=value;
 }
 function providerLock(){    // 목록을 다시 만들지 않는 잠금 갱신: 열려 있는 선택 상자를 건드리지 않는다.
   const kinds=$("provider-kind"),models=$("provider-model");
   const running=!!state.data?.running||!!providerInfo?.busy,fixed=providerInfo?providerInfo.roles.filter(r=>r.provider).length:0;
   kinds.disabled=models.disabled=running||!providerInfo;
+  const search=document.querySelector(".provider-switch .model-search");if(search)search.disabled=models.disabled;
   const note=!providerInfo?"":running?"응답이 끝난 뒤 바꿀 수 있습니다":fixed?`다음 요청부터 적용 · 서브에이전트 ${fixed}개는 개별 지정`:"다음 요청부터 적용됩니다";
   $("provider-note").textContent=note;kinds.title=models.title=note;
 }
@@ -92,7 +116,10 @@ function renderProviderSwitch(){
     fillSelect($("provider-kind"),Object.entries(providerInfo.providers).map(([id,p])=>[id,p.label]),providerInfo.provider);
     const current=providerInfo.defaults[providerInfo.provider],names=providerInfo.providers[providerInfo.provider].models.slice();
     if(!names.includes(current))names.unshift(current);
-    fillSelect($("provider-model"),names.map(m=>[m,m==="default"?"계정 기본 모델":m]),current);
+    const choices=names.map(m=>[m,m==="default"?"계정 기본 모델":modelTitle(providerInfo.providers,providerInfo.provider,m)]);
+    fillSelect($("provider-model"),choices,current);
+    for(const node of document.querySelectorAll(".provider-switch .model-search,.provider-switch .model-search-count"))node.remove();
+    if(names.length>SEARCH_MIN)$("provider-model").before(...modelSearch($("provider-model"),choices,[],names.length,"사용 모델",false));
   }
   providerLock();
 }

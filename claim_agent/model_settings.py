@@ -9,7 +9,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from .config import AppConfig, apply_overrides
-from .model_catalog import gemini_models, openrouter_models
+from .model_catalog import gemini_models, openrouter_catalog, openrouter_models
 from .provider.subscription import KINDS, auth_home, connection_status
 from .roles.registry import ROLE_NAMES
 
@@ -130,6 +130,10 @@ def connection(cfg, kind):
     return {"installed": True, "connected": present, "message": "API 키 설정됨" if present else f".env에 {key} 설정 필요"}
 
 
+def openrouter_labels(cfg) -> dict[str, str]:
+    return {model_id: label for model_id, label in openrouter_catalog(cfg) if label}
+
+
 def settings_snapshot(cfg):
     providers = {}
     for kind, meta in PROVIDERS.items():
@@ -138,6 +142,8 @@ def settings_snapshot(cfg):
                   "openrouter": lambda: openrouter_models(cfg)}.get(kind, list)()
         models = list(dict.fromkeys([default, *meta["models"], *cached, *[r.model for r in cfg.roles.values() if r.model and (r.provider or cfg.provider.kind) == kind]]))
         providers[kind] = {**meta, "models": models}
+        if kind == "openrouter":
+            providers[kind]["labels"] = openrouter_labels(cfg)    # name · price · context, searched by the picker
     return {"provider": cfg.provider.kind, "defaults": {p: cfg.default_model_for(p) for p in PROVIDERS}, "providers": providers,
             "thinking_levels": THINKING, "roles": [{"id": name, "label": label, "provider": cfg.role(name).provider,
                 "model": cfg.role(name).model, "thinking_level": cfg.role(name).thinking_level,
