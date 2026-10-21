@@ -129,6 +129,17 @@ class TelemetryConfig(BaseModel):
     pricing: dict[str, dict[str, float]] = Field(default_factory=dict)
 
 
+class GraphConfig(BaseModel):
+    """claim_agent/graph: rule packs, invention graph idea sheet, precedent sheet. All off by default."""
+    rule_pack: str = "off"            # off | on — secondary source files sliced to the role's sections (primary files stay whole)
+    rule_pack_exempt_roles: list[str] = Field(default_factory=lambda: ["claim-success-reviewer"])
+    invention: str = "off"            # off | on — one extraction call before ARCHITECT; idea sheet to both architects
+    invention_role: str = "claim-architect"   # the extraction call borrows this role's provider and model
+    invention_model: str | None = None        # None = that role's model
+    precedent: str = "off"            # off | on — precedent sheet to dependent-claim-strategy-architect only (설계 §13 #10)
+    precedent_path: str = "../cs2-spec-writer/graph/prosecution_v2/examples.json"
+
+
 class AppConfig(BaseModel):
     model: ModelConfig = Field(default_factory=ModelConfig)
     roles: dict[str, RoleConfig] = Field(default_factory=dict)
@@ -138,6 +149,7 @@ class AppConfig(BaseModel):
     lessons: LessonsConfig = Field(default_factory=LessonsConfig)
     improve: ImproveConfig = Field(default_factory=ImproveConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
+    graph: GraphConfig = Field(default_factory=GraphConfig)
     materials: MaterialsConfig = Field(default_factory=MaterialsConfig)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
     provider: ProviderConfig = Field(default_factory=ProviderConfig)

@@ -662,6 +662,10 @@ def build_parser() -> argparse.ArgumentParser:
     m = sub.add_parser("models", help="list models available to the API key")
     m.set_defaults(func=cmd_models)
 
+    from .graph.cli import register as register_graph
+
+    register_graph(sub)
+
     so = sub.add_parser("sources", help="show source catalog and whitelist")
     so.add_argument("sub", nargs="?", default="check")
     so.set_defaults(func=cmd_sources)
