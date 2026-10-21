@@ -12,7 +12,7 @@ from ..config import AppConfig
 from ..graph.pipeline import GraphHooks
 from ..models.contracts import COMBINED_REVIEW, combined_contract, contract_for
 from ..models.enums import ExecStatus, NextStep, RequestMode, Scope, Status, StyleChangeMode
-from ..models.envelope import ENVELOPE_JSON_SCHEMA, RoleEnvelope
+from ..models.envelope import RoleEnvelope, envelope_schema_for
 from ..models.ids import Identifiers, bump_dependent_design_revision, bump_dependent_revision, bump_design_revision, bump_revision, input_revision_id, record_id
 from ..models.request import EXISTING_SET_EDIT, MaterialBundle, RunRequest
 from ..models.state import (
@@ -485,7 +485,7 @@ class PipelineEngine(PriorArtSteps):
             self._guard_budget(state, stage)
         spec = CallSpec(
             role=role, scope=scope.value, model=self.cfg.model_for(role), system_instruction=prompt.system_instruction,
-            packet_text=packet_text, sources_block=prompt.sources_block, images=list(packet.images), json_schema=ENVELOPE_JSON_SCHEMA,
+            packet_text=packet_text, sources_block=prompt.sources_block, images=list(packet.images), json_schema=envelope_schema_for(role),
             tools=None, gen=self._gen(role), use_cache=(rc.cache and self.cfg.cache.enabled and not blind), phase="main",
             stage=stage.value, run_id=state.run_id, seq=seq, meta={"record_id": rid, "kind": kind, "target_claim_id": ids.target_claim_id},
             cache_packet_text=packet.cache_text if not blind else "", cache_images=packet.cache_images and not blind, expected_reuse=expected_reuse,

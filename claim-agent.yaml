@@ -69,7 +69,7 @@ prior_search:
   base_date: null           # 출원 예정일 (YYYY-MM-DD); null → the run date
   inventive_high: note      # note | review — INVENTIVE_RISK HIGH is recorded, or stops the run for review
   screen_threshold: 0.5
-  trim_threshold: 0.5
+  trim_threshold: 0.3       # relevance question on claims+abstract; 0.5 kept only 1 of 5 cable holders in the live check
   trim: true
   max_wips_calls: 40
 

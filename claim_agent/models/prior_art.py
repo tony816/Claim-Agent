@@ -29,7 +29,7 @@ class PriorSearchOptions(BaseModel):
     base_date: str | None = None              # 출원 예정일; None → the run date
     inventive_high: Literal["note", "review"] = "note"
     screen_threshold: float = Field(default=0.5, ge=0, le=1)
-    trim_threshold: float = Field(default=0.5, ge=0, le=1)
+    trim_threshold: float = Field(default=0.3, ge=0, le=1)   # calibrated on the 2026-10-21 live run (prior_steps.TRIM_QUESTION)
     trim: bool = True
     max_wips_calls: int = Field(default=40, ge=1)
 

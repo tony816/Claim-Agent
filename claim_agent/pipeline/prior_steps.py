@@ -30,9 +30,14 @@ from ..provider.base import ImagePart
 from ..store.telemetry import TelemetryRow, TelemetryWriter, now
 from . import packets
 
-SCREEN_QUESTION = ("candidates의 {key} 후보의 명칭·요약이 invention의 핵심 구성과 그 결합 대부분을 개시하는가. "
-                   "분야나 낱말이 같다는 것만으로는 아니다.")
-TRIM_QUESTION = "docs의 {key} 문헌의 청구범위·요약에 invention의 핵심 구성들이 같은 결합 관계로 나오는가."
+# Relevance questions, not disclosure questions: on the 2026-10-21 live run (117 WIPS candidates for the clip holder) the
+# disclosure wording ("핵심 구성과 그 결합 대부분을 개시하는가") topped out at 0.25 and sealed nothing, because a title and
+# abstract almost never show a whole combination. These wordings ranked the cable holders first (19 ≥ 0.5 when screening;
+# 0.50/0.44/0.42 against 0.15/0.19 when trimming the top 5). Disclosure itself is decided later from COMPARE quotes.
+SCREEN_QUESTION = ("candidates의 {key} 후보는 invention의 신규성·진보성을 따질 때 대비할 가치가 있는 선행문헌인가. "
+                   "같은 과제를 풀거나 invention의 핵심 구성 일부를 같은 쓰임으로 갖고 있으면 그렇다. 분야나 낱말만 같으면 아니다.")
+TRIM_QUESTION = ("docs의 {key} 문헌의 청구범위·요약에 invention의 핵심 구성(elements) 가운데 둘 이상이 같은 쓰임으로 나와 "
+                 "구성 단위로 대비할 가치가 있는가. 분야나 낱말만 같으면 아니다.")
 STATUS_KO = {"DISCLOSED": "개시", "PARTIALLY_DISCLOSED": "일부 개시", "NOT_DISCLOSED": "미개시", "UNCONFIRMED": "확인 필요"}
 CONCLUSION_KO = {"NEGATED_RISK": "부정 우려", "NOT_NEGATED": "인정 가능", "UNDETERMINED": "판단 보류"}
 # Classification fields of 10_심사이력_경험기준 never travel to the architect (설계 14.3).

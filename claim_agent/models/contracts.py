@@ -139,7 +139,8 @@ def _preexam_compare(env: RoleEnvelope, mode: RequestMode) -> bool:
 
 def _preexam_judge(env: RoleEnvelope, mode: RequestMode) -> bool:
     # The role's PREEXAM_NOVELTY_GATE is only a suggestion: the engine applies 설계 5.3 to its rows and the code tally.
-    return env.status in (Status.PASS, Status.REVIEW, Status.BLOCK) and env.execution_status == ExecStatus.RUN
+    # Any status counts once the judgment ran: the live run returned UNVERIFIED for "searched set, inventive step open".
+    return env.execution_status == ExecStatus.RUN and bool(env.novelty)
 
 
 CONTRACTS: dict[tuple[str, Scope], GateContract] = {

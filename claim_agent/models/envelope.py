@@ -449,6 +449,36 @@ ENVELOPE_JSON_SCHEMA: dict[str, Any] = _obj(
 )
 
 
+# Prior-art and exam-history fields belong to a few roles only. Gemini rejects the union as too complex
+# (400 INVALID_ARGUMENT on the live run), so each role receives the shared fields plus its own.
+ROLE_EXTRA_FIELDS: dict[str, tuple[str, ...]] = {
+    "claim-architect": ("design_elements",),
+    "prior-art-searcher": ("queries_ko", "queries_en", "provisional_elements", "problem", "screened"),
+    "prior-art-pre-examiner": ("preexam_rows", "doc_published", "doc_field", "doc_summary", "novelty", "inventive_primary_doc",
+                               "inventive_risk", "inventive_reason", "remaining_differences"),
+}
+CANDIDATE_EXAM_FIELDS = ("exam_pattern", "design_change_risk", "exam_pattern_basis")   # dependent-claim-strategy-architect only
+_ALL_EXTRA = {f for fields in ROLE_EXTRA_FIELDS.values() for f in fields}
+_ROLE_SCHEMAS: dict[str, dict[str, Any]] = {}
+
+
+def envelope_schema_for(role: str) -> dict[str, Any]:
+    """ENVELOPE_JSON_SCHEMA without the fields other roles own. Shared and cached: callers must not mutate it."""
+    if role not in _ROLE_SCHEMAS:
+        import copy
+
+        schema = copy.deepcopy(ENVELOPE_JSON_SCHEMA)
+        for name in _ALL_EXTRA - set(ROLE_EXTRA_FIELDS.get(role, ())):
+            schema["properties"].pop(name)
+        if role != "dependent-claim-strategy-architect":
+            for name in CANDIDATE_EXAM_FIELDS:
+                schema["properties"]["candidates"]["items"]["properties"].pop(name)
+        if role != "prior-art-pre-examiner":
+            schema["properties"]["gates"]["properties"].pop("PREEXAM_NOVELTY_GATE")
+        _ROLE_SCHEMAS[role] = schema
+    return _ROLE_SCHEMAS[role]
+
+
 def schema_depth(node: Any, depth: int = 0) -> int:
     """Maximum nesting depth of object/array nodes (used by tests and doctor)."""
     if isinstance(node, dict):

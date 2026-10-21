@@ -300,3 +300,21 @@ def test_web_status_lists_candidates_without_text(rt, request_indep):
     status = Workspace.prior_art_status(state.prior_art.model_dump(mode="json"))
     assert [c["skey"] for c in status["candidates"]] == ["KR1", "KR2"] and status["candidates"][0]["sealed"] is True
     assert "abstract" not in json.dumps(status, ensure_ascii=False)
+
+
+def test_each_role_gets_only_its_own_envelope_fields():
+    """Gemini rejected the union schema (live run 2026-10-21); every role must get the shared fields plus its own."""
+    from claim_agent.models.envelope import ENVELOPE_JSON_SCHEMA, envelope_schema_for
+
+    def props(role):
+        return set(envelope_schema_for(role)["properties"])
+
+    def cand(role):
+        return set(envelope_schema_for(role)["properties"]["candidates"]["items"]["properties"])
+
+    extras = {"design_elements", "queries_ko", "screened", "preexam_rows", "novelty", "remaining_differences"}
+    assert not props("claim-style-adjuster") & extras and not props("claim-drafter") & extras
+    assert "design_elements" in props("claim-architect") and "preexam_rows" not in props("claim-architect")
+    assert {"queries_ko", "screened"} <= props("prior-art-searcher") and {"preexam_rows", "remaining_differences"} <= props("prior-art-pre-examiner")
+    assert "exam_pattern" in cand("dependent-claim-strategy-architect") and "exam_pattern" not in cand("claim-architect")
+    assert "preexam_rows" in ENVELOPE_JSON_SCHEMA["properties"]   # the union stays the reference schema
