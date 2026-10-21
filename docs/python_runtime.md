@@ -123,14 +123,16 @@ claim-agent review --reviewers syntax-scope-reviewer,oa-strategy-reviewer --clai
 
 `provider.kind`가 실제 호출을 담당한다. 역할 파일·패킷·게이트·기록은 프로바이더 중립이며 fixtures/replay도 공통이다. Claude와 Codex는 공식 CLI 구독 로그인으로만 호출하며 API 키 전송 경로는 없다(`docs/subscription-models.md`). 이전 설정의 `provider.kind: anthropic`은 로드 시 `claude_oauth`로 옮겨진다.
 
-| | `gemini` (기본) | `claude_oauth` · `codex_oauth` |
+| | `gemini` (기본) | `claude_oauth` · `codex_oauth` · `antigravity` |
 |---|---|---|
-| 클라이언트 | `google-genai`, `GEMINI_API_KEY` | 공식 CLI 실행, 앱 전용 인증 폴더(키·부모 세션 미상속) |
+| 클라이언트 | `google-genai`, `GEMINI_API_KEY` | 공식 CLI 실행, 앱 전용 인증 폴더(키·부모 세션 미상속). `antigravity`는 `agy` 자체 로그인 |
 | 모델 | `model.default`, 역할별 `model` | `provider.<kind>.model`(`default`=계정 기본 모델), 역할별 `model` |
 | 캐시 | 명시적 context cache(아래 정책) + Files API | 없음. 호출마다 새 컨텍스트이며 사용량은 구독 한도로 집계 |
 | 사고 | `thinking_level` → `thinking_level`/`thinking_budget` | `--effort`(Claude) / `model_reasoning_effort`(Codex)로 전달 |
 | JSON | `response_json_schema` | 패킷 끝의 스키마 지시 + 동일 복구 파서 |
 | 도구 | SDK 자동 함수 호출 | `claim_agent_tool` 요청·결과 왕복(최대 5회), 허용된 callable만 실행 |
+
+`openrouter`는 `OPENROUTER_API_KEY`로 OpenRouter chat completions를 호출하며, 패킷·도구 왕복·JSON 복구는 CLI 열과 같고 비용은 OpenRouter가 보고한 USD로 기록한다(`docs/subscription-models.md`).
 
 `claim-agent models`·`doctor --live`는 설정된 프로바이더로 동작한다(구독 CLI는 모델 목록 API가 없어 로그인 상태만 확인한다). 웹·TUI 대화 경로도 같은 프로바이더(`CallSpec.history`로 이전 턴 전달)를 쓴다. 웹 채팅 상단의 연결 방식·모델 선택은 대화 도중에도 바꿀 수 있고 다음 요청부터 적용된다(실행 중에는 잠긴다).
 

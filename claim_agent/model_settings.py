@@ -14,10 +14,15 @@ ROLE_LABELS = ["독립항 설계", "의미 초안 작성", "용어·스타일 �
 PROVIDERS = {
     "gemini": {"label": "Gemini · API 키", "models": []},
     # CLI가 받는 별칭 프리셋(`claude --model`). 목록에 없는 ID는 모델 ID 직접 입력으로 지정한다.
-    "claude_oauth": {"label": "Claude · 구독 OAuth", "models": ["default", "fable", "opus", "sonnet", "haiku"],
+    "claude_oauth": {"label": "Claude · 구독 OAuth", "models": ["default", "fable", "opus", "sonnet", "haiku", "claude-fable-5-1",
+                                                               "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"],
                      "install_url": "https://code.claude.com/docs/en/setup"},
     "codex_oauth": {"label": "Codex · 구독 OAuth", "models": ["default"],
                     "install_url": "https://developers.openai.com/codex/cli/"},
+    # `agy` lists the signed-in account's models; this entry keeps the settings usable before sign-in.
+    "antigravity": {"label": "Antigravity · 구독 로그인", "models": ["gemini-3.1-pro-high"]},
+    # OpenRouter routes hundreds of vendor/model IDs; other IDs go through 모델 ID 직접 입력.
+    "openrouter": {"label": "OpenRouter · API 키", "models": ["deepseek/deepseek-v4.1-flash-1017"]},
 }
 THINKING = ["MINIMAL", "LOW", "MEDIUM", "HIGH"]
 
@@ -100,6 +105,14 @@ def settings_overrides(cfg: AppConfig, data: dict) -> dict:
 def connection(cfg, kind):
     if kind in KINDS:
         return connection_status(kind, getattr(cfg.provider, kind).executable)
+    if kind == "antigravity":
+        from .provider.antigravity import connection_status as agy_status
+
+        return agy_status(cfg.provider.antigravity.executable)
+    if kind == "openrouter":
+        from .provider.openrouter import connection_status as openrouter_status
+
+        return openrouter_status(cfg.provider.openrouter)
     key = cfg.model.api_key_env
     present = bool(os.environ.get(key) or os.environ.get("GOOGLE_API_KEY"))
     return {"installed": True, "connected": present, "message": "API 키 설정됨" if present else f".env에 {key} 설정 필요"}

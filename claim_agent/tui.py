@@ -119,7 +119,10 @@ class ClaimAgentApp(App):
     def auth_note(self) -> str:
         if self.cfg.provider.kind.endswith("_oauth"):
             return "구독 OAuth · 웹 모델 설정에서 연결"
-        key = os.environ.get(self.cfg.api_key_env) or os.environ.get("GOOGLE_API_KEY")
+        if self.cfg.provider.kind == "antigravity":
+            return "구독 로그인 · 터미널에서 agy로 로그인"
+        key_env = self.cfg.provider.openrouter.api_key_env if self.cfg.provider.kind == "openrouter" else self.cfg.api_key_env
+        key = os.environ.get(key_env) or (self.cfg.provider.kind == "gemini" and os.environ.get("GOOGLE_API_KEY"))
         return f"API 키 {'저장됨' if key else '없음 — .env에 입력 필요'}"
 
     def compose(self) -> ComposeResult:
@@ -400,9 +403,11 @@ class ClaimAgentApp(App):
             return
         from .model_settings import connection
 
-        if not self.cfg.provider.kind.endswith("_oauth") and not connection(self.cfg, self.cfg.provider.kind)["connected"]:
-            self.notify(".env에 API 키를 저장한 뒤 프로그램을 다시 열어 주세요.", severity="error")
-            return
+        if not self.cfg.provider.kind.endswith("_oauth"):
+            status = connection(self.cfg, self.cfg.provider.kind)
+            if not status["connected"]:
+                self.notify(status["message"] if self.cfg.provider.kind == "antigravity" else ".env에 API 키를 저장한 뒤 프로그램을 다시 열어 주세요.", severity="error")
+                return
         run_id = time.strftime("tui-%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:8]
         self.active_mode = str(self.query_one("#mode", Select).value)
         self.routed_mode = None

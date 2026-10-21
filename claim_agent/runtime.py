@@ -73,6 +73,14 @@ def _live_provider(cfg: AppConfig, kind: str, events=None, api_key: str | None =
         from .provider.subscription import SubscriptionProvider
 
         return SubscriptionProvider(kind, getattr(cfg.provider, kind), events)
+    if kind == "antigravity":
+        from .provider.antigravity import AntigravityProvider
+
+        return AntigravityProvider(cfg.provider.antigravity, events)
+    if kind == "openrouter":
+        from .provider.openrouter import OpenRouterProvider
+
+        return OpenRouterProvider(cfg.provider.openrouter, events)
     if kind != "gemini":
         raise ValueError(f"unknown provider.kind: {kind}")
     from .provider.files import FileStore
