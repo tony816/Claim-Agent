@@ -253,3 +253,35 @@ def test_hooks_failure_is_advisory(tmp_path):
     st = _state()
     assert hooks.architect_packet(st, _bundle(), "본문") == "본문"
     assert any("추출 호출 실패" in n for n in st.notes)
+
+
+# --------------------------------------------------------------------------- full pipeline (scripted)
+
+def test_pipeline_puts_sheets_in_architect_packets(tmp_path, request_dep):
+    from claim_agent.provider.scripted import ScriptedProvider
+    from claim_agent.runtime import build_runtime
+
+    from . import scripted_roles as R
+
+    class WithGraph(ScriptedProvider):
+        def generate(self, spec):
+            if spec.phase == "graph":
+                self.calls.append(spec)
+                return CallResult(text=json.dumps(RAW, ensure_ascii=False), parsed=RAW, usage={"prompt_tokens": 10})
+            return super().generate(spec)
+
+    (tmp_path / "ex.json").write_text(json.dumps(PRECEDENT, ensure_ascii=False), encoding="utf-8")
+    rt = build_runtime(ROOT, None, None, {"paths.runs_dir": str(tmp_path / "runs"), "paths.lessons_dir": str(tmp_path / "lessons"), "cache.enabled": False,
+                                          "pipeline.max_concurrency": 1, "graph.invention": "on", "graph.precedent": "on",
+                                          "graph.precedent_path": str(tmp_path / "ex.json")})
+    prov = WithGraph(R.happy_script(dependent=True))
+    engine = rt.engine(prov)
+    state = engine.run(engine.start(request_dep, "graph-run"))
+    assert state.outcome == "DRAFT_CLAIM_LOCK+DRAFT_DEPENDENT_SET_LOCK", state.halt
+    assert sum(c.phase == "graph" for c in prov.calls) == 1
+    arch = next(c for c in prov.calls if c.role == "claim-architect" and c.phase == "main")
+    dep = next(c for c in prov.calls if c.role == "dependent-claim-strategy-architect" and c.phase == "main")
+    assert IDEA_TITLE in arch.packet_text and PRECEDENT_TITLE not in arch.packet_text and "exam_pattern" not in arch.packet_text
+    assert IDEA_TITLE in dep.packet_text and PRECEDENT_TITLE in dep.packet_text
+    others = [c for c in prov.calls if c.role not in ("claim-architect", "dependent-claim-strategy-architect")]
+    assert all(IDEA_TITLE not in c.packet_text and PRECEDENT_TITLE not in c.packet_text for c in others)

@@ -1,7 +1,7 @@
 # 3층 그래프 (`claim_agent/graph/`)
 
 - 작성일: 2026-10-21
-- 상태: 구현됨. 설정은 모두 기본 `off`이며, 엔진 연결 4곳(아래 "엔진 연결")은 아직 넣지 않았다.
+- 상태: 구현·엔진 연결됨. 설정은 모두 기본 `off`이다.
 
 | 층 | 무엇 | 만드는 방법 | 받는 역할 | 근거 지위 |
 |---|---|---|---|---|
@@ -56,12 +56,21 @@ claim-agent graph precedent                       # 패턴 통계
 claim-agent graph precedent --graph out/clip/graph.json
 ```
 
-## 엔진 연결 (대기 중)
+## 엔진 연결
 
-다른 세션이 `pipeline/engine.py`를 편집 중이라, 그 커밋 뒤에 다음 4곳을 넣는다.
+`pipeline/engine.py`의 4곳에서 패킷에 시트를 덧붙인다.
 
 1. `__init__`: `self.graph_hooks = GraphHooks(cfg, provider, store.run_dir, self._account_result)`
-2. `_independent_step` ARCHITECT: `pk.text = self.graph_hooks.architect_packet(state, bundle, pk.text)`
-3. `_dependent_step` DEP_ARCHITECT의 `dep_architect(...)` 두 곳: `pk.text = self.graph_hooks.dependent_packet(state, bundle, pk.text)`
+2. `_independent_step` ARCHITECT: `pk.text = self.graph_hooks.architect_packet(state, bundle, pk.text)` — 아이디어 시트만
+3. `_dependent_step` DEP_ARCHITECT의 `dep_architect(...)` 두 곳: `pk.text = self.graph_hooks.dependent_packet(state, bundle, pk.text)` — 아이디어 시트(exam_pattern 힌트 포함)와 심사 이력 참고 시트
 
-연결 전에도 CLI로 세 층을 모두 만들고 볼 수 있다.
+나머지 역할(drafter·style·success·syntax·OA·blind·picture)의 패킷에는 어느 시트도 들어가지 않는다. `tests/test_graph.py::test_pipeline_puts_sheets_in_architect_packets`가 이를 확인한다.
+
+켜는 법 (`claim-agent.yaml`):
+
+```yaml
+graph:
+  invention: on        # 아이디어 시트 (추출 호출 1회)
+  precedent: on        # 심사 이력 참고 시트 (종속항 설계자만)
+  invention_role: claim-architect   # 추출 호출이 빌릴 역할의 프로바이더·모델
+```

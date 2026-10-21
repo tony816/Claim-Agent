@@ -9,6 +9,7 @@ from typing import Any
 
 from ..claim_scope import parse_target
 from ..config import AppConfig
+from ..graph.pipeline import GraphHooks
 from ..models.contracts import COMBINED_REVIEW, combined_contract, contract_for
 from ..models.enums import ExecStatus, NextStep, RequestMode, Scope, Status, StyleChangeMode
 from ..models.envelope import ENVELOPE_JSON_SCHEMA, RoleEnvelope
@@ -147,6 +148,7 @@ class PipelineEngine(PriorArtSteps):
         self.lessons_hash = lessons_hash
         self.shadow_hook = shadow_hook
         self.prior_art_tools = prior_art_tools
+        self.graph_hooks = GraphHooks(cfg, provider, store.run_dir, self._account_result)   # advisory sheets; config graph.* (off by default)
         self._bundle: MaterialBundle | None = None
         self._tool_logs: dict[str, ToolLog] = {}
         self._lock = threading.Lock()
@@ -848,7 +850,9 @@ class PipelineEngine(PriorArtSteps):
             ids = Identifiers(c.candidate_id, c.revision, c.design_revision, input_revision=state.input_revision)
             rid = record_id("design", ids)
             goal = next((n.split(": ", 1)[1] for n in reversed(state.notes) if n.startswith(f"설계 변경 목표 ({c.design_revision})")), None)
-            env, ref = self._call(state, "claim-architect", Scope.INDEPENDENT, st, "design", packets.architect(state, bundle, ids, rid, req.request_text, goal), ids, rid, loop_index=c.loop_counts.get("ARCHITECT", 0))
+            pk = packets.architect(state, bundle, ids, rid, req.request_text, goal)
+            pk.text = self.graph_hooks.architect_packet(state, bundle, pk.text)
+            env, ref = self._call(state, "claim-architect", Scope.INDEPENDENT, st, "design", pk, ids, rid, loop_index=c.loop_counts.get("ARCHITECT", 0))
             tr = self._decide(state, env, "claim-architect", Scope.INDEPENDENT, st, rid, c.loop_counts)
             if tr.kind == "RETURN":
                 self._apply_return(state, tr, env, rid, dependent=False)
@@ -1092,6 +1096,7 @@ class PipelineEngine(PriorArtSteps):
             targets = parse_target(req.dependent_target)
             loop = d.loop_counts.get("DEPENDENT_ARCHITECT", 0)
             pk = packets.dep_architect(state, self.store, bundle, ids, rid, d.root_lock_id, c.design_record_id or "", root_text, req.request_text, goal, targets)
+            pk.text = self.graph_hooks.dependent_packet(state, bundle, pk.text)
             try:
                 env, ref = self._call(state, "dependent-claim-strategy-architect", Scope.DEPENDENT_SET, st, "dependent_design", pk, ids, rid, loop_index=loop)
             except PipelineHalt as ph:
@@ -1103,6 +1108,7 @@ class PipelineEngine(PriorArtSteps):
                 rid = record_id("dependent_design", ids, seq=2)
                 pk = packets.dep_architect(state, self.store, bundle, ids, rid, d.root_lock_id, c.design_record_id or "", root_text, req.request_text, goal, targets,
                                            scope_repair=ph.halt.message)
+                pk.text = self.graph_hooks.dependent_packet(state, bundle, pk.text)
                 env, ref = self._call(state, "dependent-claim-strategy-architect", Scope.DEPENDENT_SET, st, "dependent_design", pk, ids, rid, loop_index=loop)
             tr = self._decide(state, env, "dependent-claim-strategy-architect", Scope.DEPENDENT_SET, st, rid, d.loop_counts)
             if tr.kind == "RETURN":
