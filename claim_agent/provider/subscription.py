@@ -6,8 +6,10 @@ Every call uses a fresh working directory; only the supplied packet enters the r
 from __future__ import annotations
 
 import base64
+import functools
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -39,17 +41,35 @@ def cli_env(kind: str) -> dict[str, str]:
 
 def executable(kind: str, configured: str | None = None) -> list[str]:
     name = "claude" if kind == "claude_oauth" else "codex"
-    found = shutil.which(configured or name)
-    if not found and not configured:
-        candidate = Path.home() / ".local" / "bin" / (name + (".exe" if os.name == "nt" else ""))
-        if candidate.is_file():
-            found = str(candidate)
-    if not found and not configured and kind == "claude_oauth":
-        resolved = npm_entry(Path.home() / ".claim-agent" / "tools" / "node_modules" / "@anthropic-ai" / "claude-code", name)
-        if resolved:
-            return resolved
-    if not found:
+    if configured:
+        found = shutil.which(configured)
+        if not found:
+            raise ValueError(f"{name} CLI를 설치한 뒤 다시 확인하세요. 설정 파일에서 executable 경로를 지정할 수도 있습니다.")
+        return _shim_entry(found, name)
+    # Every install the app can find, newest CLI version first: a standalone or npm install that stopped updating
+    # would otherwise hide models only newer CLIs accept (the desktop apps keep their bundled CLI current).
+    found = [shutil.which(name), str(Path.home() / ".local" / "bin" / (name + (".exe" if os.name == "nt" else "")))]
+    if kind == "claude_oauth":
+        found += [str(p) for p in (*Path(os.environ.get("APPDATA", "")).glob("Claude/claude-code/**/claude.exe"),
+                                   *Path(os.environ.get("LOCALAPPDATA", "")).glob("Packages/Claude_*/LocalCache/Roaming/Claude/claude-code/**/claude.exe"))]
+    else:
+        found += [str(p) for p in Path(os.environ.get("LOCALAPPDATA", "")).glob("OpenAI/Codex/bin/*/codex.exe")]
+    commands = []
+    for path in dict.fromkeys(f for f in found if f and Path(f).is_file()):
+        try:
+            commands.append(_shim_entry(path, name))
+        except ValueError:
+            continue
+    if kind == "claude_oauth":
+        tools = npm_entry(Path.home() / ".claim-agent" / "tools" / "node_modules" / "@anthropic-ai" / "claude-code", name)
+        if tools:
+            commands.append(tools)
+    if not commands:
         raise ValueError(f"{name} CLI를 설치한 뒤 다시 확인하세요. 설정 파일에서 executable 경로를 지정할 수도 있습니다.")
+    return list(max(commands, key=lambda c: cli_version(tuple(c))))
+
+
+def _shim_entry(found: str, name: str) -> list[str]:
     # npm Windows shims must not go through cmd.exe (model names/prompts are untrusted).
     if Path(found).suffix.lower() in {".cmd", ".bat", ".ps1"}:
         package = "@anthropic-ai/claude-code" if name == "claude" else "@openai/codex"
@@ -60,6 +80,20 @@ def executable(kind: str, configured: str | None = None) -> list[str]:
                 return resolved
         raise ValueError(f"{name} 네이티브 CLI 또는 표준 npm 설치가 필요합니다.")
     return [found]
+
+
+@functools.cache
+def cli_version(command: tuple[str, ...]) -> tuple[int, ...]:
+    """'codex-cli 0.163.0-alpha.10.2' → (0, 163, 0). A versioned desktop-app folder answers without running it. () if unknown."""
+    match = re.fullmatch(r"\d+(?:\.\d+)+", Path(command[-1]).parent.name)
+    if not match:
+        options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+        try:
+            out = subprocess.run([*command, "--version"], capture_output=True, text=True, timeout=20, **options).stdout
+        except (OSError, subprocess.SubprocessError):
+            return ()
+        match = re.search(r"\d+(?:\.\d+)+", out)
+    return tuple(int(part) for part in match.group(0).split(".")[:3]) if match else ()
 
 
 def npm_entry(package: Path, name: str) -> list[str] | None:
