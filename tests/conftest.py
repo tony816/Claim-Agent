@@ -11,6 +11,15 @@ ROOT = Path(__file__).resolve().parents[1]
 CASE = ROOT / "eval" / "cases" / "sample-clip-holder"
 
 
+@pytest.fixture(autouse=True)
+def offline_model_catalog(monkeypatch):
+    """Settings snapshots must not fetch live Gemini/OpenRouter lists (or write ROOT/.tui) in tests."""
+    from claim_agent import model_settings
+
+    monkeypatch.setattr(model_settings, "gemini_models", lambda cfg: [])
+    monkeypatch.setattr(model_settings, "openrouter_models", lambda cfg: [])
+
+
 @pytest.fixture
 def project_root() -> Path:
     return ROOT

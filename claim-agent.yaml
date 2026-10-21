@@ -15,7 +15,7 @@ provider:
     timeout_s: 600
   codex_oauth:
     model: default                 # CLI account default, or account-accessible model ID
-    executable: 'C:\Users\mssong\.aside\runtime\node\codex.cmd'
+    # executable unset: the newest codex found (PATH, ~/.local/bin, the Codex desktop app's bundled CLI) is used.
     timeout_s: 600
   antigravity:
     model: gemini-3.1-pro-high     # `agy models` lists the signed-in account's models
