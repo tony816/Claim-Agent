@@ -11,6 +11,7 @@ PARA = re.compile(r"[\[【]\s*(\d{4})\s*[\]】]")
 MARK = re.compile(r"[\[【]\s*(\d{4})\s*[\]】]|【([^】\n]{1,40})】")   # 문단 번호 [0001]·【0001】 또는 【요약】·【청구항 1】 같은 머리표
 ELLIPSIS = re.compile(r"\s*(?:…|\.\.\.+|⋯)\s*")
 MIN_CHARS = 4
+END_PUNCT = ".,;:。、!?"
 _SAME = {"“": '"', "”": '"', "‘": "'", "’": "'", "－": "-", "–": "-", "—": "-"}
 
 
@@ -51,7 +52,9 @@ def find_quote(text: str, quote: str) -> dict | None:
     hay, pos = _norm_map(text)
     start, first = 0, None
     for p in parts:
-        needle = normalize(p)
+        # A quote cut at a clause boundary often ends in "." where the document goes on with "," or ";" (live run
+        # 2026-10-21: 3 of 6 misses). Only the punctuation at either end is ignored; every word must still match.
+        needle = normalize(p).strip(END_PUNCT) or normalize(p)
         k = hay.find(needle, start)
         if k < 0:
             return None

@@ -42,3 +42,11 @@ def test_timing_cases():
     assert timing("2020-01-01", "") == ""
     assert timing("2024", "2024-05-01") == "공개일·기준일이 가까움 — 정확한 날짜 확인 필요"
     assert timing("2023", "2024-05-01") == ""
+
+
+def test_find_quote_ignores_only_end_punctuation():
+    # live run 2026-10-21: a clause-truncated quote ended in "." where the document continues with "," or ";"
+    text = "[0012] the cable holes are formed in the fixing piece, and the slots open upward; a rib projects."
+    assert find_quote(text, "the cable holes are formed in the fixing piece.") is not None
+    assert find_quote(text, "the slots open upward.") is not None
+    assert find_quote(text, "the cable holes are formed in the locking piece.") is None
