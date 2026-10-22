@@ -10,13 +10,15 @@ from __future__ import annotations
 from ..models.enums import Scope
 
 SOURCE_WHITELIST: dict[tuple[str, Scope], list[str]] = {
-    ("claim-architect", Scope.INDEPENDENT): ["README", "SUCCESS", "S07"],
-    ("claim-drafter", Scope.INDEPENDENT): ["SUCCESS"],
-    ("claim-drafter", Scope.DEPENDENT_SET): ["SUCCESS", "S08", "S05"],
+    # S11 (판례 청구항 주의 시트) is an expression-risk sheet for the two generating roles; the success reviewer gets it
+    # only to audit that it was not used as a technical basis. Style, syntax and OA never receive it.
+    ("claim-architect", Scope.INDEPENDENT): ["README", "SUCCESS", "S07", "S11"],
+    ("claim-drafter", Scope.INDEPENDENT): ["SUCCESS", "S11"],
+    ("claim-drafter", Scope.DEPENDENT_SET): ["SUCCESS", "S08", "S05", "S11"],
     ("claim-style-adjuster", Scope.INDEPENDENT): ["README", "S07", "S04"],
     ("claim-style-adjuster", Scope.DEPENDENT_SET): ["README", "S07", "S04"],
-    ("claim-success-reviewer", Scope.INDEPENDENT): ["README", "SUCCESS", "S07", "S04"],
-    ("claim-success-reviewer", Scope.DEPENDENT_SET): ["README", "SUCCESS", "S07", "S04", "S08", "S05"],
+    ("claim-success-reviewer", Scope.INDEPENDENT): ["README", "SUCCESS", "S07", "S04", "S11"],
+    ("claim-success-reviewer", Scope.DEPENDENT_SET): ["README", "SUCCESS", "S07", "S04", "S08", "S05", "S11"],
     ("syntax-scope-reviewer", Scope.INDEPENDENT): ["S07", "S04"],
     ("syntax-scope-reviewer", Scope.DEPENDENT_SET): ["S07", "S04", "S08", "S05"],
     ("oa-strategy-reviewer", Scope.INDEPENDENT): ["S06"],

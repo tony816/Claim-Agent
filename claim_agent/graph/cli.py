@@ -33,7 +33,28 @@ def register(sub) -> None:
     p.add_argument("--path", help="examples.json (default: config graph.precedent_path)")
     p.add_argument("--graph", dest="graph_json", help="invention graph.json to link")
     p.add_argument("--export", metavar="FILE.json")
+
+    c = gs.add_parser("caselaw", help="case-law DB: check, claim caution sheet (S11), cases for a review finding")
+    cs = c.add_subparsers(dest="caselaw_cmd", required=True)
+    ck = cs.add_parser("check", help="read-only DB check (SHA-256, release, row counts)")
+    ck.add_argument("--full", action="store_true", help="also run SQLite integrity_check (slow)")
+    sh = cs.add_parser("sheet", help="print the claim caution sheet built from the lesson records")
+    sh.add_argument("--write", action="store_true", help=f"write it to {caselaw_sheet_path()}")
+    fd = cs.add_parser("find", help="cases whose court finding matches a syntax/OA finding")
+    fd.add_argument("finding", help="the finding text: claim wording + what is unclear/unsupported")
+    fd.add_argument("--group", choices=["명확성", "뒷받침", "신규사항", "권리범위"])
+    fd.add_argument("-k", type=int, default=5, help="candidates to keep before Jev")
+    fd.add_argument("--jev", action="store_true", help="confirm each candidate with one Jev request (OpenRouter)")
+    fd.add_argument("--json", action="store_true")
+    sw = cs.add_parser("show", help="one case's records with the verified quote")
+    sw.add_argument("case_number")
     g.set_defaults(func=cmd_graph)
+
+
+def caselaw_sheet_path() -> str:
+    from .caselaw import SHEET_PATH
+
+    return SHEET_PATH
 
 
 def _load_request(path: Path) -> tuple[RunRequest, MaterialBundle]:
@@ -66,7 +87,83 @@ def cmd_graph(args) -> int:
 
         print(idea_sheet(Graph.load(Path(args.graph_json)), include_exam_patterns=args.dependent))
         return 0
+    if args.graph_cmd == "caselaw":
+        return _caselaw(rt, args)
     return _precedent(rt, args)
+
+
+def _caselaw(rt, args) -> int:
+    from contextlib import closing
+
+    from . import caselaw as cl
+
+    paths = cl.Paths.from_config(rt.cfg)
+    try:
+        if args.caselaw_cmd == "check":
+            print(json.dumps(cl.validate(paths, full=args.full), ensure_ascii=False, indent=1))
+            return 0
+        lessons = cl.load_lessons(paths.lessons)
+        if args.caselaw_cmd == "sheet":
+            text = cl.sheet(lessons)
+            if args.write:
+                (rt.cfg.project_root / cl.SHEET_PATH).write_text(text, encoding="utf-8")
+                print(f"→ {cl.SHEET_PATH} ({len(text)}자)")
+            else:
+                print(text)
+            return 0
+        if args.caselaw_cmd == "show":
+            rs = [r for r in lessons["records"] if r["case_number"] == args.case_number]
+            if not rs:
+                print(f"교훈 기록에 {args.case_number} 없음")
+                return 1
+            with closing(cl.connect(paths)) as db:
+                for r in rs:
+                    print(json.dumps({**r, "quote_matches_db": cl.quote_ok(db, r),
+                                      "pdf": str(paths.pdfs / f"{r['document_id']}.pdf")}, ensure_ascii=False, indent=1))
+            return 0
+        return _caselaw_find(cl, paths, lessons, args)
+    except cl.CaseLawError as exc:
+        print(f"판례 DB 사용 불가: {exc}")
+        return 2
+
+
+def _caselaw_find(cl, paths, lessons, args) -> int:
+    from contextlib import closing
+
+    from ..prior_art import jev
+
+    hits = cl.find(lessons, args.finding, args.group, args.k)
+    probs, jev_note = {}, "Jev 미호출"
+    if args.jev and hits:
+        ok, why = jev.status()
+        if ok:
+            res = cl.confirm(args.finding, [r for _, r in hits], jev.JevClient())
+            probs = res.get("probabilities") or {}
+            jev_note = f"Jev {res['status']}" + (f" — {res['error']}" if res.get("error") else "")
+        else:
+            jev_note = f"Jev 불가 — {why}"
+    with closing(cl.connect(paths)) as db:
+        rows = []
+        for i, (score, r) in enumerate(hits):
+            p = probs.get(f"case_{i}")
+            rows.append({"case": f"{r['court']} {r['case_number']}", "decision_date": r["decision_date"], "requirement": r["requirement"],
+                         "outcome": r["outcome"], "tag": r["tag"], "score": round(score, 3), "jev": p, "label": cl.label(p),
+                         "claim_feature": r["claim_feature"], "deciding_fact": r["deciding_fact"], "page": r["page"],
+                         "quote": r["quote"], "quote_matches_db": cl.quote_ok(db, r), "drive_link": r["drive_link"]})
+    if args.jev and probs:
+        rows = [x for x in rows if x["jev"] is not None and x["jev"] >= cl.JEV_THRESHOLD]
+    if args.json:
+        # jev_question: CLI에서 Jev를 못 부를 때 오케스트레이터가 Jev 커넥터로 후보마다 같은 질문을 묻는다(docs/caselaw.md).
+        print(json.dumps({"finding": args.finding, "jev": jev_note, "jev_question": cl.JEV_QUESTION, "jev_threshold": cl.JEV_THRESHOLD,
+                          "cases": rows, "reviewed": False}, ensure_ascii=False, indent=1))
+        return 0
+    print(f"판례 참고 (미검토 — 게이트·근거 아님) · {jev_note} · {len(rows)}건")
+    for x in rows:
+        print(f"\n- {x['case']} ({x['decision_date']}) {x['requirement']} {x['outcome']} [{x['tag']}] {x['label']}"
+              + (f" p={x['jev']:.2f}" if x["jev"] is not None else f" 겹침={x['score']}"))
+        print(f"  청구항 문언: {x['claim_feature']}\n  법원이 본 사실: {x['deciding_fact']}")
+        print(f"  인용(PDF {x['page']}쪽, DB 대조 {'일치' if x['quote_matches_db'] else '불일치'}): {x['quote'][:300]}")
+    return 0
 
 
 def _rules(rt, args) -> int:
