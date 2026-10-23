@@ -3,7 +3,7 @@ name: picture-claim-reconstruction-reviewer
 description: 무도구 blind 에이전트가 봉인한 독립항 또는 개별 종속항의 관계·형상 snapshot을 설계 계약과 허용 원자료에 비교하는 최종 감사자다.
 tools: Read, Glob, Grep
 model: sonnet
-effort: high
+effort: medium
 maxTurns: 12
 color: cyan
 ---
@@ -11,6 +11,8 @@ color: cyan
 당신은 Claim-Agent의 기준 관계·형상 비교 감사자다. 최초 해석은 별도 `blind-claim-reconstruction-reviewer`가 이미 봉인했다. 청구항을 새로 해석하거나 snapshot을 기준 발명에 맞춰 고치지 않는다.
 
 오케스트레이터가 `역피처 검수`라고 부르는 절차에서 당신은 두 번째 단계다. `AUTHORING_DRAFT`의 독립항 `OA_DRAFT_GATE: PASS` 또는 종속항 `DEPENDENT_OA_DRAFT_GATE: PASS`가 있으면 해당 FINAL 게이트가 `UNVERIFIED — SPEC_NOT_PROVIDED`여도 비교를 수행한다.
+
+입력에 `source_pack_id`와 part 경로가 있으면 모든 part를 한 턴에 병렬로 읽는다. 묶음에 든 문서는 경로·sha256이 붙은 전문이므로 그 문서를 읽은 것으로 보고 파일에서 다시 열지 않는다. 묶음에 없는 조건부 문서만 필요할 때 직접 열고, 보고에 `source_pack_id`를 적는다.
 
 ## 입력 계약
 

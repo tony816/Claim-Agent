@@ -103,6 +103,19 @@
 - 이어 깨운 역할은 보고 머리에 `context: RESUMED — <이전 revision>`과 다시 읽지 않은 소스 목록을 적는다.
 - 다음 경우에는 새로 호출한다: blind(항상 목표항별 새 non-fork context이며 이어 깨우지 않는다), run 중 그 역할의 정의 파일이나 그 역할이 읽는 `sources/` 문서가 바뀐 경우(이어 깨운 에이전트는 옛 정의로 움직인다), 한 에이전트가 이미 3개 revision을 맡은 경우, 턴 한도·컨텍스트 한도·API 오류로 이어 깨우기가 실패한 경우. 한 에이전트를 다른 역할로 이어 쓰지 않는다.
 
+### 소스 묶음 전달 규칙
+
+- 오케스트레이터는 역할을 부르기 전에 `python scripts/build_source_pack.py --role <역할> --scope <INDEPENDENT|DEPENDENT_SET> --extra <원자료·상위 기록 파일…> --out <run 폴더>/packs/<역할>-<revision>`으로 소스 묶음을 만들고, 호출문에는 출력된 `source_pack_id`와 part 경로를 넣는다. 묶음은 각 파일 전문을 경로·sha256과 함께 그대로 담으므로 요약·절단 전달이 아니다.
+- 역할은 모든 part를 한 턴에 병렬로 읽고, 묶음에 든 문서를 파일에서 다시 열지 않는다. 묶음에 없는 조건부 문서(예시 라우팅 인덱스·문체 코퍼스, 도면 이미지)만 필요할 때 직접 연다. 보고에는 `source_pack_id`를 적는다.
+- 이어 깨운 역할에는 바뀐 상위 기록만 새 묶음으로 준다.
+- blind에는 묶음을 만들지 않는다(스크립트가 거부한다). 문서 전문을 호출문 본문에 직접 붙이지 않는다. 오케스트레이터가 전문을 다시 출력해야 해서 오히려 느리다.
+
+### 동시 검수 하드 규칙
+
+- `AUTHORING_DRAFT`와 `FINALIZATION`에서 style이 exact revision 또는 dependent_revision을 봉인하면, success·syntax·OA와 blind(종속항은 목표항별)를 같은 exact 문언에 대해 한 메시지에서 동시에 호출한다. syntax와 OA는 `review_mode: PARALLEL`로 부르고, 아직 없는 상위 기록(success record, syntax 보고서) 대신 style record와 그 독자·기하 게이트를 입력으로 준다. picture는 OA 보고서와 blind snapshot이 나온 뒤 부른다.
+- 이 규칙은 제6~8단계·제15~18단계와 역피처 자동 실행 하드 규칙의 호출 시점만 바꾼다. 채택 순서와 PASS 조건은 그대로다. 오케스트레이터는 success → syntax → OA → picture 순으로 결과를 채택하고, 앞 단계가 PASS가 아니면 뒤 단계 결과를 PASS 근거로 쓰지 않는다. PARALLEL 보고의 `upstream: PENDING` 항목은 채택 때 같은 revision의 success·syntax 보고로 확인한다(OA가 style record로 판정한 독자·기하 게이트는 syntax 보고의 같은 게이트도 PASS여야 한다). LOCK에는 모든 게이트가 같은 exact 문언에서 PASS여야 한다.
+- 어느 단계든 실패하면 가장 앞에서 실패한 단계로 되돌림 단계를 정하고, 같은 revision에서 나온 다른 리뷰어의 지적도 함께 되돌림 입력에 넣어 한 번에 고친다. 실패한 revision의 PASS 보고는 새 revision에 재사용하지 않는다.
+
 에이전트를 호출하지 못한 경우에는 호출한 것처럼 꾸미지 않는다. 어떤 검수가 누락되었는지 명시한다.
 
 ## 생성 소스와 후처리 소스의 분리
