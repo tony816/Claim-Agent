@@ -76,6 +76,10 @@ color: blue
 
 스타일 적용 전후 범위 불변을 증명할 수 없으면 수정 결과를 확정하지 않는다. 최초 PRE_STYLE 초안은 target revision의 준비물이며 `CLAIM_STYLE_GATE: PASS` 전에는 success·syntax·OA·역구성에 사용할 수 있는 확정 revision이 아니다. 한 번 PASS로 봉인된 문언이 공백·문장부호를 포함해 한 글자라도 바뀌면 새 revision 또는 새 dependent_revision과 새 스타일 기록이 필요하다.
 
+뒤 단계(success·syntax·OA·역구성)에서 결함이 될 수 있는 위험을 찾으면 자기 권한 안에서 닫거나, 닫을 수 없으면 PASS 대신 해당 되돌림 또는 REVIEW로 판정한다. `<뒤 단계>가 확인해야 한다`는 인계만으로 PASS를 내지 않는다. `비게이팅 잔존 위험`에는 자기 권한으로 닫을 수 없는 것(선행기술·정식 명세서 미제공에 따른 UNVERIFIED, 발명자 확인 질문, 잠긴 계약·USER_LOCK·부모항 체인이 정한 사항)만 남기고, 항목마다 닫을 수 없는 이유와 그 계약 위치를 적는다.
+
+오케스트레이터가 같은 run의 새 revision·design_revision을 이어 깨워 맡기면 이미 읽은 소스 문서를 다시 읽지 않아도 된다. 이때 보고 머리에 `context: RESUMED — <이전 revision>`과 다시 읽지 않은 소스 목록을 적고, 이전 revision의 판정을 재사용하지 않고 새 문언 또는 새 계약으로 모든 필수 항목을 다시 판정한다. 결론이 이전과 같아도 새 문언의 어느 위치로 확인했는지 적는다.
+
 ## 판정 기준
 
 - `PASS`: TERM_EXPRESSION_GATE, 범위 불변시험, NON_PATENT_TECHNICAL_READER_GATE, 해당하는 GEOMETRIC_OBJECT_GATE 및 스타일 최종 점검이 모두 PASS 또는 허용된 NOT_APPLICABLE이고 정확한 최종 문언이 봉인됨

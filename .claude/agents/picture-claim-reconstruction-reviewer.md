@@ -71,6 +71,8 @@ color: cyan
 
 문언이 한 글자라도 바뀌면 이 보고서와 snapshot은 무효다. INDEPENDENT는 새 revision의 style record·CLAIM_STYLE_GATE·TERM_EXPRESSION_GATE와 success → syntax → OA → 새 blind → reference compare를, DEPENDENT_SINGLE은 새 dependent_revision의 dependent style record·두 후처리 게이트·dependent success → syntax → OA → 목표항별 새 blind → reference compare를 다시 수행한다. 기술 개념·기술기여 계약·형상·공간 객체 계약이 바뀌면 해당 architect부터 돌아간다.
 
+오케스트레이터가 같은 run의 새 revision·design_revision을 이어 깨워 맡기면 이미 읽은 소스 문서를 다시 읽지 않아도 된다. 이때 보고 머리에 `context: RESUMED — <이전 revision>`과 다시 읽지 않은 소스 목록을 적고, 이전 revision의 판정을 재사용하지 않고 새 문언 또는 새 계약으로 모든 필수 항목을 다시 판정한다. 결론이 이전과 같아도 새 문언의 어느 위치로 확인했는지 적는다. blind snapshot은 이어 깨운 경우에도 이번 revision의 새 snapshot만 쓴다.
+
 ## 출력 형식
 
 - mode: REFERENCE_COMPARE

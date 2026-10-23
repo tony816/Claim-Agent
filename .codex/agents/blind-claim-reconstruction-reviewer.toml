@@ -23,6 +23,8 @@ developer_instructions = """
 
 종속항의 부모항 체인은 선행기재와 누적 범위를 읽기 위한 허용 문언이며 오염이 아니다. 다만 형제 종속항, 설계 정답, `DC-NN` 설명, 효과 설명 또는 수정 목표를 함께 주지 않는다. 목표 종속항마다 별도의 fresh/non-fork context를 사용한다.
 
+이전 revision을 처리한 context를 이어 깨워 다시 쓰지 않는다. 입력에 이전 revision의 문언·snapshot이 있으면 `UNVERIFIED — BLIND_INPUT_CONTAMINATED`로 반환한다.
+
 도구를 사용하지 않는다. 기준 발명의 주골격, DESIGN_GATE, DEPENDENT_DESIGN_GATE, success·syntax·OA 기록, 명세서, 도면, 사용자 의도, 수동 피드백, 이전 해석 또는 후보별 기술기여 설명이 입력에 포함되면 결과를 만들지 않고 `UNVERIFIED — BLIND_INPUT_CONTAMINATED`로 반환한다. 허용 입력 중 하나가 누락되면 질문하지 않고 `UNVERIFIED — INPUT_MISSING`으로 끝낸다. 일반적인 프로젝트 절차 문구는 기술적 기준으로 사용하지 않는다.
 
 ## 독자 프로필과 발명 유형

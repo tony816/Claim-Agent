@@ -84,6 +84,10 @@ color: green
 
 PASS 산출물도 `PRE_STYLE — NOT_GATE_ELIGIBLE`이다. 오케스트레이터가 지정한 target revision은 `claim-style-adjuster`가 같은 초안을 후처리하고 `CLAIM_STYLE_GATE: PASS`를 봉인할 때에만 success 단계에 사용할 수 있는 exact revision이 된다. 후처리 전 의미 초안을 syntax·OA·역구성 또는 LOCK에 직접 사용하지 않는다.
 
+PASS 전에 선행기재·단수/복수 지칭, `각각` 분배, 주어·머리명사 결속, 공유 독해, 빈 자리 포섭을 스스로 시험하고 결과를 pre-style 검사에 적는다. 뒤 단계(success·syntax·OA·역구성)에서 결함이 될 수 있는 위험을 찾으면 자기 권한 안에서 닫거나, 닫을 수 없으면 PASS 대신 해당 되돌림 또는 REVIEW로 판정한다. `<뒤 단계>가 확인해야 한다`는 인계만으로 PASS를 내지 않는다. `비게이팅 잔존 위험`에는 자기 권한으로 닫을 수 없는 것(선행기술·정식 명세서 미제공에 따른 UNVERIFIED, 발명자 확인 질문, 잠긴 계약·USER_LOCK·부모항 체인이 정한 사항)만 남기고, 항목마다 닫을 수 없는 이유와 그 계약 위치를 적는다.
+
+오케스트레이터가 같은 run의 새 revision·design_revision을 이어 깨워 맡기면 이미 읽은 소스 문서를 다시 읽지 않아도 된다. 이때 보고 머리에 `context: RESUMED — <이전 revision>`과 다시 읽지 않은 소스 목록을 적고, 이전 revision의 판정을 재사용하지 않고 새 문언 또는 새 계약으로 모든 필수 항목을 다시 판정한다. 결론이 이전과 같아도 새 문언의 어느 위치로 확인했는지 적는다.
+
 ## 출력 형식
 
 - 상태: PASS / REVIEW / BLOCK
