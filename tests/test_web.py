@@ -498,6 +498,16 @@ def test_a_server_from_older_code_reports_that_version_and_explains_a_missing_ro
         with pytest.raises(HTTPError) as err:
             urlopen(Request(server.origin + "/api/not-in-this-build", headers=headers), timeout=3)
         assert err.value.code == 404 and "이전 코드" in json.load(err.value)["error"]
+        # The 미지정 report: the new page sent target_mode "auto" to a process whose rules predate it. Actions now ask
+        # for a restart before any old validation runs; stopping a response still works.
+        post = {**headers, "Content-Type": "application/json"}
+        body = json.dumps({"id": "x", "text": "6항 검토", "target_mode": "auto"}).encode()
+        with pytest.raises(HTTPError) as err:
+            urlopen(Request(server.origin + "/api/send", data=body, headers=post), timeout=3)
+        assert err.value.code == 409 and "이전 코드" in json.load(err.value)["error"]
+        with pytest.raises(HTTPError) as err:
+            urlopen(Request(server.origin + "/api/stop", data=json.dumps({"id": "x"}).encode(), headers=post), timeout=3)
+        assert err.value.code != 409
     finally:
         server.shutdown()
         server.server_close()

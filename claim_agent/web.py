@@ -25,6 +25,7 @@ from .sources.extract import DOC_EXT, ExtractionError, extract_text
 from .tui_support import CATEGORIES, RESUME_KINDS, chat_resume_kind, child_options, claim_proposal_route, read_state, resume_command, validate_attachment
 
 ASSETS = Path(__file__).with_name("web_assets")
+STALE_SERVER = "실행 중인 웹 서버가 이전 코드로 시작되어 이 기능이 없습니다. 진행 중인 응답이 끝난 뒤 '프로그램 종료'를 누르고 실행기를 다시 실행해 주세요."
 MAX_UPLOAD = 20 * 1024 * 1024
 MAX_LIVE_LOG = 300000       # window of the live log kept in memory and rendered in the browser
 LIVE_LOG_HEAD = MAX_LIVE_LOG // 5   # the start of the log stays in the window; the rest slides
@@ -922,8 +923,7 @@ class Handler(BaseHTTPRequestHandler):
                 # A process started before a code update keeps its old routes while app.js is read fresh from disk, so a
                 # new screen can call an endpoint this process never loaded: say that instead of a bare 404.
                 stale = url.path.startswith("/api/") and self.server.code_version != code_fingerprint()
-                self.json({"error": "실행 중인 웹 서버가 이전 코드로 시작되어 이 기능이 없습니다. 진행 중인 응답이 끝난 뒤 '프로그램 종료'를 누르고 실행기를 다시 실행해 주세요."
-                           if stale else "페이지를 찾을 수 없습니다."}, 404)
+                self.json({"error": STALE_SERVER if stale else "페이지를 찾을 수 없습니다."}, 404)
         except (ValueError, OSError, KeyError) as exc:
             self.json({"error": self.server.workspace.redact(str(exc))}, 400)
 
@@ -938,6 +938,12 @@ class Handler(BaseHTTPRequestHandler):
             raw = self.rfile.read(length)
             url = urlsplit(self.path)
             workspace = self.server.workspace
+            # The page and its script are read from disk on every load, but the Python code stays as it was when the
+            # server started. After a code update the new page would talk to old server rules (e.g. a 작성 대상 value
+            # the old server rejects), so every action except stop/shutdown asks for a restart instead.
+            if url.path not in ("/api/stop", "/api/shutdown") and self.server.code_version != code_fingerprint():
+                self.json({"error": STALE_SERVER}, 409)
+                return
             if url.path == "/api/upload":
                 query = parse_qs(url.query)
                 self.json(workspace.upload(query.get("id", [""])[0], query.get("name", [""])[0], raw))
