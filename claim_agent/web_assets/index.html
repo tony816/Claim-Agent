@@ -64,18 +64,8 @@
       <details id="run-gates"><summary>게이트 표</summary><table id="run-gate-table"></table></details>
       <details id="run-diff"><summary>리비전 대조 (기존 문언 / 제안 문언 / 변경 이유 / 권리범위 영향 / 근거)</summary><div id="run-diff-body" class="run-diff-body"></div></details>
       <div class="run-actions"><a id="export-docx" class="run-link" download>DOCX 내보내기</a><a id="export-md" class="run-link" download>MD 내보내기</a><a id="export-evidence" class="run-link" download>근거·판정 부록 포함 DOCX</a></div>
-      <form id="resume-form" class="resume-form">
-        <label class="resume-label">재개·수정 결정</label>
-        <textarea id="resume-text" rows="2" placeholder="결정 내용 또는 수정 지시 (예: 오목면의 주체는 기둥 둘레면)"></textarea>
-        <div class="resume-row">
-          <select id="resume-kind" aria-label="재개 종류"></select>
-          <select id="resume-scope" aria-label="수정 범위" hidden><option value="">독립항 (종속항은 재검수)</option><option value="DEPENDENT">종속항만</option></select>
-          <span id="resume-files" class="resume-files"></span>
-          <button type="submit" id="resume-send">실행</button>
-        </div>
-        <p class="resume-hint">스타일만: 조사·띄어쓰기·표면 용어 (r+1) · 의미: 절 결속·관계 술어 (r+1) · 재설계: 주골격·한정 집합 (d+1). 추가 자료를 첨부하면 항상 재설계로 실행됩니다.</p>
-        <pre id="prior-candidates" class="prior-candidates" hidden></pre>
-      </form>
+      <p class="run-chat-hint">수정이나 결정은 아래 입력창에 그대로 적어 보내세요. 이 작업에 이어서 반영됩니다.</p>
+      <pre id="prior-candidates" class="prior-candidates" hidden></pre>
     </section>
   </div>
   <footer>

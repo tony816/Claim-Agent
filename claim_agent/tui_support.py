@@ -167,28 +167,45 @@ def resume_command(root: Path, run_id: str, decision_path: Path, kind: str, mode
     return command
 
 
-def feedback_command(root: Path, folder: Path, state: dict, feedback: str, material: str,
-                     attachments: list[Attachment], model: str) -> list[str]:
-    """Keep the existing run and USER_LOCK; invalidate dependent gates via redesign."""
+ACCEPT_UNVERIFIED = re.compile(r"미검증\s*(?:으로|을|를)?\s*(?:수용|진행|받아들)")
+
+
+def chat_resume_kind(text: str, halt: dict | None, new_material: bool = False) -> str | None:
+    """How a chat message continues a halted run; None when the run is not waiting for a decision.
+
+    A halted run waits for the user's decision, so the next chat message is that decision on the same run: the
+    prior-art pick when the halt asks for documents, the non-gating UNVERIFIED acceptance when the message says so,
+    a restart from the architect when it brings new material, and otherwise a re-run of the halted stage.
+    """
+    if not halt:
+        return None
+    if halt.get("reason_code") == "PRIOR_ART_SELECTION":
+        return "select_prior_art"
+    if ACCEPT_UNVERIFIED.search(text):
+        return "accept_unverified"
+    return "restart" if new_material else "none"
+
+
+def chat_resume_command(root: Path, folder: Path, state: dict | None, text: str, material: str,
+                        attachments: list[Attachment], model: str) -> list[str] | None:
+    """The resume command for a chat message on a halted run (same run, same USER_LOCK); None when not halted."""
     import hashlib
 
-    if not feedback.strip():
-        raise ValueError("수정할 내용을 프롬프트에 입력해 주세요.")
+    if not (state or {}).get("halt"):
+        return None
     checked = [validate_attachment(a.path) for a in attachments]
-    folder.mkdir(parents=True, exist_ok=False)
-    decision = folder / "feedback.txt"
-    decision.write_text(feedback, encoding="utf-8")
-    command = resume_command(root, state["run_id"], decision, "restart", model)
     known = {str(Path(item["path"]).resolve()) for item in state.get("material_meta", [])}
-    for item in checked:
-        if str(item.path.resolve()) not in known:
-            command += ["--add-source", str(item.path)]
+    add = [str(item.path) for item in checked if str(item.path.resolve()) not in known]
+    folder.mkdir(parents=True, exist_ok=False)
     digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
     if material.strip() and digest not in {item.get("sha256") for item in state.get("material_meta", [])}:
         source = folder / "추가설명.txt"
         source.write_text(material, encoding="utf-8")
-        command += ["--add-source", str(source)]
-    return command
+        add.append(str(source))
+    kind = chat_resume_kind(text, state["halt"], bool(add))
+    decision = folder / "decision.txt"
+    decision.write_text(text, encoding="utf-8")
+    return resume_command(root, state["run_id"], decision, kind, model, add if kind == "restart" else None)
 
 
 def child_options(root: Path) -> dict:

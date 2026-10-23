@@ -353,10 +353,9 @@ $("project-attach").onclick=()=>$("project-file-picker").click();$("project-file
 $("project-delete").onclick=async()=>{const p=state.projectData;if(!p)return;if(!confirm(`"${p.name}" 프로젝트와 저장된 지침·소스 파일을 삭제할까요? 대화 ${p.sessions.length}개는 남고 프로젝트 연결만 해제됩니다.`))return;
   try{await api("/api/project/delete",{id:p.id});state.project=null;localStorage.removeItem("claim-project");const sessions=await list();if(sessions.length)await open(sessions[0].id);else await create(null);}catch(e){error(e.message);}};
 
-// ---- 작업 상태 패널: 단계 스텝퍼 · 게이트 표 · 중지 사유 · 재개 · 내보내기 · 리비전 대조
+// ---- 작업 상태 패널: 단계 스텝퍼 · 게이트 표 · 중지 사유 · 내보내기 · 리비전 대조 (수정·결정은 입력창으로)
 const STAGES_ROOT=["ARCHITECT","DRAFT","STYLE","SUCCESS","SYNTAX","OA","BLIND","PICTURE","LOCK"],STAGES_DEP=["DEP_ARCHITECT","DEP_DRAFT","DEP_STYLE","DEP_SUCCESS","DEP_SYNTAX","DEP_OA","DEP_RECON","DEP_LOCK"];
 const STAGE_LABEL={ARCHITECT:"설계",DRAFT:"의미 초안",STYLE:"문체",SUCCESS:"성공조건",SYNTAX:"통사",OA:"OA",BLIND:"블라인드",PICTURE:"기준 비교",LOCK:"독립항 LOCK",DEP_ARCHITECT:"종속 설계",DEP_DRAFT:"종속 초안",DEP_STYLE:"종속 문체",DEP_SUCCESS:"종속 성공조건",DEP_SYNTAX:"종속 통사",DEP_OA:"종속 OA",DEP_RECON:"종속 역구성",DEP_LOCK:"종속 LOCK"};
-const KIND_LABEL={none:"같은 단계 재실행",accept_unverified:"미검증 수용(명세서·선행기술 부재만)",style:"스타일만 수정 (r+1)",meaning:"의미 수정 (r+1)",redesign:"재설계 (d+1)",restart:"처음부터",select_prior_art:"선행기술 문헌 선택"};
 let runKey="";
 function renderRun(data){
   const panel=$("run-panel"),run=data.run;
@@ -373,34 +372,20 @@ function renderRun(data){
     li.title=rec?`${rec.role}: ${rec.status} ${Object.entries(rec.gates||{}).map(([k,v])=>k+"="+v).join(", ")}`:"";steps.append(li);}
   const halt=$("run-halt");halt.replaceChildren();
   if(run.halt){halt.hidden=false;halt.append(el("strong","",`${run.halt.kind} @ ${run.halt.stage} (${run.halt.role||""})`),document.createTextNode("\n"+(run.halt.message||"")));
-    if(run.halt.open_issues&&run.halt.open_issues.length){const ul=el("ul");for(const o of run.halt.open_issues)ul.append(el("li","",`[${o.kind||""}] ${o.code||""} ${o.text||""}`));halt.append(ul);}}
+    if(run.halt.open_issues&&run.halt.open_issues.length){const ul=el("ul");for(const o of run.halt.open_issues)ul.append(el("li","",`[${o.kind||""}] ${o.code||""} ${o.text||""}`));halt.append(ul);}
+    halt.append(el("p","run-chat-hint","이 작업은 결정을 기다립니다. 결정이나 수정할 내용을 입력창에 보내면 같은 작업이 이어집니다. 명세서·선행기술이 없어 남은 미검증을 그대로 받아들이려면 '미검증 수용'이라고 보내세요."));}
   else halt.hidden=true;
   const table=$("run-gate-table");table.replaceChildren();
   const head=el("tr");for(const h of ["단계","역할","상태","게이트","비고"]){head.append(el("th","",h));}table.append(head);
   for(const r of run.stages||[]){const tr=el("tr");tr.className=r.superseded||r.stale?"superseded":"";for(const v of [r.stage,r.role,r.status,Object.entries(r.gates||{}).map(([k,v])=>k+": "+v).join(", "),(r.superseded?"superseded ":"")+(r.stale?"STALE":"")])tr.append(el("td","",v||""));table.append(tr);}
   const base=`/api/export?id=${encodeURIComponent(data.id)}`;
   $("export-docx").href=base+"&format=docx";$("export-md").href=base+"&format=md";$("export-evidence").href=base+"&format=docx&evidence=1";
-  const kinds=(run.halt?["none","style","meaning","redesign","accept_unverified"]:["style","meaning","redesign"]).concat(run.prior_art?["select_prior_art"]:[]);
   const pc=$("prior-candidates");pc.hidden=!run.prior_art;
-  if(run.prior_art)pc.textContent=`선행기술 후보 (선별 ${run.prior_art.screening||"-"}, 기준일 ${run.prior_art.base_date}) — '선행기술 문헌 선택'에 skey를 쉼표로, 기준일을 YYYY-MM-DD로 적으세요\n`+run.prior_art.candidates.map(c=>`${c.sealed?"●":"○"} ${c.skey}  ${c.number}  ${c.title}  ${c.published||"-"}  Jev ${c.p_screen==null?"-":c.p_screen.toFixed(2)}  ${c.relevance||""}`).join("\n");
-  const select=$("resume-kind");const current=select.value;select.replaceChildren();
-  for(const k of kinds){const o=el("option","",KIND_LABEL[k]);o.value=k;select.append(o);}
-  if(kinds.includes(current))select.value=current;
-  $("resume-scope").hidden=!(run.dependent&&(run.dependent.draft_set_lock||run.dependent.final_set_lock));
-  $("resume-files").textContent=state.pending.length?`첨부 ${state.pending.length}개 → 재설계로 실행`:"";
+  if(run.prior_art)pc.textContent=`선행기술 후보 (선별 ${run.prior_art.screening||"-"}, 기준일 ${run.prior_art.base_date}) — 대비할 문헌의 skey를 쉼표로, 기준일을 YYYY-MM-DD로 입력창에 적어 보내세요 (고르지 않으려면 none)\n`+run.prior_art.candidates.map(c=>`${c.sealed?"●":"○"} ${c.skey}  ${c.number}  ${c.title}  ${c.published||"-"}  Jev ${c.p_screen==null?"-":c.p_screen.toFixed(2)}  ${c.relevance||""}`).join("\n");
   const key=data.id+"|"+(run.outcome||"")+"|"+(run.revision||"")+"|"+(run.dependent&&run.dependent.draft_set_lock||"");
   if(key!==runKey){runKey=key;$("run-diff").open=false;$("run-diff-body").textContent="";}
 }
 $("run-diff").ontoggle=async()=>{if($("run-diff").open&&!$("run-diff-body").textContent){try{const r=await api(`/api/diff?id=${encodeURIComponent(state.id)}`);$("run-diff-body").textContent=r.text;}catch(e){$("run-diff-body").textContent=e.message;}}};
-$("resume-form").onsubmit=async event=>{
-  event.preventDefault();if(state.busy||state.data?.running)return;
-  const kind=$("resume-kind").value,text=$("resume-text").value.trim();
-  if(kind!=="accept_unverified"&&!text){error("결정 내용을 입력하세요.");return;}
-  state.busy=true;controls();error("");
-  try{await api("/api/resume",{id:state.id,kind:state.pending.length&&kind!=="none"&&kind!=="accept_unverified"?"restart":kind,text,files:state.pending.map(f=>f.id),scope:$("resume-scope").hidden?"":$("resume-scope").value});
-    $("resume-text").value="";state.pending=[];pending();await refresh();restartPoll();$("conversation").scrollTop=$("conversation").scrollHeight;}
-  catch(e){error(e.message);}finally{state.busy=false;controls();}
-};
 
 // ---- 개선 / Approval Inbox (ACE): 자동 제안은 전부 승인 대기. 승인해도 회귀 평가 전에는 주입되지 않는다.
 const GATE_CLASS={PENDING:"gate-pending",CANDIDATE_APPROVED:"gate-wait",ACTIVE_APPROVED:"gate-active",APPROVED_BUT_FAILED_EVAL:"gate-failed",HELD:"gate-held"};

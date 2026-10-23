@@ -21,7 +21,7 @@ from .config import load_config
 from .live_events import EventReader
 from .live_log import LiveLogFormatter
 from .model_settings import PROVIDERS, merge_settings_file
-from .tui_support import Attachment, child_options, feedback_command, native_input, parse_paths, prepare_request, read_state, run_command, validate_attachment
+from .tui_support import Attachment, chat_resume_command, child_options, native_input, parse_paths, prepare_request, read_state, run_command, validate_attachment
 
 STAGES = {
     "ARCHITECT": "독립항 설계", "DRAFT": "의미 초안", "STYLE": "용어·문체 조정",
@@ -82,7 +82,6 @@ class ClaimAgentApp(App):
     #actions { height: 3; padding: 0 1; }
     #actions Button { min-width: 12; margin-right: 1; }
     #toggle-logs { height: 3; width: 1fr; }
-    #feedback { height: 3; width: 14; }
     #log-panel { height: 45%; min-height: 6; }
     #logs { height: 1fr; }
     #result { height: 1fr; border: none; }
@@ -131,9 +130,8 @@ class ClaimAgentApp(App):
         with Horizontal(id="workspace"):
             with VerticalScroll(id="compose-pane"):
                 yield Label("01  프롬프트", classes="heading")
-                yield Select([("자동 분류 · 대화", "CHAT"), ("청구항 잠정안 작성", "AUTHORING_DRAFT"), ("기존 작업에 피드백 반영", "FEEDBACK"), ("출원용 최종 검증", "FINALIZATION")], value="CHAT", allow_blank=False, id="mode")
-                yield Select([], prompt="피드백을 반영할 작업 선택", id="feedback-run")
-                yield Static("질문이나 수정할 내용을 아래에 입력하세요. 답변을 받은 뒤 이어서 피드백을 보낼 수 있습니다.", classes="hint")
+                yield Select([("자동 분류 · 대화", "CHAT"), ("청구항 잠정안 작성", "AUTHORING_DRAFT"), ("출원용 최종 검증", "FINALIZATION")], value="CHAT", allow_blank=False, id="mode")
+                yield Static("질문이나 수정할 내용을 아래에 입력하세요. 답변을 받은 뒤 같은 입력창에 수정할 내용을 보내면 이전 작업에 이어서 반영됩니다.", classes="hint")
                 with TabbedContent(id="editor-tabs"):
                     with TabPane("대화·요청·피드백", id="request-tab"):
                         yield Composer(id="request")
@@ -163,7 +161,6 @@ class ClaimAgentApp(App):
                 yield Static("실행 대기", id="run-label", markup=False)
                 yield TextArea("단순 대화에서는 자료 없이 질문할 수 있습니다. 청구항 작성은 왼쪽 작업 모드에서 선택하세요.", read_only=True, id="result")
                 with Horizontal(classes="row"):
-                    yield Button("결과 수정", id="feedback", disabled=True)
                     yield Button("실시간 로그 펼치기", id="toggle-logs")
                 with Vertical(id="log-panel"):
                     yield TextArea(read_only=True, id="logs")
@@ -182,7 +179,6 @@ class ClaimAgentApp(App):
             self.add_files([Path(p).resolve() for p in self.initial_files])
         self.query_one("#request", TextArea).focus()
         self.set_log_open(False)
-        self.refresh_runs()
         self.update_mode()
         self.add_log("파일 선택: F2  |  클립보드의 파일·이미지·텍스트: F3")
         self.add_log("드래그가 동작하지 않는 터미널에서는 탐색기에서 복사한 뒤 붙여넣기 버튼을 누르세요.")
@@ -213,27 +209,9 @@ class ClaimAgentApp(App):
 
     def update_mode(self) -> None:
         mode = self.query_one("#mode", Select).value
-        self.query_one("#dependent", Checkbox).disabled = mode in {"CHAT", "FEEDBACK"}
-        self.query_one("#dep-target", Input).disabled = mode in {"CHAT", "FEEDBACK"}
-        self.query_one("#feedback-run", Select).display = mode == "FEEDBACK"
-        self.query_one("#start", Button).label = "보내기" if mode == "CHAT" else ("수정 실행" if mode == "FEEDBACK" else "실행")
-
-    def refresh_runs(self) -> None:
-        root = self.cfg.path("runs_dir")
-        options = []
-        if root.exists():
-            for path in sorted(root.glob("*/state.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:50]:
-                state = read_state(path)
-                if state and state.get("request_mode") in {"AUTHORING_DRAFT", "FINALIZATION"}:
-                    options.append((f"{path.parent.name} · {state.get('outcome', '')}", path.parent.name))
-        selector = self.query_one("#feedback-run", Select)
-        selected = selector.value
-        selector.set_options(options)
-        available = {value for _, value in options}
-        if self.last_pipeline_run in available:
-            selector.value = self.last_pipeline_run
-        elif selected in available:
-            selector.value = selected
+        self.query_one("#dependent", Checkbox).disabled = mode == "CHAT"
+        self.query_one("#dep-target", Input).disabled = mode == "CHAT"
+        self.query_one("#start", Button).label = "보내기" if mode == "CHAT" else "실행"
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "mode":
@@ -364,13 +342,6 @@ class ClaimAgentApp(App):
             self.copy_result()
         elif action == "toggle-logs":
             self.set_log_open(not self.log_open)
-        elif action == "feedback" and not self.running:
-            self.query_one("#mode", Select).value = "CHAT" if self.active_mode == "CHAT" else "FEEDBACK"
-            self.refresh_runs()
-            self.query_one("#editor-tabs", TabbedContent).active = "request-tab"
-            self.query_one("#request", Composer).clear()
-            self.query_one("#request", Composer).focus()
-            self.notify("프롬프트에 수정할 내용을 입력한 뒤 보내세요.")
         elif action == "new-chat" and not self.running:
             self.chat_history = []
             self.last_pipeline_run = None
@@ -390,7 +361,6 @@ class ClaimAgentApp(App):
             self.refresh_log()
             self.set_log_open(False)
             self.query_one("#copy", Button).disabled = True
-            self.query_one("#feedback", Button).disabled = True
         elif action == "quit":
             await self.action_close_app()
 
@@ -414,7 +384,17 @@ class ClaimAgentApp(App):
         self.routed_run_id = None
         request_text = self.query_one("#request", Composer).text.strip()
         try:
-            if self.active_mode == "CHAT":
+            halted = read_state(self.cfg.path("runs_dir") / self.last_pipeline_run / "state.json") if self.active_mode == "CHAT" and self.last_pipeline_run else None
+            resume = chat_resume_command(self.root, self.root / ".tui" / "requests" / run_id, halted, request_text,
+                                         self.query_one("#material", Composer).text, self.attachments, model) if halted and request_text else None
+            if resume:
+                # A halted run waits for a decision: this chat message is that decision on the same run.
+                self.active_mode = "RESUME"
+                self.job_dir = self.root / ".tui" / "requests" / run_id
+                command, run_id = resume, self.last_pipeline_run
+                if self.config_path:
+                    command[command.index("resume"):command.index("resume")] = ["--config", str(self.config_path)]
+            elif self.active_mode == "CHAT":
                 if not request_text:
                     raise ValueError("메시지를 입력해 주세요.")
                 self.job_dir = self.root / ".tui" / "requests" / run_id
@@ -427,19 +407,6 @@ class ClaimAgentApp(App):
                 command = [sys.executable, "-u", "-m", "claim_agent.chat", "--project-root", str(self.root), "--request", str(request_path)]
                 if self.config_path:
                     command += ["--config", str(self.config_path)]
-            elif self.active_mode == "FEEDBACK":
-                selected = self.query_one("#feedback-run", Select).value
-                if selected is Select.BLANK:
-                    raise ValueError("피드백을 반영할 기존 작업을 선택해 주세요.")
-                state = read_state(self.cfg.path("runs_dir") / str(selected) / "state.json")
-                if not state:
-                    raise ValueError("기존 작업 기록을 읽을 수 없습니다.")
-                self.job_dir = self.root / ".tui" / "requests" / run_id
-                command = feedback_command(self.root, self.job_dir, state, request_text,
-                    self.query_one("#material", Composer).text, self.attachments, model)
-                run_id = str(selected)
-                if self.config_path:
-                    command[command.index("resume"):command.index("resume")] = ["--config", str(self.config_path)]
             else:
                 request_path = prepare_request(
                     self.root, run_id, request_text,
@@ -479,7 +446,6 @@ class ClaimAgentApp(App):
         self.query_one("#start", Button).disabled = running
         self.query_one("#stop", Button).disabled = not running
         self.query_one("#new-chat", Button).disabled = running
-        self.query_one("#feedback", Button).disabled = running or not self.result_text
 
     @work(exclusive=True, group="pipeline")
     async def execute(self, command: list[str]) -> None:
@@ -520,7 +486,6 @@ class ClaimAgentApp(App):
             self.process = None
             self.set_running(False)
             self.set_log_open(False)
-            self.refresh_runs()
 
     def current_state(self) -> dict | None:
         if self.active_mode == "CHAT" and getattr(self, "routed_mode", None) not in (None, "CHAT", "META"):
@@ -591,7 +556,7 @@ class ClaimAgentApp(App):
                 self.query_one("#result", TextArea).load_text(self.redact(self.chat_prefix + self.chat_stream + "\n\n[응답 미완료 — 로그 펼치기로 확인하세요. 이전 대화는 유지됩니다.]"))
             return
         report = self.cfg.path("runs_dir") / self.run_id / "report.md"
-        if self.active_mode == "FEEDBACK" and report.exists() and report.stat().st_mtime_ns == self.previous_report_stamp:
+        if self.active_mode == "RESUME" and report.exists() and report.stat().st_mtime_ns == self.previous_report_stamp:
             self.query_one("#result", TextArea).load_text("수정된 보고서가 생성되지 않았습니다. 로그 펼치기로 중지 원인을 확인하세요. 이전 보고서는 결과 폴더에 보존되어 있습니다.")
             return
         concise = self.cfg.path("runs_dir") / self.run_id / "report-chat.md"

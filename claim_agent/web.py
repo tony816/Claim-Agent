@@ -22,7 +22,7 @@ from .config import load_config
 from .live_events import EventReader
 from .live_log import LiveLogFormatter
 from .sources.extract import DOC_EXT, ExtractionError, extract_text
-from .tui_support import CATEGORIES, RESUME_KINDS, child_options, claim_proposal_route, read_state, resume_command, validate_attachment
+from .tui_support import CATEGORIES, RESUME_KINDS, chat_resume_kind, child_options, claim_proposal_route, read_state, resume_command, validate_attachment
 
 ASSETS = Path(__file__).with_name("web_assets")
 MAX_UPLOAD = 20 * 1024 * 1024
@@ -437,11 +437,16 @@ class Workspace:
             text = str(data.get("text", "")).strip()
             if not text or len(text) > 200000:
                 raise ValueError("메시지를 입력하세요. 최대 20만 글자까지 보낼 수 있습니다.")
+            status = self.run_status(session.get("run_id"))
+            selected = data.get("files", [])
+            kind = chat_resume_kind(text, status and status["halt"], bool(selected))
+            if kind:
+                # A halted run waits for a decision: this chat message is that decision on the same run.
+                return self.resume(sid, dict(kind=kind, text=text, files=selected))
             self.require_connection()
             mode = data.get("mode", "CHAT")
             if mode not in {"CHAT", "AUTHORING_DRAFT"}:
                 raise ValueError("지원하지 않는 대화 모드입니다.")
-            selected = data.get("files", [])
             if not isinstance(selected, list) or any(not isinstance(x, str) for x in selected):
                 raise ValueError("첨부 파일 목록을 확인하세요.")
             known = {item["id"]: item for item in session["files"]}
@@ -975,9 +980,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.json({"ok": True})
             elif url.path == "/api/send":
                 workspace.start(data.get("id", ""), data)
-                self.json({"ok": True})
-            elif url.path == "/api/resume":
-                workspace.resume(data.get("id", ""), data)
                 self.json({"ok": True})
             elif url.path == "/api/stop":
                 workspace.stop(data.get("id", ""))
