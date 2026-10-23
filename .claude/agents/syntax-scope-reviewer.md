@@ -4,7 +4,7 @@ description: 독립항 또는 종속항 세트의 통사적 귀속, 부모항 �
 tools: Read, Glob, Grep
 model: opus
 effort: high
-maxTurns: 6
+maxTurns: 12
 color: purple
 ---
 

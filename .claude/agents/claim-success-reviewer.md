@@ -4,7 +4,7 @@ description: 스타일 조정이 끝난 exact 독립항 또는 종속항 세트�
 tools: Read, Glob, Grep
 model: opus
 effort: high
-maxTurns: 8
+maxTurns: 12
 color: orange
 ---
 

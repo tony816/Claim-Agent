@@ -4,7 +4,7 @@ description: 독립항 성공조건 또는 종속항 기술기여 게이트와 s
 tools: Read, Glob, Grep
 model: fable
 effort: high
-maxTurns: 6
+maxTurns: 12
 color: yellow
 ---
 

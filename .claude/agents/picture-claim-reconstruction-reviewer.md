@@ -4,7 +4,7 @@ description: 무도구 blind 에이전트가 봉인한 독립항 또는 개별 �
 tools: Read, Glob, Grep
 model: opus
 effort: high
-maxTurns: 8
+maxTurns: 12
 color: cyan
 ---
 
