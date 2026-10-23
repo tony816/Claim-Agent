@@ -9,6 +9,7 @@
 웹의 **⚙ 에이전트 모델 설정**에서 Claude·Codex 구독 OAuth 계정을 연결하고, 9개 역할의 제공자·모델·추론 강도를 변경할 수 있습니다. [구독 연결과 모델 설정 안내](docs/subscription-models.md)를 참고하세요.
 
 - `CLAUDE.md`: 주 오케스트레이터의 우선순위, 활성 순서, 필수 검수 루프
+- `invention-problem-finder`: 설계 전에 원띵 방법(공통 상류 병목·첫 도미노)으로 발명이 해결하고자 하는 최상류 과제를 근거와 함께 정한다. 비게이팅 기록이며 원자료가 아니다. 과제만 정해 달라는 `PROBLEM_FINDING` 요청에서는 이 역할만 호출한다
 - `claim-architect`: 주골격·근거·최소충분 한정 설계
 - `dependent-claim-strategy-architect`: 독립항 LOCK 뒤 종속항 후보의 과제–특징–작동원리–효과를 검증하고 단순 도면 묘사를 배제
 - `claim-drafter`: 잠긴 독립항 설계 또는 종속항 기술기여 계약을 보존해 `PRE_STYLE` 의미 초안 작성

@@ -31,6 +31,7 @@ color: blue
 
 1. 사용자의 현재 요청, USER_LOCK 문언, 현재 발명의 원자료 및 정책·보조 문서의 관계를 구분한다.
 2. 원자료에서 직접 뒷받침되는 사실만 사용한다. 불명확한 사항은 추정하지 말고 `근거 미확인`으로 둔다.
+2a. 입력에 `invention-problem-finder`의 과제 기록(`problem_record_id`)이 있으면 주골격의 방향 참고로만 쓴다. 기록은 원자료가 아니므로 그 도미노 연쇄의 각 고리를 인용된 원자료 위치에서 다시 확인하고, 확인되지 않는 고리는 주골격에 쓰지 않는다. 기록과 다른 과제를 중심으로 주골격을 세우면 이유를 적는다. 기록이 `UNRESOLVED`이고 후보 선택에 따라 주골격이 달라지면 9번과 같이 설계 쟁점으로 처리한다.
 3. 발명을 발명이게 하는 주골격을 3~5개 명제로 쓴다.
 4. 각 명제를 최상위 구성, 하위 구성, 구성 간 관계, 작용 또는 방법 단계에 배치하고 `PHYSICAL`, `PROCESS`, `DATA_CONTROL`, `COMPOSITION` 중 PRIMARY와 필요한 SECONDARY 유형을 기록한다. 둘 이상이 함께 주골격이면 `HYBRID`로 둔다. 각 구성에는 안정적인 `개념 ID`를 부여한다.
 5. 핵심 협동관계를 명시하고, 발명 유형상 필요한 경우 인과·선후·상태전이 순서를 함께 기록한다.
@@ -67,6 +68,7 @@ color: blue
 - 작업 경계
 - USER_LOCK 문언 및 변경 금지 항목
 - 주골격 3~5개
+- 과제 기록 대조: 입력된 `problem_record_id`와 그 과제를 따랐는지 / 다르게 정했으면 이유; 입력이 없으면 `없음`
 - 발명 유형: `PRIMARY: PHYSICAL|PROCESS|DATA_CONTROL|COMPOSITION; SECONDARY: 해당 유형 목록 또는 없음; HYBRID: YES|NO`
 - 구성 계층과 핵심 협동관계
 - 기술 개념표: `개념 ID / 원자료상 대상 / 계층 / 개념 설명 / SOURCE_EXACT_TERM 또는 CONCEPT_LABEL_ONLY / 근거 위치`
