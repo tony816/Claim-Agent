@@ -191,6 +191,18 @@ def parse_claim_set(text: str) -> list[Claim]:
     return claims
 
 
+def as_claim_set(text: str, no: int = 1) -> str:
+    """A lone claim without a header (an independent claim's exact text) as a one-claim set headed 【청구항 no】.
+
+    The style adjuster may return the independent claim body alone; the dependent stages parse it together with the
+    dependent set, so it needs a header. Text that already has one is returned as is.
+    """
+    text = text.strip()
+    if not text or _CLAIM_HEAD.search(normalize_headers(text)[0]):
+        return text
+    return f"【청구항 {no}】\n{text}"
+
+
 def validate_parent_refs(claims: list[Claim]) -> list[str]:
     """Return human-readable problems: forward references, missing parents, duplicates."""
     problems: list[str] = []

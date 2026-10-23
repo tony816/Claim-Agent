@@ -55,6 +55,7 @@ color: cyan
 7a. 사용자가 종속항의 주체 구성(예: "상기 리드 지지부는")을 지정하면, 의미 한정 패키지는 그 주체의 어떤 구조(부재·부분·형상)가 추가 관계를 만드는지를 담아야 한다. 주체의 구조 없이 `~되도록 구성되는`처럼 결과·기능만 남으면 `CLAIMABILITY_GATE`를 PASS로 하지 않는다. 그 구조가 도면에서만 확인되더라도 후보의 과제–작동 원리를 실현하는 수단이면 형상 묘사(`DRAWING_ONLY`)가 아니라 그 후보의 구성으로 판단하고, 원자료에 명칭이 없으면 개념 라벨로 넘긴다.
 7b. 세 기술기여 게이트가 PASS인 후보마다 `08_종속항_기술기여_게이트.md` 제5.4절의 `ENFORCEMENT_VALUE_GATE`를 판정한다. 먼저 `<누가> <어떤 실시품·공정>을 <제조·판매·사용>하면 <이 한정의 충족>을 <어떤 방법>으로 확인하고, 회피하려면 <무엇을 잃는다>`라는 권리행사 시나리오 한 줄을 원자료와 부모항 체인 문언만으로 쓰고, EV1 한정 실익·EV2 충족 확인·EV3 단일 실시 주체·EV4 회피 대가·EV5 독립 축을 근거 위치와 함께 기록한다. 시나리오를 쓸 수 없거나 EV 시험에 실패한 후보는 주된 트리에 넣지 않고 `FALLBACK_ONLY`로 내리거나 제외하며, 실패한 EV 항목을 적는다. EV2의 측정 조건이나 EV4의 대안 포섭 표현이 원자료에 있고 잠긴 계약 안의 선택이면 의미 한정 패키지에 넣고 다시 판정한다. 이 게이트에는 `13_판례_권리행사_작성기준.md`의 사례(측정 방법 미특정, 복수 주체 등)를 실패 유형 확인에만 쓰며, 원자료에 없는 측정법·구조·주체를 만들지 않는다.
 7c. `BUSINESS_CONTEXT`가 있으면 후보별 `business_fit`(HIGH·MEDIUM·LOW)과 그 입력의 위치를 `business_fit_basis`에 적는다. 입력에 근거가 없거나 `BUSINESS_CONTEXT: NONE`이면 `UNVERIFIED`로 두고, 주된 후보마다 사업 확인 질문 하나(예: `이 구성은 양산 사양에 들어갑니까?`, `경쟁 제품 중 이 구성을 쓰는 것이 있습니까?`)를 적는다. 시장·경쟁 정보를 추정하지 않고, `BUSINESS_CONTEXT`를 한정의 내용·기술 사실·효과의 근거로 쓰지 않는다. `business_fit`은 게이트가 아니며 분류나 다섯 게이트 값을 바꾸지 않는다.
+7d. 후보마다 `05_종속항_전개패턴_가이드.md` 제1.4a절의 메인 주체 하나를 잠근다. 사용자가 주체를 지정했으면 그 구성이고, 아니면 추가 관계를 만드는 구조를 가진 구성이다. 의미 한정 패키지의 다른 구성은 그 주체의 목적어·관형절로만 놓이게 짠다. 서로 다른 두 구성에 각각 새 구조가 필요하면 주체별 후보로 나누고, 나누면 인과사슬이 닫히지 않으면 `CLAIMABILITY_GATE: REVIEW`다.
 8. 선행기술이 제공된 경우에만 문헌별 개시, 차이점, 결합동기, 변경 용이성, 변경 저해 및 효과의 예측 가능성을 검토한다. 없으면 모든 신규성·진보성 판정을 `UNVERIFIED — PRIOR_ART_NOT_PROVIDED`로 둔다.
 9. `TECHNICAL_SOLUTION_CANDIDATE`만 주된 권리화 축에 배치한다. `FALLBACK_ONLY`는 사용자의 요청 또는 구체적인 보정·침해 입증 가치가 있을 때 별도 보조 축에 두며, 주된 기술기여 후보처럼 표현하지 않는다.
 9a. `TECHNICAL_SOLUTION_CANDIDATE`마다 `10_심사이력_경험기준.md`의 `exam_pattern`(REL_POSITION_COUPLING, SUBASSEMBLY_ACTION, CONDITIONAL_BRANCH, MODE_OPERATION, OPERATION_ORDER, PURPOSE_POSITION_MATERIAL, NUMERIC_WITH_REASON, NUMERIC_NO_REASON, SELECTION_MATERIAL, SELECTION_SHAPE, SELECTION_METHOD, SELECTION_INPUT_DATA, KNOWN_ITEM, OTHER)과 `design_change_risk`(LOW·MEDIUM·HIGH)를 붙이고, 분류의 원자료 근거 위치를 `exam_pattern_basis`에 적는다. 유형은 원자료의 문장으로만 정하며, 원자료가 두 구성의 결합 위치를 말하지 않으면 REL_POSITION_COUPLING으로 올리지 않는다. 이 분류는 순서 신호일 뿐 `CandidateClass`나 08의 세 게이트 값을 바꾸지 않는다. HIGH 후보도 인과사슬이 원자료로 닫히면 주된 트리에 남되, 같은 부모항 아래에서는 LOW → MEDIUM → HIGH 순서로 예정 항을 정하고 같은 위험도 안에서는 05의 권리화 축 순서를 따른다. `business_fit`이 HIGH·MEDIUM·LOW로 기록된 후보가 있으면 같은 부모항 아래에서 그 순서를 위험도보다 먼저 적용하고, `UNVERIFIED` 후보는 이 키로 앞뒤를 정하지 않는다. NUMERIC_NO_REASON에는 `원자료에 범위 안팎 비교 없음 — 반복 실험 최적화로 넘어갈 위험`을 적는다. 선행기술이 봉인돼 있고 그 관계가 개시돼 있으면 그 사실이 위험도보다 우선한다. `authoring_scope: EXISTING_SET_EDIT`이면 번호·인용관계를 바꾸지 않으므로 분류는 보고서에만 남긴다.
@@ -94,7 +95,7 @@ color: cyan
 - 원자료 집합
 - PRIOR_ART_SET: 정확한 경로 목록 / NONE
 - USER_LOCK 보존 결과
-- 후보별 필수 인과기록표: `후보 ID / 원자료 근거 / 부모항 전체 조합 / 과제 / 추가 기술특징 / 작동·협동 원리 / 효과 / 인과사슬 / 청구 가능 의미 한정 패키지 / 선행기술 대비 / 분류`
+- 후보별 필수 인과기록표: `후보 ID / 원자료 근거 / 부모항 전체 조합 / 과제 / 추가 기술특징 / 작동·협동 원리 / 효과 / 인과사슬 / 청구 가능 의미 한정 패키지 / 메인 주체와 선택 이유 / 선행기술 대비 / 분류`
 - 후보별 게이트표: `DEPENDENT_SOURCE_GATE / CAUSAL_CONTRIBUTION_GATE / CLAIMABILITY_GATE / ENFORCEMENT_VALUE_GATE / PRIOR_ART_CONTRIBUTION_GATE`
 - 후보별 권리행사 기록: `후보 ID / 권리행사 시나리오 / EV1 한정 실익 / EV2 충족 확인 / EV3 단일 실시 주체 / EV4 회피 대가 / EV5 독립 축 / business_fit / business_fit_basis 또는 사업 확인 질문`
 - 후보별 심사 경험 순위 신호: `후보 ID / exam_pattern / design_change_risk / 분류 근거 위치` (10_심사이력_경험기준; 게이트 아님)

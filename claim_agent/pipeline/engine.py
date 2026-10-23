@@ -41,6 +41,7 @@ from .claimtext import (
     ClaimParseError,
     MultiDependentChain,
     ancestor_nos,
+    as_claim_set,
     baseline_digest,
     claim_set_text,
     contains_user_lock,
@@ -1095,7 +1096,8 @@ class PipelineEngine(PriorArtSteps):
         c = state.candidate
         req = RunRequest.model_validate(state.request)
         d = self._ensure_dependent(state)
-        root_text = state.baseline_set.chain_text if state.baseline_set else (c.current.exact_text or "")  # type: ignore[union-attr]
+        # The locked independent text may have no 【청구항 1】 header; the dependent set is parsed together with it.
+        root_text = state.baseline_set.chain_text if state.baseline_set else as_claim_set(c.current.exact_text or "")  # type: ignore[union-attr]
         if st == Stage.DEP_ARCHITECT:
             ids = self._ids(state)
             ids.dependent_design_revision = d.dependent_design_revision
