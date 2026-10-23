@@ -146,6 +146,15 @@ class GraphConfig(BaseModel):
     caselaw_review: str = "on"        # on | off — OA packets get the enforcement check of the exact claim text (S13 types, code only)
 
 
+class ConversationConfig(BaseModel):
+    """CLAUDE.md `대화 모더레이터`: intent and direct answers before the gated flow, delivery after it.
+
+    The model comes from `roles.conversation-moderator`. off: the router runs on the conversation model, questions fall
+    back to REVIEW_ONLY/authoring as before, and results go out as the plain chat report.
+    """
+    moderator: str = "on"             # on | off
+
+
 class AppConfig(BaseModel):
     model: ModelConfig = Field(default_factory=ModelConfig)
     roles: dict[str, RoleConfig] = Field(default_factory=dict)
@@ -160,6 +169,7 @@ class AppConfig(BaseModel):
     prior_search: PriorSearchOptions = Field(default_factory=PriorSearchOptions)
     materials: MaterialsConfig = Field(default_factory=MaterialsConfig)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
+    conversation: ConversationConfig = Field(default_factory=ConversationConfig)
     provider: ProviderConfig = Field(default_factory=ProviderConfig)
     project_root: Path = Field(default_factory=Path.cwd, exclude=True)
 

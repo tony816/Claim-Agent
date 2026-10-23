@@ -243,18 +243,59 @@ def edited_set_text(state: RunState) -> str | None:
     return "\n\n".join(edited.get(c.claim_no, c.text) for c in base.claims)
 
 
+def no_lock_line(state: RunState) -> str:
+    """The 최종안 slot when no LOCK holds the text (CLAUDE.md 미완성 답변 방지): 없음 and the step that stopped it."""
+    h = state.halt
+    if h is None:
+        return "없음 — LOCK 단계 미완료"
+    return f"없음 — {h.stage} {h.kind}" + (" 실패" if h.kind in FAILED_HALTS else " 판단 대기")
+
+
+FAILED_HALTS = {"BLOCK", "LOOP_LIMIT", "ENVELOPE_INVALID", "ERROR"}
+
+
+def unlocked_label(state: RunState) -> str:
+    """How LOCK-less wording may be shown: as a pending or failed revision, never as the result."""
+    return "실패 revision(사용 금지)" if state.halt and state.halt.kind in FAILED_HALTS else "판단 대기 revision(LOCK 없음 · 사용 금지)"
+
+
 def _edit_section(state: RunState) -> list[str]:
     base, dep = state.baseline_set, state.dependent
     assert base is not None
     nos = ", ".join(f"제{n}항" for n in base.edit_targets)
     lock = dep.draft_set_lock if dep else None
     text = dep.current.exact_text if dep and dep.current and dep.current.exact_text else None
-    out = [f"### 편집한 항: {nos} ({'DRAFT_DEPENDENT_SET_LOCK ' + lock if lock else 'LOCK 없음'}; {PROVISIONAL_LABEL if lock else '미확정 문언'})", "",
-           text or "편집 문언 없음 (종속항 단계에서 중지)", ""]
+    if lock:
+        out = [f"### 편집한 항: {nos} (DRAFT_DEPENDENT_SET_LOCK {lock}; {PROVISIONAL_LABEL})", "", text or "", ""]
+    else:
+        out = [no_lock_line(state), ""]
+        if text:
+            out += [f"### {unlocked_label(state)}: {nos}", "", text, ""]
     full = edited_set_text(state)
     if full:
-        out += [f"### 전체 청구항 세트 ({nos}만 교체 · 나머지 항은 제공된 원문 그대로 · 부모항 체인 미검증)", "", full, ""]
+        tag = "부모항 체인 미검증" if lock else f"{nos}은 {unlocked_label(state)}"
+        out += [f"### 전체 청구항 세트 ({nos}만 교체 · 나머지 항은 제공된 원문 그대로 · {tag})", "", full, ""]
     return out
+
+
+def _root_section(state: RunState, root_text: str | None) -> list[str]:
+    c = state.candidate
+    if not root_text:
+        return ["독립항 문언 없음 (설계 단계에서 중지)", ""]
+    if c.final_claim_lock or c.draft_claim_lock:
+        lock = "FINAL_CLAIM_LOCK " + c.final_claim_lock if c.final_claim_lock else "DRAFT_CLAIM_LOCK " + c.draft_claim_lock
+        return [f"### 독립항 ({lock}; {'출원용 최종안' if c.final_claim_lock else PROVISIONAL_LABEL})", "", root_text, ""]
+    return [no_lock_line(state), "", f"### {unlocked_label(state)}: 독립항", "", root_text, ""]
+
+
+def _dependent_section(state: RunState) -> list[str]:
+    dep = state.dependent
+    text = (dep.current.exact_text if dep.current and dep.current.exact_text else None) or "종속항 문언 없음"
+    dl = dep.final_set_lock or dep.draft_set_lock
+    if dl:
+        lock = ("FINAL_DEPENDENT_SET_LOCK " if dep.final_set_lock else "DRAFT_DEPENDENT_SET_LOCK ") + dl
+        return [f"### 종속항 세트 ({lock}; {'출원용 최종 종속항 세트' if dep.final_set_lock else PROVISIONAL_LABEL})", "", text, ""]
+    return [f"### 종속항 세트 — {unlocked_label(state)}", "", text, ""]
 
 
 def prior_art_line(state: RunState) -> str:
@@ -323,20 +364,9 @@ def render_chat_report(state: RunState) -> str:
         out += ["## 최종안", ""] + _edit_section(state)
     else:
         root_text = cur.exact_text if cur and cur.exact_text else (cur.meaning_draft_text if cur else None)
-        final_root = bool(c.final_claim_lock)
-        out += ["## 최종안", ""]
-        if root_text:
-            lock = "FINAL_CLAIM_LOCK " + c.final_claim_lock if final_root else ("DRAFT_CLAIM_LOCK " + c.draft_claim_lock if c.draft_claim_lock else "LOCK 없음")
-            label = "출원용 최종안" if final_root else (PROVISIONAL_LABEL if c.draft_claim_lock else "미확정 문언")
-            out += [f"### 독립항 ({lock}; {label})", "", root_text, ""]
-        else:
-            out += ["독립항 문언 없음 (설계 단계에서 중지)", ""]
+        out += ["## 최종안", ""] + _root_section(state, root_text)
         if dep:
-            dl = dep.final_set_lock or dep.draft_set_lock
-            lock = ("FINAL_DEPENDENT_SET_LOCK " if dep.final_set_lock else "DRAFT_DEPENDENT_SET_LOCK ") + dl if dl else "LOCK 없음"
-            label = "출원용 최종 종속항 세트" if dep.final_set_lock else PROVISIONAL_LABEL
-            out += [f"### 종속항 세트 ({lock}; {label})", "",
-                    (dep.current.exact_text if dep.current and dep.current.exact_text else None) or "종속항 문언 없음", ""]
+            out += _dependent_section(state)
     prior = prior_art_line(state)
     if prior:
         out += [prior, ""]
@@ -353,12 +383,13 @@ def render_report(state: RunState, claims_only: bool = False) -> str:
     root_text = cur.exact_text if cur and cur.exact_text else (cur.meaning_draft_text if cur else None)
     dep = state.dependent
     dep_text = dep.current.exact_text if dep and dep.current and dep.current.exact_text else None
-    final_root = bool(c.final_claim_lock)
-    root_label = "출원용 최종안" if final_root else PROVISIONAL_LABEL
+    locked = bool(c.final_claim_lock or c.draft_claim_lock)
+    root_label = "출원용 최종안" if c.final_claim_lock else PROVISIONAL_LABEL if locked else unlocked_label(state)
 
     if claims_only:
         if state.baseline_set:
-            return f"<!-- {PROVISIONAL_LABEL} · 기존 세트 편집 -->\n\n" + (edited_set_text(state) or dep_text or "") + "\n"
+            edit_label = PROVISIONAL_LABEL if dep and dep.draft_set_lock else unlocked_label(state)
+            return f"<!-- {edit_label} · 기존 세트 편집 -->\n\n" + (edited_set_text(state) or dep_text or "") + "\n"
         parts = [f"<!-- {root_label} -->"]
         if root_text:
             parts.append(root_text)
@@ -384,26 +415,14 @@ def render_report(state: RunState, claims_only: bool = False) -> str:
         out.append("")
     elif state.baseline_set:
         out.extend(_edit_section(state))
-    elif root_text:
-        lock_state = "FINAL_CLAIM_LOCK " + c.final_claim_lock if final_root else ("DRAFT_CLAIM_LOCK " + c.draft_claim_lock if c.draft_claim_lock else "LOCK 없음")
-        out.append(f"### 독립항 ({lock_state}; {root_label if c.draft_claim_lock or c.final_claim_lock else '미확정 문언'})")
-        out.append("")
-        out.append(root_text)
-        out.append("")
     else:
-        out.append("독립항 문언 없음 (설계 단계에서 중지)")
-        out.append("")
+        out.extend(_root_section(state, root_text))
     if state.halt and state.halt.report_markdown and not reviewing:
         out.extend(["## 중지 단계의 검토 내용", "",
                     "아래는 해당 역할의 원 보고서입니다. 제시된 방향·예시 문언은 후속 검수를 통과한 확정안이 아닙니다.", "",
                     state.halt.report_markdown, ""])
     if dep and not state.baseline_set:
-        dl = dep.final_set_lock or dep.draft_set_lock
-        label = ("FINAL_DEPENDENT_SET_LOCK " if dep.final_set_lock else "DRAFT_DEPENDENT_SET_LOCK ") + dl if dl else "LOCK 없음"
-        out.append(f"### 종속항 세트 ({label}; {'출원용 최종 종속항 세트' if dep.final_set_lock else PROVISIONAL_LABEL})")
-        out.append("")
-        out.append(dep_text or "종속항 문언 없음")
-        out.append("")
+        out.extend(_dependent_section(state))
     out.extend(feedback_lines(state))
     out.append("## 핵심 판단")
     out.append("")

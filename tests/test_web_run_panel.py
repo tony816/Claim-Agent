@@ -79,8 +79,19 @@ def test_run_panel_endpoints(rt, request_indep, tmp_path, monkeypatch):
         resumed = []
         monkeypatch.setattr(workspace, "resume", lambda s, d: resumed.append((s, d)))
         workspace.start(sid3, {"text": "미검증 수용", "files": []})
+        assert workspace.jobs.get(sid3) is None
+        # Moderator on: a plain message on a halted run is read first, with the halt attached; the run keeps waiting.
+        started = []
+        monkeypatch.setattr(workspace, "require_connection", lambda: None)
+        monkeypatch.setattr(workspace, "execute", lambda s, job, command: (started.append(job), job.update(done=True)))
+        workspace.start(sid3, {"text": "왜 멈췄어?", "files": []})
+        workspace.jobs[sid3]["thread"].join()
+        packet = json.loads((started[0]["folder"] / "chat.json").read_text(encoding="utf-8"))
+        assert packet["ui_hints"]["halted"]["stage"] == state.halt.stage and [d["kind"] for _, d in resumed] == ["accept_unverified"]
+        # Moderator off: the message is the halted run's decision, as before.
+        monkeypatch.setattr(workspace.cfg.conversation, "moderator", "off")
         workspace.start(sid3, {"text": "오목면의 주체는 기둥 둘레면", "files": []})
-        assert [d["kind"] for _, d in resumed] == ["accept_unverified", "none"] and workspace.jobs.get(sid3) is None
+        assert [d["kind"] for _, d in resumed] == ["accept_unverified", "none"]
     finally:
         server.shutdown()
         server.server_close()

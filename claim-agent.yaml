@@ -41,6 +41,12 @@ roles:
   # Prior-art search (검색 문장·Jev 실패 시 선별) and pre-exam (문헌별 대비·종합 판단), docs/선행기술조사_사전심사_설계_2026-10.md
   prior-art-searcher:                    {thinking_level: MEDIUM, temperature: 0.2}
   prior-art-pre-examiner:                {thinking_level: HIGH,   temperature: 0.1}
+  # Conversation moderator (CLAUDE.md 대화 모더레이터): routes every chat turn, answers CONSULT questions and writes the
+  # `## 답변` over pipeline results. Not a gate role; it never writes or seals claim wording.
+  conversation-moderator:                {provider: claude_oauth, model: claude-opus-5-5, thinking_level: HIGH, temperature: 0.3}
+
+conversation:
+  moderator: "on"           # on | off (quoted: bare on/off are YAML booleans) — off: router on the conversation model, plain reports, no CONSULT answers
 
 cache:
   enabled: true

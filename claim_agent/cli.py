@@ -127,7 +127,8 @@ def cmd_run(args) -> int:
 
 def cmd_resume(args) -> int:
     rt = _rt(args, args.variant)
-    engine = rt.engine(_provider(rt, args))
+    provider = _provider(rt, args)
+    engine = rt.engine(provider)
     action = "none"
     for flag, name in (("apply_style_fix", "style_fix"), ("apply_meaning_fix", "meaning_fix"), ("redesign", "redesign"), ("accept_unverified", "accept_unverified")):
         if getattr(args, flag, False):
@@ -146,6 +147,11 @@ def cmd_resume(args) -> int:
     decision = Decision(text=text, action=action, add_sources=args.add_source or None, restart_from=args.restart_from, scope=args.scope,
                         prior_art_selection=selection, base_date=base_date)
     state = engine.resume(args.run_id, decision)
+    if getattr(args, "moderate", False) and text.strip():
+        from .moderator import deliver
+        from .store.report import render_chat_report
+
+        rt.store.write_chat_report(state.run_id, deliver(provider, rt.cfg, text, state, render_chat_report(state)))
     _print_summary(state)
     return _exit_code(state.outcome)
 
@@ -634,6 +640,7 @@ def build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--select-prior-art", help="comma-separated WIPS skeys to compare (empty string = none); a sealed set restarts the design")
     rs.add_argument("--base-date", help="출원 예정일 YYYY-MM-DD for --select-prior-art")
     rs.add_argument("--select-prior-art-from-decision", action="store_true", help="read the skeys (and an optional YYYY-MM-DD) from the decision text")
+    rs.add_argument("--moderate", action="store_true", help="the decision is the user's chat message: the conversation moderator answers it over the result")
     rs.set_defaults(func=cmd_resume)
 
     rv = sub.add_parser("revise", help="user-initiated new revision of a finished run")

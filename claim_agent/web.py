@@ -319,6 +319,10 @@ class Workspace:
                     files=[a["path"] for a in attachments], attachments=attachments,
                     project=dict(id=pid, name=project["name"]))
 
+    @property
+    def moderated(self) -> bool:
+        return self.cfg.conversation.moderator == "on"
+
     def run_status(self, run_id: str | None) -> dict | None:
         """Halt/outcome/usage summary of the session's pipeline run (no claim text, no paths)."""
         if not run_id or not re.fullmatch(r"[A-Za-z0-9_-]+", run_id):
@@ -440,10 +444,13 @@ class Workspace:
                 raise ValueError("메시지를 입력하세요. 최대 20만 글자까지 보낼 수 있습니다.")
             status = self.run_status(session.get("run_id"))
             selected = data.get("files", [])
-            kind = chat_resume_kind(text, status and status["halt"], bool(selected))
-            if kind:
-                # A halted run waits for a decision: this chat message is that decision on the same run.
+            halt = status and status["halt"]
+            kind = chat_resume_kind(text, halt, bool(selected))
+            if kind and (kind != "none" or not self.moderated):
+                # An explicit decision (documents, UNVERIFIED acceptance, new material) continues the halted run at once.
                 return self.resume(sid, dict(kind=kind, text=text, files=selected))
+            # Anything else on a halted run goes to the moderator first: a decision comes back as a resume hand-off, a
+            # question about the halt gets answered and the run keeps waiting (CLAUDE.md 대화 모더레이터).
             self.require_connection()
             if not isinstance(selected, list) or any(not isinstance(x, str) for x in selected):
                 raise ValueError("첨부 파일 목록을 확인하세요.")
@@ -473,7 +480,8 @@ class Workspace:
                                 files=all_files, attachments=preset["attachments"], history=history, model=model, run_id=session["run_id"],
                                 instructions=preset["instructions"], user_lock=preset["user_lock"], project=preset["project"],
                                 ui_hints=dict(dependent=dependent, target=target or "", target_mode=target_mode,
-                                              prior_search=bool(data.get("prior_search")))))
+                                              prior_search=bool(data.get("prior_search")),
+                                              **({"halted": {k: halt.get(k) for k in ("stage", "kind", "role", "message")}} if halt else {}))))
             command = [sys.executable, "-u", "-m", "claim_agent.chat", "--project-root", str(self.root), "--request", str(req)]
             if self.config:
                 command += ["--config", str(self.config)]
@@ -487,7 +495,7 @@ class Workspace:
             session["updated"] = time.time()
             self.persist(session)
             job = dict(done=False, stopped=False, process=None, log="", log_base=0, mid=mid, folder=job_dir,
-                       mode="CHAT", run_id=None, previous_report=0)
+                       mode="CHAT", run_id=None, previous_report=0, text=text, files=list(dict.fromkeys(selected)))
             self.jobs[sid] = job
             thread = threading.Thread(target=self.execute, args=(sid, job, command), daemon=True)
             job["thread"] = thread
@@ -609,6 +617,8 @@ class Workspace:
             command = resume_command(self.root, run_id, decision, kind, self.cfg.default_model, add, scope)
             if self.config:
                 command += ["--config", str(self.config)]
+            if self.moderated and kind != "select_prior_art":
+                command += ["--moderate"]          # the decision text is the user's message: answer it over the result
             report = self.cfg.path("runs_dir") / run_id / "report.md"
             mid = uuid.uuid4().hex
             labels = {"none": "같은 단계 재실행", "style": "스타일만 수정", "meaning": "의미 수정", "redesign": "재설계", "restart": "처음부터", "accept_unverified": "미검증 수용"}
@@ -683,7 +693,8 @@ class Workspace:
                 message["route_reason"] = self.redact(event.get("reason", ""))
                 job["log"] += f"\n[자동 분류: {event['mode']}] {event.get('reason', '')}\n"
                 continue
-            if event.get("kind") == "delta" and job["mode"] == "CHAT" and event.get("role") == "대화":
+            # Live text: the plain chat answer and the moderator's CONSULT answer (not its routing JSON or delivery draft).
+            if event.get("kind") == "delta" and job["mode"] == "CHAT" and (event.get("role") == "대화" or event.get("stage") == "CONSULT"):
                 message["text"] += self.redact(event.get("text", ""))
             job["log"] += formatter.feed(event)
         self.trim_log(job)
@@ -718,6 +729,12 @@ class Workspace:
                 if job["stopped"]:
                     message["status"] = "stopped"
                     message["text"] += "\n\n[응답을 중지했습니다.]"
+                elif job["mode"] == "CHAT" and (read_state(job["folder"] / "response.json") or {}).get("resume_halted") and process.returncode == 0:
+                    # The moderator read the message as the halted run's decision: drop this turn's placeholders and let
+                    # the run's own resume path (scope rules, edit guard, labels) take the same message after this job.
+                    index = session["messages"].index(message)
+                    del session["messages"][index - 1:index + 1]
+                    job["handoff"] = dict(kind="none", text=job["text"], files=job["files"])
                 elif job["mode"] == "CHAT":
                     result = read_state(job["folder"] / "response.json")
                     if process.returncode != 0 or not result:
@@ -742,6 +759,12 @@ class Workspace:
                     message["text"] = self.redact((concise if concise.exists() else report).read_text(encoding="utf-8"))
                     message["pipeline_run_id"] = job["run_id"]
                     message["status"] = "complete" if process.returncode == 0 else "review"
+                    # The next turn's moderator and roles must see this exchange too, not only chat turns.
+                    decision = job["folder"] / "decision.txt"
+                    history = (read_state(self.directory(sid) / "history.json") or {}).get("history", [])
+                    history += [{"role": "user", "parts": [{"text": decision.read_text(encoding="utf-8") if decision.exists() else ""}]},
+                                {"role": "model", "parts": [{"text": message["text"]}]}]
+                    save_json(self.directory(sid) / "history.json", {"history": history})
         except Exception as exc:
             with self.lock:
                 message["status"] = "error"
@@ -762,6 +785,14 @@ class Workspace:
                 job["done"] = True
                 session["updated"] = time.time()
                 self.persist(session)
+        handoff = job.get("handoff")
+        if handoff:
+            try:
+                self.resume(sid, handoff)
+            except Exception as exc:  # noqa: BLE001 - the user still needs an answer in the conversation
+                with self.lock:
+                    session["messages"].append(dict(id=uuid.uuid4().hex, role="assistant", text=self.redact(str(exc)), status="error", mode="AUTHORING_DRAFT"))
+                    self.persist(session)
 
     def stop(self, sid: str) -> None:
         with self.lock:

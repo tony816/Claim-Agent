@@ -22,7 +22,7 @@ from .config import load_config
 from .live_events import EventReader
 from .live_log import LiveLogFormatter
 from .model_settings import PROVIDERS, merge_settings_file
-from .tui_support import Attachment, chat_resume_command, child_options, native_input, parse_paths, read_state, validate_attachment
+from .tui_support import Attachment, chat_resume_command, chat_resume_kind, child_options, native_input, parse_paths, read_state, validate_attachment
 
 STAGES = {
     "ARCHITECT": "독립항 설계", "DRAFT": "의미 초안", "STYLE": "용어·문체 조정",
@@ -385,19 +385,29 @@ class ClaimAgentApp(App):
         request_text = self.query_one("#request", Composer).text.strip()
         try:
             halted = read_state(self.cfg.path("runs_dir") / self.last_pipeline_run / "state.json") if self.last_pipeline_run else None
+            halt = (halted or {}).get("halt")
+            # With the moderator on, a halted run's message is read first (CLAUDE.md 대화 모더레이터): only an explicit
+            # decision resumes at once; a question is answered and a plain decision comes back as a resume hand-off.
+            handed_off, self.pending_resume = getattr(self, "pending_resume", False), False
+            moderate_first = (bool(halt) and not handed_off and self.cfg.conversation.moderator == "on"
+                              and chat_resume_kind(request_text, halt, bool(self.attachments)) == "none")
             resume = chat_resume_command(self.root, self.root / ".tui" / "requests" / run_id, halted, request_text,
-                                         self.query_one("#material", Composer).text, self.attachments, model) if halted and request_text else None
+                                         self.query_one("#material", Composer).text, self.attachments, model) if halted and request_text and not moderate_first else None
             if resume:
                 # A halted run waits for a decision: this chat message is that decision on the same run.
                 self.active_mode = "RESUME"
                 self.job_dir = self.root / ".tui" / "requests" / run_id
                 command, run_id = resume, self.last_pipeline_run
+                if self.cfg.conversation.moderator == "on" and "--select-prior-art-from-decision" not in command:
+                    command.append("--moderate")
                 if self.config_path:
                     command[command.index("resume"):command.index("resume")] = ["--config", str(self.config_path)]
             else:
                 if not request_text:
                     raise ValueError("메시지를 입력해 주세요.")
                 hints = self.claim_hints()
+                if moderate_first:
+                    hints["halted"] = {k: halt.get(k) for k in ("stage", "kind", "role", "message")}
                 self.job_dir = self.root / ".tui" / "requests" / run_id
                 self.job_dir.mkdir(parents=True, exist_ok=False)
                 request_path = self.job_dir / "chat.json"
@@ -477,6 +487,8 @@ class ClaimAgentApp(App):
             self.process = None
             self.set_running(False)
             self.set_log_open(False)
+            if getattr(self, "pending_resume", False):
+                self.call_later(self.action_start)
 
     def current_state(self) -> dict | None:
         if self.active_mode == "CHAT" and getattr(self, "routed_mode", None) not in (None, "CHAT", "META"):
@@ -533,6 +545,11 @@ class ClaimAgentApp(App):
             return
         if self.active_mode == "CHAT":
             response = read_state(self.job_dir / "response.json") if self.job_dir else None
+            if response and response.get("resume_halted") and not self.stop_requested:
+                # The moderator read the message as the halted run's decision: send the same message down the resume path.
+                self.pending_resume = True
+                self.add_log("모더레이터: 중지된 작업에 대한 결정으로 보고 같은 작업을 재개합니다.")
+                return
             if response and not self.stop_requested:
                 self.chat_history = response["history"]
                 self.result_text = self.redact(response["answer"] if response.get("run_id") else self.chat_transcript(self.chat_history))
