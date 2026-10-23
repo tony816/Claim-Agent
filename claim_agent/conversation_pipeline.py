@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 from .claim_scope import apply_ui_target, constrain_target, find_existing_set, parse_target, ui_target_set
+from .models.prior_art import PriorSearchOptions
 from .models.request import IMAGE_EXT, RunRequest
 from .pipeline.engine import Decision
 from .routing import RouteDecision
@@ -186,17 +187,37 @@ def _new_material(request: dict, blocks: list[dict], paths: dict, previous) -> b
     return bool(new_material or [f for f in request.get("files", []) if f not in preset])
 
 
-def effective_request_text(request: dict) -> str:
+PREVIOUS_ANSWER_HEAD = ("## 앞선 답변 (이 대화에서 Claim-Agent가 낸 직전 답변 — 이번 요청이 가리키는 수정 방향 참고용이며 "
+                        "발명 원자료·근거가 아님. 기술 사실은 원자료로 다시 확인하고, 지적을 따를지는 잠긴 계약과 게이트가 정한다)")
+
+
+def previous_answer(request: dict) -> str:
+    """The latest model turn of the conversation (e.g. a REVIEW_ONLY result the user now asks to apply)."""
+    for entry in reversed(request.get("history", [])):
+        if entry.get("role") == "model":
+            return "\n".join(part["text"] for part in entry.get("parts", []) if "text" in part).strip()
+    return ""
+
+
+def effective_request_text(request: dict, with_previous_answer: bool = False) -> str:
     """The request the roles see: project instructions (standing user directives) precede the current turn's text.
 
     Instructions never enter the material bundle, so they cannot become invention evidence; they only travel in the
-    `현재 요청` section that every role already treats as the user's instruction.
+    `현재 요청` section that every role already treats as the user's instruction. For authoring, the conversation's
+    latest answer follows under a heading that marks it as a non-source reference: "검토한 내용에 따라 수정해줘"
+    otherwise reaches the architect and drafter without the review it points at (only the router saw it).
     """
     instructions = str(request.get("instructions") or "").strip()
-    if not instructions:
+    answer = previous_answer(request) if with_previous_answer else ""
+    if not instructions and not answer:
         return request["text"]
-    return ("## 프로젝트 지침 (사용자가 프로젝트 폴더에 미리 설정한 지시 — 같은 전문이 `project-instructions` 원자료로도 전달됨)\n\n" + instructions
-            + "\n\n## 현재 요청\n\n" + request["text"])
+    parts = []
+    if instructions:
+        parts.append("## 프로젝트 지침 (사용자가 프로젝트 폴더에 미리 설정한 지시 — 같은 전문이 `project-instructions` 원자료로도 전달됨)\n\n" + instructions)
+    parts.append("## 현재 요청\n\n" + request["text"])
+    if answer:
+        parts.append(PREVIOUS_ANSWER_HEAD + "\n\n" + answer)
+    return "\n\n".join(parts)
 
 
 def previous_state(cfg, request):
@@ -221,7 +242,7 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
     source = next((b for b in blocks if b["id"] == route.claim_source_id), None)
     if source is None and previous and authoring:
         source = next((b for b in blocks if b["category"] == "existing_claims"), None)
-    text = effective_request_text(request)
+    text = effective_request_text(request, with_previous_answer=authoring)
     req = RunRequest(
         request_mode=route.mode, request_text=text,
         candidate_id=previous.candidate.candidate_id if previous else "cand-01",
@@ -232,6 +253,8 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
         reviewers=list(dict.fromkeys(route.reviewers)), review_scope=route.review_scope,
         claim_file=baseline[0] if baseline else (source["path"] if source else None),
         authoring_scope=route.authoring_scope if authoring else None, **paths,
+        # 선행기술 검색 체크(웹 작성 창·MCP claim_send): WIPS 검색 + Jev 선별 + 사전 심사, 나머지 값은 claim-agent.yaml prior_search
+        prior_search=PriorSearchOptions(enabled=True) if (request.get("ui_hints") or {}).get("prior_search") and authoring and not previous else None,
     )
     # Existing model claims can be a review/edit target, but are not evidence of
     # new technical facts. The packet builder passes claim_file separately.

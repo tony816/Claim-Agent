@@ -22,9 +22,10 @@ from .config import load_config
 from .live_events import EventReader
 from .live_log import LiveLogFormatter
 from .sources.extract import DOC_EXT, ExtractionError, extract_text
-from .tui_support import CATEGORIES, RESUME_KINDS, child_options, claim_proposal_route, read_state, resume_command, validate_attachment
+from .tui_support import CATEGORIES, RESUME_KINDS, chat_resume_kind, child_options, claim_proposal_route, read_state, resume_command, validate_attachment
 
 ASSETS = Path(__file__).with_name("web_assets")
+STALE_SERVER = "실행 중인 웹 서버가 이전 코드로 시작되어 이 기능이 없습니다. 진행 중인 응답이 끝난 뒤 '프로그램 종료'를 누르고 실행기를 다시 실행해 주세요."
 MAX_UPLOAD = 20 * 1024 * 1024
 MAX_LIVE_LOG = 300000       # window of the live log kept in memory and rendered in the browser
 LIVE_LOG_HEAD = MAX_LIVE_LOG // 5   # the start of the log stays in the window; the rest slides
@@ -318,6 +319,10 @@ class Workspace:
                     files=[a["path"] for a in attachments], attachments=attachments,
                     project=dict(id=pid, name=project["name"]))
 
+    @property
+    def moderated(self) -> bool:
+        return self.cfg.conversation.moderator == "on"
+
     def run_status(self, run_id: str | None) -> dict | None:
         """Halt/outcome/usage summary of the session's pipeline run (no claim text, no paths)."""
         if not run_id or not re.fullmatch(r"[A-Za-z0-9_-]+", run_id):
@@ -339,7 +344,22 @@ class Workspace:
                     for r in (state.get("records") or {}).values()],
             dependent=dict(reconstruction_gate=(dep.get("current") or {}).get("reconstruction_gate"), draft_set_lock=dep.get("draft_set_lock"), final_set_lock=dep.get("final_set_lock")) if dep else None,
             draft_claim_lock=cand.get("draft_claim_lock"), final_claim_lock=cand.get("final_claim_lock"),
+            prior_art=self.prior_art_status(state.get("prior_art")),
         )
+
+    @staticmethod
+    def prior_art_status(pa: dict | None) -> dict | None:
+        """Search candidates for the 선행기술 선택 resume (skey, number, title, Jev probability, chosen), no document text."""
+        if not pa or not pa.get("hits"):
+            return None
+        screened = pa.get("screened") or {}
+        kept = {d.get("skey") for d in pa.get("docs") or []} - {t.get("skey") for t in pa.get("trimmed") or []}
+        rows = []
+        for h in pa["hits"][:30]:
+            s = screened.get(h.get("skey"), {})
+            rows.append(dict(skey=h.get("skey"), number=" ".join(x for x in (h.get("ctry"), h.get("number"), h.get("kind")) if x), title=h.get("title", ""),
+                             published=h.get("published", ""), p_screen=s.get("p_screen"), relevance=s.get("relevance"), sealed=h.get("skey") in kept))
+        return dict(base_date=pa.get("base_date"), set_id=pa.get("set_id"), screening=pa.get("screening"), candidates=rows)
 
     def snapshot(self, sid: str, log_from: int | None = None) -> dict:
         """Session state for one poll. `log_from` is the client's live-log cursor: only what came after it is sent.
@@ -422,11 +442,16 @@ class Workspace:
             text = str(data.get("text", "")).strip()
             if not text or len(text) > 200000:
                 raise ValueError("메시지를 입력하세요. 최대 20만 글자까지 보낼 수 있습니다.")
-            self.require_connection()
-            mode = data.get("mode", "CHAT")
-            if mode not in {"CHAT", "AUTHORING_DRAFT"}:
-                raise ValueError("지원하지 않는 대화 모드입니다.")
+            status = self.run_status(session.get("run_id"))
             selected = data.get("files", [])
+            halt = status and status["halt"]
+            kind = chat_resume_kind(text, halt, bool(selected))
+            if kind and (kind != "none" or not self.moderated):
+                # An explicit decision (documents, UNVERIFIED acceptance, new material) continues the halted run at once.
+                return self.resume(sid, dict(kind=kind, text=text, files=selected))
+            # Anything else on a halted run goes to the moderator first: a decision comes back as a resume hand-off, a
+            # question about the halt gets answered and the run keeps waiting (CLAUDE.md 대화 모더레이터).
+            self.require_connection()
             if not isinstance(selected, list) or any(not isinstance(x, str) for x in selected):
                 raise ValueError("첨부 파일 목록을 확인하세요.")
             known = {item["id"]: item for item in session["files"]}
@@ -438,13 +463,14 @@ class Workspace:
             rid = "web-" + uuid.uuid4().hex
             job_dir = self.root / ".tui" / "requests" / rid
             model = self.cfg.default_model
-            # Every web request is classified. The selection is a hint, never a
-            # bypass around interpretation of the user's current question.
+            # Every web request is classified from its text; the composer has no chat/authoring switch. The claim
+            # picker is a hint, never a bypass around interpretation of the user's current question.
             job_dir.mkdir(parents=True)
             history = (read_state(folder / "history.json") or {}).get("history", [])
             prior_users = [m for m in session["messages"] if m["role"] == "user"]
             material = "\n\n".join(m["text"] for m in prior_users)
-            context = "\n\n".join(m["text"] for m in session["messages"] if m.get("mode") == "AUTHORING_DRAFT" and m.get("status") in {"complete", "review"})
+            context = "\n\n".join(m["text"] for m in session["messages"] if m.get("role") == "assistant" and m.get("status") in {"complete", "review"}
+                                  and (m.get("pipeline_run_id") or m.get("mode") == "AUTHORING_DRAFT"))
             earlier_files = [f["id"] for m in prior_users for f in m.get("files", [])]
             preset = self.project_inputs(session)
             session_files = [str(validate_attachment(folder / "uploads" / fid / known[fid]["name"]).path) for fid in dict.fromkeys([*earlier_files, *selected])]
@@ -453,21 +479,23 @@ class Workspace:
             save_json(req, dict(text=text, material=material, reference=context,
                                 files=all_files, attachments=preset["attachments"], history=history, model=model, run_id=session["run_id"],
                                 instructions=preset["instructions"], user_lock=preset["user_lock"], project=preset["project"],
-                                ui_hints=dict(selected_mode=mode, dependent=dependent, target=target or "", target_mode=target_mode)))
+                                ui_hints=dict(dependent=dependent, target=target or "", target_mode=target_mode,
+                                              prior_search=bool(data.get("prior_search")),
+                                              **({"halted": {k: halt.get(k) for k in ("stage", "kind", "role", "message")}} if halt else {}))))
             command = [sys.executable, "-u", "-m", "claim_agent.chat", "--project-root", str(self.root), "--request", str(req)]
             if self.config:
                 command += ["--config", str(self.config)]
             mid = uuid.uuid4().hex
             session["messages"].extend([
-                dict(id=uuid.uuid4().hex, role="user", text=text, files=[known[f] for f in dict.fromkeys(selected)], mode=mode,
+                dict(id=uuid.uuid4().hex, role="user", text=text, files=[known[f] for f in dict.fromkeys(selected)], mode="CHAT",
                      claim_target=dict(mode=target_mode, dependent=dependent, target=target)),
-                dict(id=mid, role="assistant", text="", status="running", mode=mode, log_id=rid),
+                dict(id=mid, role="assistant", text="", status="running", mode="CHAT", log_id=rid),
             ])
             session["title"] = session["messages"][0]["text"][:36]
             session["updated"] = time.time()
             self.persist(session)
             job = dict(done=False, stopped=False, process=None, log="", log_base=0, mid=mid, folder=job_dir,
-                       mode="CHAT", run_id=None, previous_report=0)
+                       mode="CHAT", run_id=None, previous_report=0, text=text, files=list(dict.fromkeys(selected)))
             self.jobs[sid] = job
             thread = threading.Thread(target=self.execute, args=(sid, job, command), daemon=True)
             job["thread"] = thread
@@ -589,6 +617,8 @@ class Workspace:
             command = resume_command(self.root, run_id, decision, kind, self.cfg.default_model, add, scope)
             if self.config:
                 command += ["--config", str(self.config)]
+            if self.moderated and kind != "select_prior_art":
+                command += ["--moderate"]          # the decision text is the user's message: answer it over the result
             report = self.cfg.path("runs_dir") / run_id / "report.md"
             mid = uuid.uuid4().hex
             labels = {"none": "같은 단계 재실행", "style": "스타일만 수정", "meaning": "의미 수정", "redesign": "재설계", "restart": "처음부터", "accept_unverified": "미검증 수용"}
@@ -663,7 +693,8 @@ class Workspace:
                 message["route_reason"] = self.redact(event.get("reason", ""))
                 job["log"] += f"\n[자동 분류: {event['mode']}] {event.get('reason', '')}\n"
                 continue
-            if event.get("kind") == "delta" and job["mode"] == "CHAT" and event.get("role") == "대화":
+            # Live text: the plain chat answer and the moderator's CONSULT answer (not its routing JSON or delivery draft).
+            if event.get("kind") == "delta" and job["mode"] == "CHAT" and (event.get("role") == "대화" or event.get("stage") == "CONSULT"):
                 message["text"] += self.redact(event.get("text", ""))
             job["log"] += formatter.feed(event)
         self.trim_log(job)
@@ -698,6 +729,12 @@ class Workspace:
                 if job["stopped"]:
                     message["status"] = "stopped"
                     message["text"] += "\n\n[응답을 중지했습니다.]"
+                elif job["mode"] == "CHAT" and (read_state(job["folder"] / "response.json") or {}).get("resume_halted") and process.returncode == 0:
+                    # The moderator read the message as the halted run's decision: drop this turn's placeholders and let
+                    # the run's own resume path (scope rules, edit guard, labels) take the same message after this job.
+                    index = session["messages"].index(message)
+                    del session["messages"][index - 1:index + 1]
+                    job["handoff"] = dict(kind="none", text=job["text"], files=job["files"])
                 elif job["mode"] == "CHAT":
                     result = read_state(job["folder"] / "response.json")
                     if process.returncode != 0 or not result:
@@ -722,6 +759,12 @@ class Workspace:
                     message["text"] = self.redact((concise if concise.exists() else report).read_text(encoding="utf-8"))
                     message["pipeline_run_id"] = job["run_id"]
                     message["status"] = "complete" if process.returncode == 0 else "review"
+                    # The next turn's moderator and roles must see this exchange too, not only chat turns.
+                    decision = job["folder"] / "decision.txt"
+                    history = (read_state(self.directory(sid) / "history.json") or {}).get("history", [])
+                    history += [{"role": "user", "parts": [{"text": decision.read_text(encoding="utf-8") if decision.exists() else ""}]},
+                                {"role": "model", "parts": [{"text": message["text"]}]}]
+                    save_json(self.directory(sid) / "history.json", {"history": history})
         except Exception as exc:
             with self.lock:
                 message["status"] = "error"
@@ -742,6 +785,14 @@ class Workspace:
                 job["done"] = True
                 session["updated"] = time.time()
                 self.persist(session)
+        handoff = job.get("handoff")
+        if handoff:
+            try:
+                self.resume(sid, handoff)
+            except Exception as exc:  # noqa: BLE001 - the user still needs an answer in the conversation
+                with self.lock:
+                    session["messages"].append(dict(id=uuid.uuid4().hex, role="assistant", text=self.redact(str(exc)), status="error", mode="AUTHORING_DRAFT"))
+                    self.persist(session)
 
     def stop(self, sid: str) -> None:
         with self.lock:
@@ -903,8 +954,7 @@ class Handler(BaseHTTPRequestHandler):
                 # A process started before a code update keeps its old routes while app.js is read fresh from disk, so a
                 # new screen can call an endpoint this process never loaded: say that instead of a bare 404.
                 stale = url.path.startswith("/api/") and self.server.code_version != code_fingerprint()
-                self.json({"error": "실행 중인 웹 서버가 이전 코드로 시작되어 이 기능이 없습니다. 진행 중인 응답이 끝난 뒤 '프로그램 종료'를 누르고 실행기를 다시 실행해 주세요."
-                           if stale else "페이지를 찾을 수 없습니다."}, 404)
+                self.json({"error": STALE_SERVER if stale else "페이지를 찾을 수 없습니다."}, 404)
         except (ValueError, OSError, KeyError) as exc:
             self.json({"error": self.server.workspace.redact(str(exc))}, 400)
 
@@ -919,6 +969,12 @@ class Handler(BaseHTTPRequestHandler):
             raw = self.rfile.read(length)
             url = urlsplit(self.path)
             workspace = self.server.workspace
+            # The page and its script are read from disk on every load, but the Python code stays as it was when the
+            # server started. After a code update the new page would talk to old server rules (e.g. a 작성 대상 value
+            # the old server rejects), so every action except stop/shutdown asks for a restart instead.
+            if url.path not in ("/api/stop", "/api/shutdown") and self.server.code_version != code_fingerprint():
+                self.json({"error": STALE_SERVER}, 409)
+                return
             if url.path == "/api/upload":
                 query = parse_qs(url.query)
                 self.json(workspace.upload(query.get("id", [""])[0], query.get("name", [""])[0], raw))
@@ -959,9 +1015,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.json({"ok": True})
             elif url.path == "/api/send":
                 workspace.start(data.get("id", ""), data)
-                self.json({"ok": True})
-            elif url.path == "/api/resume":
-                workspace.resume(data.get("id", ""), data)
                 self.json({"ok": True})
             elif url.path == "/api/stop":
                 workspace.stop(data.get("id", ""))

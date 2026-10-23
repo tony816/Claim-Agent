@@ -71,6 +71,11 @@ RECORD_PREFIX = {
     "draft_dependent_set_lock": "ddsl",
     "final_dependent_set_lock": "fdsl",
     "baseline_set": "bl",
+    "prior_query": "pq",
+    "prior_screen": "ps",
+    "prior_art_set": "pset",
+    "preexam_compare": "pec",
+    "preexam_judge": "pej",
 }
 
 
@@ -102,8 +107,11 @@ def record_id(kind: str, ids: Identifiers, seq: int = 1) -> str:
     """Deterministic record id for a record kind and identifier set."""
     prefix = RECORD_PREFIX[kind]
     nn = f"{seq:02d}"
-    if kind in {"design"}:
+    if kind in {"design", "preexam_judge"}:
         return f"{prefix}-{ids.candidate_id}-{ids.design_revision}-{nn}"
+    if kind == "preexam_compare":
+        # One per document of the sealed set (D1, D2 …).
+        return f"{prefix}-{ids.candidate_id}-{ids.design_revision}-{ids.extra.get('doc_id', 'D0')}-{nn}"
     if kind in {"dependent_design"}:
         return f"{prefix}-{ids.dependent_set_id}-{ids.dependent_design_revision}-{nn}"
     if kind == "dependent_blind" or kind == "dependent_reference_compare":

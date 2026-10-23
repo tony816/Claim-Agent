@@ -79,8 +79,9 @@ CONVERSATION_MAX_TOTAL_TOKENS = 1_000_000
 
 def routed_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: Path, events: EventWriter) -> dict:
     """`provider` is the configured live provider (routing + plain chat); the pipeline builds its own from the runtime."""
+    from . import moderator
     from .conversation_pipeline import intake, previous_state, run_pipeline
-    from .routing import classify_request
+    from .routing import RouteDecision, classify_request
     from .runtime import build_runtime, make_provider
     from .store.report import usage_note
 
@@ -88,13 +89,31 @@ def routed_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
     provider = UsageMeter(provider, cfg.telemetry.pricing)     # the routing call is part of this answer's cost
     previous = previous_state(cfg, request)
     blocks, paths = intake(request, folder, previous)
-    route = classify_request(provider, cfg.project_root, request["model"], request["text"], blocks, folder.name,
-                             request.get("ui_hints"), request.get("instructions"))
+    # Front of the moderator: it reads the intent (CLAUDE.md 대화 모더레이터), on its own model when it is on.
+    role, model = moderator.router_model(cfg, request["model"])
+    route = classify_request(provider, cfg.project_root, model, request["text"], blocks, folder.name,
+                             request.get("ui_hints"), request.get("instructions"), role)
+    halted = bool((request.get("ui_hints") or {}).get("halted")) and previous is not None and previous.halt is not None
+    if route.resumes_halt and not halted:
+        route.resumes_halt = False                 # only a run that is actually waiting can take the message as its decision
+    if route.mode == "CONSULT" and not moderator.enabled(cfg):
+        # Without the moderator no one answers a question directly; the reviewers answer it as before.
+        route = RouteDecision(mode="REVIEW_ONLY", reason=route.reason, reviewers=["syntax-scope-reviewer", "oa-strategy-reviewer"],
+                              claim_source_id=route.claim_source_id)
     (folder / "route.json").write_text(route.model_dump_json(indent=2), encoding="utf-8")
-    planned_id = previous.run_id if previous and previous.request_mode.value == route.mode and route.mode in {"AUTHORING_DRAFT", "FINALIZATION"} else folder.name
+    planned_id = previous.run_id if previous and (route.resumes_halt or previous.request_mode.value == route.mode and route.mode in {"AUTHORING_DRAFT", "FINALIZATION"}) else folder.name
     events.emit("route", role="요청 분류", run_id=planned_id, **route.model_dump())
     message = user_message(request["text"], request.get("material", ""), request.get("files", []))
     history = request.get("history", [])
+    if route.resumes_halt:
+        # The halted run's own resume path (same run, same stage, its scope rules) takes the message; the web runs it.
+        return {"answer": "", "history": history, "resume_halted": True, "effective_mode": route.mode,
+                "route": route.model_dump(), "run_id": previous.run_id, "finish_reason": "RESUME_HALTED"}
+    if route.mode == "CONSULT":
+        answer = moderator.consult(provider, cfg, request, blocks, paths, previous)
+        footnote = moderator.CONSULT_NOTE + "\n" + usage_note(provider.usage, time.time() - started)
+        return {"answer": answer + "\n\n" + footnote, "effective_mode": "CONSULT", "route": route.model_dump(), "finish_reason": "STOP",
+                "history": [*history, message, {"role": "model", "parts": [{"text": answer}]}]}
     if route.mode in {"CHAT", "META"}:
         # A prior report is conversational context, not a user-authored source.
         context = history
@@ -111,6 +130,10 @@ def routed_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
                               turn={"started_at": started, **provider.usage})
     finally:
         _close(pipeline_provider)
+    # Back of the moderator: the answer to this message over the report; the report itself stays as rendered.
+    state = rt.store.load_state(result["run_id"])
+    result["answer"] = moderator.deliver(provider, cfg, request["text"], state, result["answer"], route.reason)
+    rt.store.write_chat_report(state.run_id, result["answer"])
     result["history"] = [*history, message, {"role": "model", "parts": [{"text": result["answer"]}]}]
     return result
 

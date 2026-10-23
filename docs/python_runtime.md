@@ -41,7 +41,7 @@ Windows 더블클릭 실행기는 `scripts/launch_web.py`를 통해 `claim_agent
 
 서버는 `127.0.0.1`의 임의 포트에만 바인딩한다. 실행기 토큰으로 HttpOnly/SameSite 쿠키를 설정하고 API는 Host·Origin·요청 헤더를 검증한다. API 키는 서버 환경변수에만 유지한다. 업로드는 세션별 복사본과 ID로 관리하고 `.env`, 경로 탈출, 지원하지 않는 형식 및 20MB 초과 파일을 거부한다. API에서 임의 로컬 경로를 읽지 않는다.
 
-대화 목록·메시지·Gemini 역할 이력은 `.tui/web/sessions/`에 저장된다. 기본 선택인 **자동 분류 · 대화**는 `claim_agent.chat`에서 답변 전에 현재 `CLAUDE.md`와 이전 문맥으로 요청을 분류한다. 청구항 출력물·수정안은 `AUTHORING_DRAFT`, 명시적 출원용 최종 확정은 `FINALIZATION`, 특허 의견은 `REVIEW_ONLY`로 기존 `PipelineEngine`에 연결된다. 작성·수정은 필수 역할과 게이트 순서를 거치며, 제한 검수는 요청된 리뷰어만 호출한다. 수동 **청구항 작성·수정** 선택도 유지된다.
+대화 목록·메시지·Gemini 역할 이력은 `.tui/web/sessions/`에 저장된다. 입력창에는 대화·작성 선택이 없고, 모든 요청은 `claim_agent.chat`에서 답변 전에 현재 `CLAUDE.md`와 이전 문맥으로 요청을 분류한다. 청구항 출력물·수정안은 `AUTHORING_DRAFT`, 명시적 출원용 최종 확정은 `FINALIZATION`, 특허 의견은 `REVIEW_ONLY`로 기존 `PipelineEngine`에 연결된다. 작성·수정은 필수 역할과 게이트 순서를 거치며, 제한 검수는 요청된 리뷰어만 호출한다. 작성 옵션(대상 항·종속항 범위·선행기술 검색)은 분류기 힌트이며 작성 경로로 분류될 때만 적용된다. TUI도 같은 경로 하나로 보낸다.
 
 **보고서 두 벌.** `runs/<run_id>/report.md`는 게이트 표·성능 요약·리비전 이력까지 담은 완전한 기록이고, `report-chat.md`는 대화에 표시할 간결본(`render_chat_report`)이다. 간결본은 맨 위에 청구항 문언·LOCK을 두고, 보고서 내용은 게이트 기록에서 조립한 500자 이하의 **요약 코멘트**(결과, 중지 사유, 미통과·미실행 단계, 재개 방법, 남은 UNVERIFIED, 쟁점 순으로 넘치는 줄은 잘림)로만 싣는다. 중지 단계의 분석 등 역할별 원 보고서는 전체 보고서에만 있다. REVIEW_ONLY는 맨 위 청구항 자리에 리뷰어 검토 의견 전문을 싣고 그 아래에 요약 코멘트를 둔다. 텍스트 자료와 붙여 넣은 청구항은 저장·로드할 때 줄바꿈을 LF로 통일한다(자료 식별 sha256은 원본 바이트 기준). 모델은 CRLF를 되돌려 쓰지 않으므로, 통일하지 않으면 `exact_claim_text` 대조가 항상 실패한다. 마지막 `※` 주석은 이번 실행(run/resume 한 번, 대화 경로에서는 요청 분류 호출 포함)의 작업 소요 시간, 토큰 수(입력·캐시·출력+사고), `telemetry.pricing` 단가로 산출한 API 비용이며, 단가가 없는 모델은 "산출 불가"로 표시한다. 누적 사용량은 `state.usage`, 이번 실행분은 `state.turn`에 저장된다. 일반 대화(CHAT·META) 답변에도 같은 주석이 붙지만 다음 턴의 모델 이력에는 넣지 않는다. 웹·TUI는 간결본을 표시하고, 웹의 `/api/report`는 전체 보고서를 접힌 영역에 지연 로드한다. CLI·export·감사 기록은 `report.md`를 그대로 쓴다.
 
@@ -141,6 +141,18 @@ claim-agent review --reviewers syntax-scope-reviewer,oa-strategy-reviewer --clai
 텍스트 원자료는 `.md/.txt/.yaml/.json/.csv` 외에 `.pdf`(텍스트 레이어), `.docx`, `.hwpx`, `.hwp`(HWP 5.0)를 `sources/extract.py`가 본문 텍스트로 추출한다. 스캔 PDF·암호화 문서·배포용 HWP는 업로드 시점에 명확한 사유로 거부한다(OCR 미지원). 원본 파일의 sha256이 원자료 식별자이며 추출 요약은 `material_meta.extraction`에 남는다.
 
 도면은 intake에서 한 번 정규화한다(`materials.max_image_side`, 기본 2048px, 도면 부호 판독을 위해 더 줄이지 않음). 원본·정규화본 sha가 모두 기록되어 `input_revision`에 반영된다. `materials.files_api`가 켜져 있으면 Gemini Files API에 콘텐츠 해시당 1회 업로드하고 이후 호출은 URI로 참조한다(레지스트리 `runs/.files-registry.json`, 보존 기간 내 프로세스 간 재사용, 실패 시 inline 폴백). 호출 기록의 `context_transport.image_transport`로 확인한다.
+
+## 선행기술 검색과 사전 심사
+
+설계([`docs/선행기술조사_사전심사_설계_2026-10.md`](선행기술조사_사전심사_설계_2026-10.md))대로 동작한다. 기본은 꺼짐이며, `run --prior-search`, 요청 YAML의 `prior_search: {enabled: true}`, 웹 작성 옵션의 **선행기술** 체크, MCP `claim_send(prior_search=true)`로 켠다. 나머지 값은 `claim-agent.yaml`의 `prior_search` 블록(6개국, 국가당 10건, `max_docs: 5`, 자동 선택, `inventive_high: note`)이다.
+
+- 흐름: `PRIOR_QUERY`(searcher 모델이 국문·영문 검색 문장) → `PRIOR_SEARCH`(WIPS AI 검색·서지, `claim_agent/prior_art/wips.py`) → `PRIOR_SCREEN`(Jev 확률로 선별) → `PRIOR_FETCH`(전문 수집, `runs/<id>/prior_art/`) → `PRIOR_TRIM`(청구범위·요약 기준 Jev 확률로 거르고 `PRIOR_ART_SET` 봉인) → `ARCHITECT`(조건 6·8) → `PRE_EXAM`(문헌별 COMPARE + JUDGE) → `DRAFT`. 사용자가 파일로 준 선행기술만 있어도 `PRE_EXAM`은 돈다.
+- 키: WIPS는 `.env`의 `WIPS_API_KEY`(OAuth 과정을 코드가 대행), Jev는 OpenRouter로만 실행하며 `OPENROUTER_API_KEY`를 쓴다. jev-cli는 Python 3.13 이상에서 설치된다. `claim-agent doctor`가 두 연결 상태를 알린다(값은 출력하지 않는다).
+- 판정: 인용 원문은 엔진이 문헌에서 다시 찾고 못 찾은 개시는 `확인 필요`로 내린다. 한 문헌에 독립항 필수 요소가 모두 개시(인용 확인)되고 사전 심사자도 부정 우려로 보면 새 design_revision으로 architect에 되돌린다(`pipeline.max_return_loops.PREEXAM`, 기본 2). 모델·코드 불일치(`PREEXAM_MODEL_CODE_MISMATCH`), 실질적 동일 확인(`PREEXAM_SUBSTANTIAL_IDENTITY`), 인용 미확인(`PREEXAM_EVIDENCE_UNCONFIRMED`), 남는 차이 없음(`NO_SOURCE_DIFFERENTIATOR`)은 멈춘다.
+- 재개: 검색 불가(`PRIOR_SEARCH_UNAVAILABLE`)는 `resume --accept-unverified`로 검색 없이 진행. 문헌 선택은 `resume <run_id> --select-prior-art KR1,KR2 [--base-date YYYY-MM-DD]`(웹: 재개 종류 '선행기술 문헌 선택', MCP: `claim_select_prior_art`). 봉인 뒤 바꾸면 설계부터 다시 한다.
+- 비용: WIPS·Jev 호출은 `pipeline.max_calls`에 세지 않는다. WIPS는 `prior_search.max_wips_calls`(기본 40)로 따로 막고, Jev의 OpenRouter 요금은 `cost_usd`에 더해진다. 텔레메트리 `phase: wips | jev` 행에는 검색 문장·키·토큰이 남지 않는다.
+- 결과: 보고서의 **선행기술 조사·사전 심사** 절, `records/pset-*.md`(봉인 집합), `records/pej-*.md`(사전 심사 판정과 문헌별 대비표). 신규성·진보성은 언제나 "검색 집합 기준"이며 전수 조사가 아니다.
+- 명세서 작성 인계표: LOCK마다 `runs/<id>/handoff/spec_materials.json`과 LOCK 보고서·`export --with-evidence` 부록에 한정별 심사대응 재료 상태를 남긴다(LOCK 조건 아님).
 
 ## 예산 가드와 성능 요약
 

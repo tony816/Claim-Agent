@@ -1,0 +1,86 @@
+{
+  "context_version": "CA-PORTABLE-2026-10-22-v1",
+  "snapshot_date": "2026-10-22",
+  "source_basis": "Current workspace files, including existing uncommitted changes",
+  "equivalence_tested": false,
+  "sources": [
+    {
+      "path": "CLAUDE.md",
+      "sha256": "6c50cf9bb7951e709257bbf6c40e827a590588f91c8126a40d08dba7bfd22a15",
+      "bytes": 44187,
+      "included_in_optional_reference": false
+    },
+    {
+      "path": ".claude/agents/invention-problem-finder.md",
+      "sha256": "206b45bc8e48e0cb1dc457007c958f110499ee4e4be029667ee8e01f4d16f3f4",
+      "bytes": 8518,
+      "included_in_optional_reference": false
+    },
+    {
+      "path": "sources/README.md",
+      "sha256": "2ad5d925d5236946b440f8295b9e4155c951c1d9728dcd514a2c92d83bae0305",
+      "bytes": 8627,
+      "included_in_optional_reference": true
+    },
+    {
+      "path": "sources/독립항_작성_성공조건.md",
+      "sha256": "eb52a646c2209a246e061dc97b936b1df9330577968256becabac82feb45314e",
+      "bytes": 33526,
+      "included_in_optional_reference": true
+    },
+    {
+      "path": "sources/04_청구항_스타일가이드.md",
+      "sha256": "85d1803b46d7d6d9a3c54d4c0f1a8dda56b8d4128e3a8b4841f58bad41d28237",
+      "bytes": 28336,
+      "included_in_optional_reference": true
+    },
+    {
+      "path": "sources/07_용어표현_출처게이트.md",
+      "sha256": "2f7eb90d0ec468c4125f10c79dbff40c8c7a940a64a4086ebe17da0fcbc217e0",
+      "bytes": 9539,
+      "included_in_optional_reference": true
+    },
+    {
+      "path": "sources/08_종속항_기술기여_게이트.md",
+      "sha256": "947c502fc6bc1f60c6c3327f7914dfd7072b9f4cd7cf4872349251a85e4e3328",
+      "bytes": 15289,
+      "included_in_optional_reference": true
+    },
+    {
+      "path": "sources/05_종속항_전개패턴_가이드.md",
+      "sha256": "2f5601d941a234bc0c7795191ec4fbc3645d241582a8c7ea4218677f34dc6377",
+      "bytes": 26946,
+      "included_in_optional_reference": true
+    },
+    {
+      "path": "sources/06_OA_심사리스크_체크리스트.md",
+      "sha256": "1d299a15830251241f2a6e018ede4fb61aeb69087bd2c584e57b1b1e97e9e43c",
+      "bytes": 45165,
+      "included_in_optional_reference": true
+    },
+    {
+      "path": "sources/09_사전심사_기준.md",
+      "sha256": "9bce312ea3622892dbe60b7f8e7395dbcbc202680cba89f903598c5c013b700c",
+      "bytes": 19212,
+      "included_in_optional_reference": true
+    },
+    {
+      "path": "docs/graph_layers.md",
+      "sha256": "87b1d327712b8bf74647665bf638e0c0e6d2218216e64a1a92ef7e2e66d79b61",
+      "bytes": 5737,
+      "included_in_optional_reference": false
+    },
+    {
+      "path": "web/PROJECT_INSTRUCTIONS.md",
+      "sha256": "c418f62d18176d8a9294dc8ebfe3ae8047bd9dd5b797b54f8d3a2155ca64d874",
+      "bytes": 20611,
+      "included_in_optional_reference": false
+    },
+    {
+      "path": "web/README.md",
+      "sha256": "1cc88ae1fac8ea6df26a539c7f5cc15d0326a9fc2edee5b2a94c6ebc0bc1471d",
+      "bytes": 4563,
+      "included_in_optional_reference": false
+    }
+  ]
+}

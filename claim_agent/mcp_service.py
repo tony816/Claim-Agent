@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import base64
 import binascii
+import re
 import time
 from pathlib import Path
 
-from .tui_support import RESUME_KINDS
+from .tui_support import RESUME_KINDS, prior_art_decision
 from .web import Workspace
 
 MAX_WAIT_S = 120         # one status call blocks at most this long; claude.ai allows 240 s per tool call
@@ -58,12 +59,13 @@ class ClaimAgentService:
     # ---- requests
 
     def send(self, conversation_id: str, text: str, attachment_ids: list[str] | None = None, target_mode: str | None = None,
-             target_claim: int | None = None, target_segments: str | None = None) -> dict:
-        """Start one turn. `target_mode` (independent | single | range) is the composer's 작성 대상, a hint the router
-        and the scope guard use; without it the request is classified from the text alone."""
-        data: dict = dict(text=text, files=list(attachment_ids or []), mode="CHAT")
+             target_claim: int | None = None, target_segments: str | None = None, prior_search: bool = False) -> dict:
+        """Start one turn. `target_mode` (auto | independent | single | range) is the composer's 작성 대상, a hint the router
+        and the scope guard use; without it the request is classified from the text alone. `prior_search` runs the WIPS
+        search, Jev screening and pre-exam before the design of a new authoring run."""
+        data: dict = dict(text=text, files=list(attachment_ids or []), prior_search=bool(prior_search))
         if target_mode is not None:
-            data.update(mode="AUTHORING_DRAFT", target_mode=target_mode, target_claim=target_claim, target_segments=target_segments)
+            data.update(target_mode=target_mode, target_claim=target_claim, target_segments=target_segments)
         self.workspace.start(conversation_id, data)
         return dict(message_id=self._last_assistant(conversation_id)["id"], status="running")
 
@@ -74,6 +76,14 @@ class ClaimAgentService:
             raise ValueError("kind는 " + ", ".join(RESUME_KINDS) + " 중 하나여야 합니다.")
         self.workspace.resume(conversation_id, dict(kind=kind, text=decision, files=list(attachment_ids or []), scope=scope))
         return dict(message_id=self._last_assistant(conversation_id)["id"], status="running")
+
+    def select_prior_art(self, conversation_id: str, skeys: list[str], base_date: str | None = None) -> dict:
+        """Pick the WIPS candidates to compare (and the base date); a sealed set restarts the design (설계 5.5)."""
+        if base_date is not None and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", base_date):
+            raise ValueError("base_date는 YYYY-MM-DD 형식이어야 합니다.")
+        if any(not re.fullmatch(r"[A-Za-z0-9_.-]+", s) for s in skeys):
+            raise ValueError("skey 형식을 확인하세요.")
+        return self.resume(conversation_id, "select_prior_art", prior_art_decision(skeys, base_date))
 
     def stop(self, conversation_id: str) -> dict:
         self.workspace.stop(conversation_id)

@@ -16,10 +16,12 @@ _spec.loader.exec_module(build)
 def test_codex_toml_matches_markdown_source():
     assert build.check_codex() == []
     for md in sorted((ROOT / ".claude" / "agents").glob("*.md")):
-        body = re.sub(r"\A---\s*\n.*?\n---\s*\n", "", md.read_text(encoding="utf-8"), flags=re.S).strip() + "\n"
+        text = md.read_text(encoding="utf-8")
+        body = re.sub(r"\A---\s*\n.*?\n---\s*\n", "", text, flags=re.S).strip() + "\n"
+        effort = re.search(r"^effort:\s*(\S+)", text, flags=re.M)
         data = tomllib.loads((ROOT / ".codex" / "agents" / f"{md.stem}.toml").read_text(encoding="utf-8"))
         assert data["developer_instructions"] == body
-        assert data["name"] == md.stem and data["model_reasoning_effort"] == "high"
+        assert data["name"] == md.stem and data["model_reasoning_effort"] == (effort.group(1) if effort else "high")
 
 
 def test_toml_escaping_round_trips_quotes_and_backslashes():

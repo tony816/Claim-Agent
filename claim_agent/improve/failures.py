@@ -51,6 +51,7 @@ GATE_OWNER: dict[str, tuple[str, str]] = {
     "DEPENDENT_SOURCE_GATE": ("dependent-claim-strategy-architect", "DEP_ARCHITECT"),
     "CAUSAL_CONTRIBUTION_GATE": ("dependent-claim-strategy-architect", "DEP_ARCHITECT"),
     "CLAIMABILITY_GATE": ("dependent-claim-strategy-architect", "DEP_ARCHITECT"),
+    "ENFORCEMENT_VALUE_GATE": ("dependent-claim-strategy-architect", "DEP_ARCHITECT"),
     "DEPENDENT_OA_DRAFT_GATE": ("oa-strategy-reviewer", "DEP_OA"),
     "DEPENDENT_OA_FINAL_GATE": ("oa-strategy-reviewer", "DEP_OA"),
     "DEPENDENT_RECONSTRUCTION_GATE": ("picture-claim-reconstruction-reviewer", "DEP_PICTURE"),

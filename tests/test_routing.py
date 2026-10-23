@@ -60,7 +60,7 @@ def test_manual_authoring_selection_is_only_a_hint_for_advice(project_root):
         "mode": "REVIEW_ONLY", "reason": "변경 방향의 타당성과 선택 근거를 묻는 질문",
         "reviewers": ["syntax-scope-reviewer", "oa-strategy-reviewer"],
     }]})
-    hints = dict(selected_mode="AUTHORING_DRAFT", dependent=True, target="2~8")
+    hints = dict(dependent=True, target="2~8")
     route = classify_request(provider, project_root, "test", ADVICE_REQUEST, [], "advice", hints)
     assert route.mode == "REVIEW_ONLY" and not route.dependent
     packet = json.loads(provider.calls[0].packet_text)
@@ -257,13 +257,34 @@ def test_project_instructions_reach_router_chat_and_pipeline_as_user_material(pr
     assert any(m["name"].startswith("project-instructions-") and m["category"] == "invention" for m in state.material_meta)
 
 
+def test_authoring_roles_see_the_previous_answer_as_a_non_source_reference(rt, request_indep, tmp_path):
+    """'검토한 내용에 따라 수정한 6항을 작성해줘': only the router used to see the review it points at."""
+    from claim_agent.conversation_pipeline import PREVIOUS_ANSWER_HEAD, effective_request_text
+
+    review = "## 검토 의견\n6항의 '구획 영역을 통해 결합됨으로써'는 결과만 적은 기능적 표현이다."
+    history = [{"role": "user", "parts": [{"text": "6항 검토해줘"}]}, {"role": "model", "parts": [{"text": review}]}]
+    request = {**request_data(request_indep), "text": "그럼 검토한 내용에 따라 수정해줘", "history": history}
+    assert effective_request_text(request) == request["text"]                     # review-only and chat paths keep the bare text
+    text = effective_request_text(request, with_previous_answer=True)
+    assert text.startswith("## 현재 요청\n\n그럼 검토한 내용에 따라") and PREVIOUS_ANSWER_HEAD in text and text.endswith(review)
+    folder = tmp_path / "apply-review"
+    folder.mkdir()
+    blocks, paths = intake(request, folder)
+    roles = ScriptedProvider({"claim-architect": [R.architect(locked=False)]})
+    run_pipeline(rt, roles, request, RouteDecision(mode="AUTHORING_DRAFT", reason="검토 반영 작성"), blocks, paths, folder)
+    packet = roles.calls[0].packet_text
+    materials, header = packet.split("## RUN_HEADER")[0], packet.split("## RUN_HEADER")[1]
+    assert "결과만 적은 기능적 표현" in header and "원자료·근거가 아님" in header
+    assert "결과만 적은 기능적 표현" not in materials                                # never an invention source
+
+
 def test_single_claim_picked_in_composer_limits_the_dependent_work(rt, request_indep, tmp_path, monkeypatch):
     folder = tmp_path / "single-pick"
     folder.mkdir()
     monkeypatch.setattr(R, "DEP_CLAIMS", R.DEP_CLAIMS[1:2])          # only 【청구항 3】 (parent 1)
     monkeypatch.setattr(R, "DEP_SET_TEXT", R.DEP_CLAIMS[0][3])
     request = {**request_data(request_indep), "text": "청구항 세트를 작성해줘",
-               "ui_hints": dict(selected_mode="AUTHORING_DRAFT", dependent=True, target="3", target_mode="single")}
+               "ui_hints": dict(dependent=True, target="3", target_mode="single")}
     blocks, paths = intake(request, folder)
     route = RouteDecision(mode="AUTHORING_DRAFT", reason="작성", dependent=True, dependent_target="2~8")
     provider = ScriptedProvider(R.happy_script(n_targets=1))

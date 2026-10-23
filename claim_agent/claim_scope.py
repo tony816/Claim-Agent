@@ -78,24 +78,24 @@ def format_target(numbers: set[int]) -> str:
     return ",".join(parts)
 
 
-TARGET_MODES = ("independent", "single", "range")
+TARGET_MODES = ("auto", "independent", "single", "range")
 
 
 def resolve_claim_target(data: dict) -> tuple[bool, str | None, str]:
     """(dependent, target, mode) from the composer's structured 작성 대상 input.
 
-    mode `independent` → 독립항만; `single` with `target_claim` N → 1 means 독립항만, N ≥ 2 means only dependent claim N;
+    mode `auto` → 미지정 (the request text and materials decide the scope); `independent` → 독립항만; `single` with `target_claim` N → 1 means 독립항만, N ≥ 2 means only dependent claim N;
     `range` with `target_segments` (a list of {from, to} / numbers, or a `2~4,6` string) → the canonical set string.
-    Requests without `target_mode` keep the legacy `dependent` + `target` fields.
+    Requests without `target_mode` keep the legacy `dependent` + `target` fields; without `dependent` they are 미지정.
     """
     mode = data.get("target_mode")
     if mode is None:
         dependent = bool(data.get("dependent"))
         target = str(data.get("target", "2~8")).strip()
-        return dependent, (target or None) if dependent else None, "range" if dependent else "independent"
+        return dependent, (target or None) if dependent else None, "range" if dependent else "auto"
     if mode not in TARGET_MODES:
-        raise ValueError("작성 대상은 독립항만·특정 항 1개·종속항 범위 중 하나를 고르세요.")
-    if mode == "independent":
+        raise ValueError("작성 대상은 미지정·독립항만·특정 항 1개·종속항 범위 중 하나를 고르세요.")
+    if mode in ("auto", "independent"):
         return False, None, mode
     if mode == "single":
         number = _claim_number(data.get("target_claim"), "항 번호")
@@ -170,6 +170,8 @@ def apply_ui_target(mode: str, dependent: bool, target: str | None, text: str, u
     a conflict and stops the request instead of silently choosing either side.
     """
     picked = ui_target_set(ui_hints)
+    if mode in {"AUTHORING_DRAFT", "FINALIZATION"} and (ui_hints or {}).get("target_mode") == "independent" and not explicit_mentions(text):
+        return False, None              # 독립항만 picked and the text names no claim: no dependent work is added
     if mode not in {"AUTHORING_DRAFT", "FINALIZATION"} or not picked:
         return dependent, target
     mentioned = explicit_mentions(text)

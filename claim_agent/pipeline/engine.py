@@ -9,9 +9,10 @@ from typing import Any
 
 from ..claim_scope import parse_target
 from ..config import AppConfig
-from ..models.contracts import COMBINED_REVIEW, combined_contract, contract_for
+from ..graph.pipeline import GraphHooks
+from ..models.contracts import COMBINED_REVIEW, combined_contract, contract_for, main_tree_gate_gaps
 from ..models.enums import ExecStatus, NextStep, RequestMode, Scope, Status, StyleChangeMode
-from ..models.envelope import ENVELOPE_JSON_SCHEMA, RoleEnvelope
+from ..models.envelope import RoleEnvelope, envelope_schema_for
 from ..models.ids import Identifiers, bump_dependent_design_revision, bump_dependent_revision, bump_design_revision, bump_revision, input_revision_id, record_id
 from ..models.request import EXISTING_SET_EDIT, MaterialBundle, RunRequest
 from ..models.state import (
@@ -51,7 +52,9 @@ from .claimtext import (
     validate_parent_refs,
 )
 from .corpus_tool import ToolLog, make_tools
+from .handoff import write_handoff
 from .locks import build_baseline_record, build_claim_lock, build_dependent_set_lock
+from .prior_steps import PriorArtSteps, PriorArtTools, stage_is_prior
 from .transitions import LOOP_KEY, Transition, decide
 
 ROLE_BY_STAGE = {
@@ -73,7 +76,7 @@ ROLE_BY_STAGE = {
 }
 
 REVIEWER_ROLES = {"claim-success-reviewer", "syntax-scope-reviewer", "oa-strategy-reviewer", "picture-claim-reconstruction-reviewer"}
-NON_GATING_UNVERIFIED = {"SPEC_NOT_PROVIDED", "PRIOR_ART_NOT_PROVIDED"}
+NON_GATING_UNVERIFIED = {"SPEC_NOT_PROVIDED", "PRIOR_ART_NOT_PROVIDED", "PRIOR_SEARCH_UNAVAILABLE"}
 
 
 class PipelineHalt(Exception):
@@ -103,12 +106,14 @@ def budget_violation(usage: dict[str, float], cfg: AppConfig) -> str | None:
 @dataclass
 class Decision:
     text: str = ""
-    action: str = "none"      # none | style_fix | meaning_fix | redesign | add_source | accept_unverified | restart
+    action: str = "none"      # none | style_fix | meaning_fix | redesign | add_source | accept_unverified | restart | select_prior_art
     add_sources: list[str] | None = None
     restart_from: str | None = None
     request_update: RunRequest | None = None  # conversational scope/source update; always redesign
     scope: str | None = None                  # INDEPENDENT | DEPENDENT: which revision a style/meaning fix targets on a finished run
     feedback_text: str | None = None          # the user's own words when `text` also carries project instructions
+    prior_art_selection: list[str] | None = None   # select_prior_art: WIPS skeys the user picked (설계 4절)
+    base_date: str | None = None              # select_prior_art: 출원 예정일 (YYYY-MM-DD)
 
 
 FEEDBACK_INSTRUCTION = (
@@ -117,7 +122,7 @@ FEEDBACK_INSTRUCTION = (
 )
 
 
-class PipelineEngine:
+class PipelineEngine(PriorArtSteps):
     def __init__(
         self,
         cfg: AppConfig,
@@ -130,6 +135,7 @@ class PipelineEngine:
         variant_id: str = "default",
         lessons_hash: str = "none",
         shadow_hook: Callable[[CallSpec, RoleEnvelope, RunState], None] | None = None,
+        prior_art_tools: PriorArtTools | None = None,
     ):
         self.cfg = cfg
         self.provider = provider
@@ -141,6 +147,8 @@ class PipelineEngine:
         self.variant_id = variant_id
         self.lessons_hash = lessons_hash
         self.shadow_hook = shadow_hook
+        self.prior_art_tools = prior_art_tools
+        self.graph_hooks = GraphHooks(cfg, provider, store.run_dir, self._account_result)   # advisory sheets; config graph.* (off by default)
         self._bundle: MaterialBundle | None = None
         self._tool_logs: dict[str, ToolLog] = {}
         self._lock = threading.Lock()
@@ -166,6 +174,7 @@ class PipelineEngine:
             prior_art_present=bundle.prior_art_present,
             candidate=CandidateState(candidate_id=request.candidate_id),
         )
+        self._init_prior_art(state, request)
         if request.request_mode == RequestMode.REVIEW_ONLY:
             state.stage = Stage.REVIEW_ONLY
         elif request.authoring_scope == EXISTING_SET_EDIT:
@@ -362,7 +371,9 @@ class PipelineEngine:
         # The answer to this turn must say what became of the feedback, not only redraw the claims.
         words = decision.feedback_text if decision.feedback_text is not None else decision.text
         state.feedback = dict(text=words, action=decision.action, dispositions={}) if words.strip() and decision.action != "accept_unverified" else None
-        if decision.restart_from:
+        if self._resume_prior_art(state, decision, halted_stage):
+            pass
+        elif decision.restart_from:
             state.stage = Stage(decision.restart_from)
             if state.stage == Stage.ARCHITECT:
                 self._bump_design(state, decision.text or "사용자 재시작", full_reset=True)
@@ -474,7 +485,7 @@ class PipelineEngine:
             self._guard_budget(state, stage)
         spec = CallSpec(
             role=role, scope=scope.value, model=self.cfg.model_for(role), system_instruction=prompt.system_instruction,
-            packet_text=packet_text, sources_block=prompt.sources_block, images=list(packet.images), json_schema=ENVELOPE_JSON_SCHEMA,
+            packet_text=packet_text, sources_block=prompt.sources_block, images=list(packet.images), json_schema=envelope_schema_for(role),
             tools=None, gen=self._gen(role), use_cache=(rc.cache and self.cfg.cache.enabled and not blind), phase="main",
             stage=stage.value, run_id=state.run_id, seq=seq, meta={"record_id": rid, "kind": kind, "target_claim_id": ids.target_claim_id},
             cache_packet_text=packet.cache_text if not blind else "", cache_images=packet.cache_images and not blind, expected_reuse=expected_reuse,
@@ -523,6 +534,12 @@ class PipelineEngine:
             # 조건 4: 근거표 공란 0건. A PASS with UNCONFIRMED evidence rows contradicts itself → REVIEW.
             evidence_problem = f"EVIDENCE_UNCONFIRMED: 근거 미확인 한정 {len(unconfirmed)}건이 PASS 판정과 함께 보고됨: " + "; ".join(unconfirmed[:5])
             issued = False
+        tree_gaps = main_tree_gate_gaps(env) if stage == Stage.DEP_ARCHITECT and env.status == Status.PASS else []
+        if tree_gaps:
+            # 08 §5.6: a LOCKED tree whose main candidates lack a PASS candidate gate or the enforcement scenario contradicts itself.
+            evidence_problem = "MAIN_TREE_GATE_GAP: 주된 트리 후보의 필수 게이트 PASS 또는 권리행사 시나리오가 없음: " + "; ".join(tree_gaps)
+            unconfirmed = tree_gaps
+            issued = False
         if scope_problem:
             issued = False
         text_for_hash = env.exact_claim_text if env.exact_claim_text else expected_exact
@@ -553,6 +570,10 @@ class PipelineEngine:
             "claims": [c.model_dump() for c in env.claims], "candidates": [c.model_dump() for c in env.candidates],
             "per_claim_gates": [g.model_dump() for g in env.per_claim_gates], "open_issues": [o.model_dump() for o in env.open_issues],
             "limitation_evidence": [e.model_dump(mode="json") for e in env.limitation_evidence], "evidence_problem": evidence_problem,
+            "design_elements": [e.model_dump(mode="json") for e in env.design_elements],
+            "preexam_rows": [r.model_dump(mode="json") for r in env.preexam_rows], "novelty": [n.model_dump(mode="json") for n in env.novelty],
+            "remaining_differences": [r.model_dump(mode="json") for r in env.remaining_differences],
+            "inventive_risk": env.inventive_risk.value if env.inventive_risk else None, "inventive_primary_doc": env.inventive_primary_doc,
             "source_set_id": state.source_set_id, "call_file": ref.call_file, "aux_source_usage": env.aux_source_usage,
             "tool_log": tool_log.render() if tool_log.calls else "조건부 보조 소스: NOT_ACTIVATED", "report_markdown": env.report_markdown,
         }
@@ -581,8 +602,9 @@ class PipelineEngine:
                     else f" 이미 확정된 독립항 {root_lock}은 변경하지 않았습니다." if root_lock else "")
             raise PipelineHalt(Halt(stage=stage.value, role=role, kind="REVIEW", reason_code="OTHER", message="REQUEST_SCOPE_MISMATCH: " + scope_problem + kept, record_id=rid))
         if evidence_problem:
+            kind_code = ("MAIN_TREE_GATE_GAP", "08-5.6") if tree_gaps else ("EVIDENCE_UNCONFIRMED", "COND4")
             raise PipelineHalt(Halt(stage=stage.value, role=role, kind="REVIEW", reason_code="OTHER", message=evidence_problem, record_id=rid,
-                                    open_issues=[{"kind": "EVIDENCE_UNCONFIRMED", "code": "COND4", "text": lim, "return_to": None} for lim in unconfirmed]))
+                                    open_issues=[{"kind": kind_code[0], "code": kind_code[1], "text": lim, "return_to": None} for lim in unconfirmed]))
         return env, ref
 
     def _guard_budget(self, state: RunState, stage: Stage) -> None:
@@ -815,7 +837,12 @@ class PipelineEngine:
             if state.total_loops > sum(self.cfg.pipeline.max_return_loops.values()) + 2:
                 raise PipelineHalt(Halt(stage=state.stage.value, role="engine", kind="LOOP_LIMIT", message="total return loops exceeded"))
             st = state.stage
-            if st in (Stage.ARCHITECT, Stage.DRAFT, Stage.STYLE, Stage.SUCCESS, Stage.SYNTAX, Stage.OA, Stage.BLIND, Stage.PICTURE, Stage.LOCK):
+            bundle = self._bundle or bundle      # PRIOR_TRIM reloads the bundle with the sealed documents
+            if stage_is_prior(st):
+                self._prior_step(state, bundle)
+            elif st == Stage.PRE_EXAM:
+                self._preexam_step(state, bundle)
+            elif st in (Stage.ARCHITECT, Stage.DRAFT, Stage.STYLE, Stage.SUCCESS, Stage.SYNTAX, Stage.OA, Stage.BLIND, Stage.PICTURE, Stage.LOCK):
                 self._independent_step(state, bundle)
             else:
                 self._dependent_step(state, bundle)
@@ -830,14 +857,16 @@ class PipelineEngine:
             ids = Identifiers(c.candidate_id, c.revision, c.design_revision, input_revision=state.input_revision)
             rid = record_id("design", ids)
             goal = next((n.split(": ", 1)[1] for n in reversed(state.notes) if n.startswith(f"설계 변경 목표 ({c.design_revision})")), None)
-            env, ref = self._call(state, "claim-architect", Scope.INDEPENDENT, st, "design", packets.architect(state, bundle, ids, rid, req.request_text, goal), ids, rid, loop_index=c.loop_counts.get("ARCHITECT", 0))
+            pk = packets.architect(state, bundle, ids, rid, req.request_text, goal)
+            pk.text = self.graph_hooks.architect_packet(state, bundle, pk.text)
+            env, ref = self._call(state, "claim-architect", Scope.INDEPENDENT, st, "design", pk, ids, rid, loop_index=c.loop_counts.get("ARCHITECT", 0))
             tr = self._decide(state, env, "claim-architect", Scope.INDEPENDENT, st, rid, c.loop_counts)
             if tr.kind == "RETURN":
                 self._apply_return(state, tr, env, rid, dependent=False)
                 return
             c.design_record_id = rid
             c.current = RevisionState(revision=c.revision, design_revision=c.design_revision)
-            state.stage = Stage.DRAFT
+            state.stage = Stage.PRE_EXAM if self._needs_preexam(state, bundle) else Stage.DRAFT
             return
 
         cur = c.current
@@ -863,7 +892,8 @@ class PipelineEngine:
         if st == Stage.STYLE:
             rid = record_id("style", ids)
             prior_style = self._prior_record(state, "style")
-            pk = packets.style_independent(state, self.store, bundle, ids, rid, c.design_record_id or "", cur.records.get("meaning_draft"), cur.style_change_mode, self._prior_text(state), prior_style, cur.change_goal)
+            pk = packets.style_independent(state, self.store, bundle, ids, rid, c.design_record_id or "", cur.records.get("meaning_draft"), cur.style_change_mode, self._prior_text(state), prior_style, cur.change_goal,
+                                          cur.meaning_draft_text)
             env, ref = self._call(state, "claim-style-adjuster", Scope.INDEPENDENT, st, "style", pk, ids, rid, use_tools=True, loop_index=c.loop_counts.get("STYLE_ONLY", 0))
             tr = self._decide(state, env, "claim-style-adjuster", Scope.INDEPENDENT, st, rid, c.loop_counts)
             if tr.kind == "RETURN":
@@ -908,6 +938,7 @@ class PipelineEngine:
         if st == Stage.OA:
             rid = record_id("oa", ids)
             pk = packets.oa_independent(state, self.store, bundle, ids, rid, c.design_record_id or "", cur.records.get("style", ""), cur.records.get("success", ""), cur.records.get("syntax", ""), exact)
+            pk.text = self.graph_hooks.oa_packet(state, pk.text, exact)
             env, ref = self._call(state, "oa-strategy-reviewer", Scope.INDEPENDENT, st, "oa", pk, ids, rid, expected_exact=exact)
             tr = self._decide(state, env, "oa-strategy-reviewer", Scope.INDEPENDENT, st, rid, c.loop_counts)
             if tr.kind == "RETURN":
@@ -945,6 +976,8 @@ class PipelineEngine:
             kind = "final_claim_lock" if final else "draft_claim_lock"
             lock_id = record_id(kind, ids)
             lock, md = build_claim_lock(state, lock_id, final, exact, [m["name"] for m in state.material_meta])
+            lock["spec_handoff"], handoff_md = write_handoff(state, self.store, "INDEPENDENT")
+            md += ("\n" + handoff_md) if handoff_md else ""
             self.store.write_record(state.run_id, lock_id, {**lock, "report_markdown": md}, md)
             state.records[lock_id] = RecordRef(record_id=lock_id, kind=kind, role="engine", scope="INDEPENDENT", stage=st.value, status="LOCKED", gates={}, text_sha256=cur.exact_sha256, ids=ids.as_dict(), source_set_id=state.source_set_id)
             cur.records[kind] = lock_id
@@ -1071,7 +1104,9 @@ class PipelineEngine:
             goal = next((n.split(": ", 1)[1] for n in reversed(state.notes) if n.startswith(f"종속항 설계 변경 목표 ({d.dependent_design_revision})")), None)
             targets = parse_target(req.dependent_target)
             loop = d.loop_counts.get("DEPENDENT_ARCHITECT", 0)
-            pk = packets.dep_architect(state, self.store, bundle, ids, rid, d.root_lock_id, c.design_record_id or "", root_text, req.request_text, goal, targets)
+            pk = packets.dep_architect(state, self.store, bundle, ids, rid, d.root_lock_id, c.design_record_id or "", root_text, req.request_text, goal, targets,
+                                       business_context=req.business_context)
+            pk.text = self.graph_hooks.dependent_packet(state, bundle, pk.text)
             try:
                 env, ref = self._call(state, "dependent-claim-strategy-architect", Scope.DEPENDENT_SET, st, "dependent_design", pk, ids, rid, loop_index=loop)
             except PipelineHalt as ph:
@@ -1082,7 +1117,8 @@ class PipelineEngine:
                 state.records[rid].superseded = True
                 rid = record_id("dependent_design", ids, seq=2)
                 pk = packets.dep_architect(state, self.store, bundle, ids, rid, d.root_lock_id, c.design_record_id or "", root_text, req.request_text, goal, targets,
-                                           scope_repair=ph.halt.message)
+                                           scope_repair=ph.halt.message, business_context=req.business_context)
+                pk.text = self.graph_hooks.dependent_packet(state, bundle, pk.text)
                 env, ref = self._call(state, "dependent-claim-strategy-architect", Scope.DEPENDENT_SET, st, "dependent_design", pk, ids, rid, loop_index=loop)
             tr = self._decide(state, env, "dependent-claim-strategy-architect", Scope.DEPENDENT_SET, st, rid, d.loop_counts)
             if tr.kind == "RETURN":
@@ -1114,7 +1150,8 @@ class PipelineEngine:
 
         if st == Stage.DEP_STYLE:
             rid = record_id("dependent_style", ids)
-            pk = packets.style_dependent(state, self.store, bundle, ids, rid, d.root_lock_id, root_text, d.design_record_id or "", cur.records.get("dependent_meaning_draft"), cur.style_change_mode, self._dep_prior_text(state), self._dep_prior_record(state, "dependent_style"), cur.change_goal)
+            pk = packets.style_dependent(state, self.store, bundle, ids, rid, d.root_lock_id, root_text, d.design_record_id or "", cur.records.get("dependent_meaning_draft"), cur.style_change_mode, self._dep_prior_text(state), self._dep_prior_record(state, "dependent_style"), cur.change_goal,
+                                        cur.meaning_draft_text)
             env, ref = self._call(state, "claim-style-adjuster", Scope.DEPENDENT_SET, st, "dependent_style", pk, ids, rid, use_tools=True, loop_index=d.loop_counts.get("STYLE_ONLY", 0))
             tr = self._decide(state, env, "claim-style-adjuster", Scope.DEPENDENT_SET, st, rid, d.loop_counts)
             if tr.kind == "RETURN":
@@ -1185,6 +1222,7 @@ class PipelineEngine:
         if st == Stage.DEP_OA:
             rid = record_id("dependent_oa", ids)
             pk = packets.oa_dependent(state, self.store, bundle, ids, rid, d.root_lock_id, root_text, d.design_record_id or "", cur.records.get("dependent_style", ""), cur.records.get("dependent_success", ""), cur.records.get("dependent_syntax", ""), set_text)
+            pk.text = self.graph_hooks.oa_packet(state, pk.text, set_text)
             env, ref = self._call(state, "oa-strategy-reviewer", Scope.DEPENDENT_SET, st, "dependent_oa", pk, ids, rid, expected_exact=set_text)
             tr = self._decide(state, env, "oa-strategy-reviewer", Scope.DEPENDENT_SET, st, rid, d.loop_counts)
             if tr.kind == "RETURN":
@@ -1206,6 +1244,8 @@ class PipelineEngine:
             kind = "final_dependent_set_lock" if final else "draft_dependent_set_lock"
             lock_id = record_id(kind, ids)
             lock, md = build_dependent_set_lock(state, lock_id, final, root_text, set_text, [m["name"] for m in state.material_meta])
+            lock["spec_handoff"], handoff_md = write_handoff(state, self.store, "DEPENDENT")
+            md += ("\n" + handoff_md) if handoff_md else ""
             self.store.write_record(state.run_id, lock_id, {**lock, "report_markdown": md}, md)
             state.records[lock_id] = RecordRef(record_id=lock_id, kind=kind, role="engine", scope="DEPENDENT_SET", stage=st.value, status="LOCKED", gates={}, text_sha256=cur.exact_sha256, ids=ids.as_dict(), source_set_id=state.source_set_id)
             cur.records[kind] = lock_id

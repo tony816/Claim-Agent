@@ -26,3 +26,6 @@ Thumbs.db
 desktop.ini
 *.swp
 *.tmp
+
+# 판례 DB와 원본 PDF (cs2-spec-writer에서 복제, 1.7GB) — docs/caselaw.md
+/graph/

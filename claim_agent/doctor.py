@@ -39,6 +39,17 @@ def run_doctor(rt: Runtime, live: bool = False, model: str | None = None, contra
     else:
         rows.append(("api key", "OK" if key_present else "WARN", f"{cfg.api_key_env} {'set' if key_present else 'not set — live calls impossible; use --replay'}"))
 
+    # Prior-art search (docs/선행기술조사_사전심사_설계_2026-10.md): WIPS key and Jev over OpenRouter. Values are never printed.
+    from .prior_art import jev as jev_mod
+    from .prior_art import wips as wips_mod
+
+    search_on = cfg.prior_search.enabled
+    rows.append(("WIPS (prior_search)", "OK" if wips_mod.available() else ("WARN" if search_on else "SKIP"),
+                 "WIPS_API_KEY set" if wips_mod.available() else "WIPS_API_KEY not set — `--prior-search` runs stop with PRIOR_SEARCH_UNAVAILABLE"))
+    jev_ok, jev_msg = jev_mod.status()
+    rows.append(("Jev via OpenRouter (prior_search)", "OK" if jev_ok else ("WARN" if search_on else "SKIP"),
+                 jev_msg + ("" if jev_ok else " — screening falls back to the searcher model, trimming is skipped")))
+
     if contracts:
         root = cfg.project_root
         for rel, tokens in CONTRACT_TOKENS.items():

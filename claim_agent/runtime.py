@@ -53,8 +53,15 @@ def build_runtime(project_root: Path, config_path: Path | None = None, variant: 
         from .models.ids import sha256_text
 
         lessons_hash = sha256_text(lessons_hash + variant.variant_id)
-    assembler = PromptAssembler(sources, lesson_texts)
+    rule_pack = None
+    if cfg.graph.rule_pack == "on":
+        from .graph.rules import pack_provider
+
+        rule_pack = pack_provider(sources, roles, cfg.graph.rule_pack_exempt_roles)
+    assembler = PromptAssembler(sources, lesson_texts, rule_pack)
     ssid = source_set_id(sources.digest(), roles.digest(), lessons_hash, ADAPTER_VERSION)
+    if rule_pack is not None:
+        ssid += "-rp1"   # what each role reads changed; runs made with whole files must not resume under packs
     store = RunStore(cfg.path("runs_dir"))
     return Runtime(cfg, roles, sources, lessons, store, assembler, ssid, lessons_hash, variant)
 

@@ -1,8 +1,10 @@
 """System-instruction and source-block assembly."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from ..models.enums import Scope
 from ..models.ids import sha256_text
@@ -38,9 +40,10 @@ def render_file_block(relpath: str, sha: str, text: str) -> str:
 
 
 class PromptAssembler:
-    def __init__(self, sources: SourceSet, lessons_text_by_role: dict[str, str] | None = None):
+    def __init__(self, sources: SourceSet, lessons_text_by_role: dict[str, str] | None = None, rule_pack: Callable[[str, Scope], Any] | None = None):
         self.sources = sources
         self.lessons = lessons_text_by_role or {}
+        self.rule_pack = rule_pack     # (role, scope) -> graph.rules.RulePack | None; None = whole files
         self.preamble = _load_preamble("adapter_preamble_ko.md")
         self.preamble_blind = _load_preamble("adapter_preamble_blind_ko.md")
 
@@ -62,9 +65,24 @@ class PromptAssembler:
             paths.append(sf.relpath)
         return "".join(blocks), paths
 
+    def _render_pack(self, pack) -> tuple[str, list[str]]:
+        blocks = [
+            "## 사전 로딩 소스\n\n",
+            f"규칙 그래프 발췌 `{pack.pack_id}`: 이 역할의 기준 파일은 전문이고, 보조 파일은 이 역할이 다루는 게이트·조건을 정의하거나 언급하는 절만 실었다 "
+            "(`<!-- §절 L시작-끝 -->` 표시). 판정에 필요한 절이 빠졌다고 보이면 추정으로 메우지 말고 보고서에 `SOURCE_SECTION_MISSING: <파일·절>`로 적는다.\n\n",
+        ]
+        paths = []
+        for key in pack.file_keys:
+            sf = self.sources.get(key)
+            text = pack.file_text(key)
+            blocks.append(render_file_block(sf.relpath if text == sf.text else f"{sf.relpath}#{pack.pack_id}", sf.sha256, text))
+            paths.append(sf.relpath)
+        return "".join(blocks), paths
+
     def sources_block(self, role: RoleSpec, scope: Scope) -> tuple[str, list[str], list[str]]:
         keys = sources_for(role.name, scope)
-        block, paths = self._render_sources(keys)
+        pack = self.rule_pack(role.name, scope) if self.rule_pack and keys else None
+        block, paths = self._render_pack(pack) if pack is not None else self._render_sources(keys)
         return block, keys, paths
 
     def assemble_combined(self, roles: list[RoleSpec], scope: Scope, header: str) -> AssembledPrompt:
