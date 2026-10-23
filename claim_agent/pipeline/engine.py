@@ -885,7 +885,8 @@ class PipelineEngine(PriorArtSteps):
         if st == Stage.STYLE:
             rid = record_id("style", ids)
             prior_style = self._prior_record(state, "style")
-            pk = packets.style_independent(state, self.store, bundle, ids, rid, c.design_record_id or "", cur.records.get("meaning_draft"), cur.style_change_mode, self._prior_text(state), prior_style, cur.change_goal)
+            pk = packets.style_independent(state, self.store, bundle, ids, rid, c.design_record_id or "", cur.records.get("meaning_draft"), cur.style_change_mode, self._prior_text(state), prior_style, cur.change_goal,
+                                          cur.meaning_draft_text)
             env, ref = self._call(state, "claim-style-adjuster", Scope.INDEPENDENT, st, "style", pk, ids, rid, use_tools=True, loop_index=c.loop_counts.get("STYLE_ONLY", 0))
             tr = self._decide(state, env, "claim-style-adjuster", Scope.INDEPENDENT, st, rid, c.loop_counts)
             if tr.kind == "RETURN":
@@ -1141,7 +1142,8 @@ class PipelineEngine(PriorArtSteps):
 
         if st == Stage.DEP_STYLE:
             rid = record_id("dependent_style", ids)
-            pk = packets.style_dependent(state, self.store, bundle, ids, rid, d.root_lock_id, root_text, d.design_record_id or "", cur.records.get("dependent_meaning_draft"), cur.style_change_mode, self._dep_prior_text(state), self._dep_prior_record(state, "dependent_style"), cur.change_goal)
+            pk = packets.style_dependent(state, self.store, bundle, ids, rid, d.root_lock_id, root_text, d.design_record_id or "", cur.records.get("dependent_meaning_draft"), cur.style_change_mode, self._dep_prior_text(state), self._dep_prior_record(state, "dependent_style"), cur.change_goal,
+                                        cur.meaning_draft_text)
             env, ref = self._call(state, "claim-style-adjuster", Scope.DEPENDENT_SET, st, "dependent_style", pk, ids, rid, use_tools=True, loop_index=d.loop_counts.get("STYLE_ONLY", 0))
             tr = self._decide(state, env, "claim-style-adjuster", Scope.DEPENDENT_SET, st, rid, d.loop_counts)
             if tr.kind == "RETURN":

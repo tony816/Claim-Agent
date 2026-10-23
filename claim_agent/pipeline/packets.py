@@ -138,9 +138,15 @@ def drafter_independent(state: RunState, store, bundle: MaterialBundle, ids: Ide
     return Packet(txt, imgs)
 
 
+# The drafter's text as the engine stored it from `exact_claim_text`/`claims[]`. A report body may only point at that
+# field ("exact_claim_text 참조"), and then the adjuster had no wording to style (MEANING_DRAFT_TEXT_MISSING).
+DRAFT_TEXT_TITLE = "PRE_STYLE 의미 초안 전문 ({id} — drafter가 exact_claim_text로 인계한 문언, 보고서 본문과 다르면 이 전문이 기준)"
+
+
 def style_independent(
     state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, design_record_id: str,
     meaning_draft_id: str | None, mode: StyleChangeMode, prior_text: str | None, prior_style_record_id: str | None, feedback: str | None,
+    draft_text: str | None = None,
 ) -> Packet:
     mats, imgs = _materials(bundle, ("invention", "drawing", "spec"))
     txt = _user_lock(bundle) + mats
@@ -151,6 +157,8 @@ def style_independent(
         txt += _report(state, store, prior_style_record_id, "직전 style record 전문")
         txt += _section("스타일만 바꾸어야 하는 정확한 피드백·규칙", feedback or "")
     else:
+        if draft_text:
+            txt += _section(DRAFT_TEXT_TITLE.format(id=meaning_draft_id), draft_text)
         txt += _report(state, store, meaning_draft_id, "claim-drafter PRE_STYLE 의미 초안 보고서 전문 (revision_status: PRE_STYLE — NOT_GATE_ELIGIBLE)")
         if mode == StyleChangeMode.DRAFTER_REVISION and prior_text:
             txt += _section("직전 확정 revision 청구항 전문", prior_text)
@@ -289,7 +297,8 @@ def drafter_dependent(state: RunState, store, bundle: MaterialBundle, ids: Ident
     return Packet(txt, imgs)
 
 
-def style_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_text: str, dep_design_record_id: str, dep_meaning_draft_id: str | None, mode: StyleChangeMode, prior_set_text: str | None, prior_style_record_id: str | None, feedback: str | None) -> Packet:
+def style_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_text: str, dep_design_record_id: str, dep_meaning_draft_id: str | None, mode: StyleChangeMode, prior_set_text: str | None, prior_style_record_id: str | None, feedback: str | None,
+                    draft_text: str | None = None) -> Packet:
     txt, imgs = _dependent_stable(state, store, bundle, root_lock_id, None, ("invention", "drawing", "spec"))
     txt += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE: LOCKED 전문")
     txt += _hdr(state, ids, record_id, {"style_scope": "DEPENDENT_SET", "style_change_mode": mode.value, "dependent_style_record_id": record_id})
@@ -299,6 +308,8 @@ def style_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identif
         txt += _report(state, store, prior_style_record_id, "직전 dependent style record 전문")
         txt += _section("스타일만 바꾸어야 하는 정확한 피드백·규칙", feedback or "")
     else:
+        if draft_text:
+            txt += _section(DRAFT_TEXT_TITLE.format(id=dep_meaning_draft_id), draft_text)
         txt += _report(state, store, dep_meaning_draft_id, "drafter 종속항 PRE_STYLE 의미 초안 세트 보고서 전문")
         if mode == StyleChangeMode.DRAFTER_REVISION and prior_set_text:
             txt += _section("직전 확정 dependent_revision 세트 전문", prior_set_text)
