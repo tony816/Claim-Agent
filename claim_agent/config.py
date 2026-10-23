@@ -143,6 +143,7 @@ class GraphConfig(BaseModel):
     # 판례 DB(cs2에서 복제, git 제외)와 교훈 기록. 주의 시트(S11)는 이 기록에서 만든다 — docs/caselaw.md
     caselaw_dir: str = "graph/patent_case_law"
     caselaw_lessons: str = "docs/caselaw-lessons.json"
+    caselaw_review: str = "on"        # on | off — OA packets get the enforcement check of the exact claim text (S13 types, code only)
 
 
 class AppConfig(BaseModel):

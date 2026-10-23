@@ -70,10 +70,73 @@ def test_engine_sends_sheet_only_to_generating_roles_and_success(tmp_path, reque
     engine = rt.engine(prov)
     state = engine.run(engine.start(request_dep, "caselaw-01"))
     assert state.outcome, state.halt
-    marker = "<<<FILE " + cl.SHEET_PATH
-    got = {c.role for c in prov.calls if marker in c.sources_block}
-    assert {"claim-architect", "claim-drafter", "claim-success-reviewer"} <= got
-    assert got <= {"claim-architect", "claim-drafter", "claim-success-reviewer"}
+    def roles_with(path):
+        return {c.role for c in prov.calls if "<<<FILE " + path in c.sources_block}
+
+    for path in (cl.SHEET_PATH, cl.ENFORCE_SHEET_PATH):
+        assert {"claim-architect", "claim-drafter", "claim-success-reviewer"} <= roles_with(path)
+    assert roles_with(cl.SHEET_PATH) <= {"claim-architect", "claim-drafter", "claim-success-reviewer"}
+    assert "dependent-claim-strategy-architect" in roles_with(cl.ENFORCE_SHEET_PATH)
+    # S12 never reaches a role that designs, drafts or styles the independent claim
+    assert roles_with(cl.PATENT_SHEET_PATH) and not roles_with(cl.PATENT_SHEET_PATH) & {"claim-architect", "claim-drafter", "claim-style-adjuster"}
+    oa = [c for c in prov.calls if c.role == "oa-strategy-reviewer"]
+    assert oa and all("권리행사 판례 점검" in c.packet_text for c in oa)
+    assert not any("권리행사 판례 점검" in c.packet_text for c in prov.calls if c.role != "oa-strategy-reviewer")
+
+
+@pytest.mark.parametrize("kind,path,build,records", [
+    ("patentability", cl.PATENT_SHEET_PATH, cl.sheet_patentability, cl.PATENT_FILE),
+    ("enforcement", cl.ENFORCE_SHEET_PATH, cl.sheet_enforcement, cl.ENFORCE_FILE),
+])
+def test_s12_s13_are_generated_from_records(kind, path, build, records):
+    data = cl.load_records(ROOT / records)
+    assert data["records"] and all(r["kind"] == kind for r in data["records"])
+    assert (ROOT / path).read_text(encoding="utf-8") == build(data)
+
+
+def test_enforcement_flags_find_risky_wording():
+    text = ("【청구항 1】\n베이스와 커버를 포함하는 거치 장치에 있어서,\n상기 베이스를 회전시키기 위한 구동수단; 및\n"
+            "사용자가 단말로 각도를 입력하면 서버가 상기 구동수단을 제어하는 제어부를 포함하고,\n상기 베이스의 두께는 3 mm 이상 5 mm 이하인 거치 장치.\n"
+            "【청구항 2】\n제1항에 있어서, 상기 구동수단은 모터인 거치 장치.\n【청구항 3】\n거치 장치에 있어서, 베이스를 포함하는 거치 장치.")
+    flags = cl.enforcement_flags(text)
+    by_claim = {}
+    for f in flags:
+        by_claim.setdefault(f["claim"], set()).add(f["type_code"])
+    assert {"W02", "W04", "W05", "W09"} <= by_claim["1"]
+    assert "2" not in by_claim                                  # dependent claim: no preamble flag, no risky wording
+    assert "W04" not in by_claim.get("3", set())                # a bare name before '에 있어서' lists no elements
+    assert sum(1 for f in flags if f["claim"] == "1" and f["type_code"] == "W05") == 1
+
+
+def test_feature_type_guess_uses_words_then_neighbours():
+    data = {"records": [{"type_code": "F-SHAPE", "claim_feature": "홀더 브라켓 수직 설치", "deciding_reason": "결로 방지", "other_side": ""}],
+            "type_labels": {}}
+    assert cl.guess_type(data, "가열 온도 범위 300 이상")[0] == "F-NUMERIC"
+    assert cl.guess_type(data, "센서 신호로 모터를 정지")[0] == "F-CONTROL"
+    assert cl.guess_type(data, "홀더 브라켓")[0] == "F-SHAPE" and cl.guess_type(data, "홀더 브라켓")[1] == "비슷한 기록"
+
+
+def test_extracted_quote_is_relocated_in_db_text():
+    import sqlite3
+
+    from claim_agent.graph import caselaw_extract as cx
+
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE pdf_pages(document_id, physical_page, text)")
+    # the PDF text layer moves digits and Latin abbreviations ('선행발명 4를' → '를.4', 'SMT 부품' → '부품SMT') and breaks pages
+    db.executemany("INSERT INTO pdf_pages VALUES ('D', ?, ?)", [
+        (3, "통상의 기술자가 선행발명 를.4 접하더라도 부품SMT 등과 같은 전자소자를 수직 방향으로 설치하겠다는"),
+        (4, "기술적 동기를 가질 수 있다고 볼 수 없다."),
+    ])
+    meta = {"document_id": "D", "case_number": "2021허1", "court": "특허법원", "decision_date": "2022-01-01", "case_type": "등록무효"}
+    rec = {"kind": "patentability", "requirement": "진보성", "outcome": "인정", "type_code": "F-SHAPE", "claim_feature": "수직 설치",
+           "deciding_reason": "동기 없음", "page": 3,
+           "quote": "통상의 기술자가 선행발명 4를 접하더라도 SMT 부품 등과 같은 전자소자를 수직 방향으로 설치하겠다는 기술적 동기를 가질 수 있다고 볼 수 없다."}
+    kept, rejected = cx.build_records(db, meta, {"records": [rec, {**rec, "quote": "판결문에 없는 문장을 모델이 지어낸 인용문이다"}]})
+    assert len(kept) == 1 and len(rejected) == 1
+    k = kept[0]
+    assert k["quote_spans_next_page"] and k["quote"].startswith("통상의 기술자가") and k["quote"].endswith("볼 수 없다")
+    assert cl.quote_ok(db, k)
 
 
 DB = ROOT / "graph" / "patent_case_law"

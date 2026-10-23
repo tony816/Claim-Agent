@@ -112,9 +112,12 @@ def test_cross_check_detects_report_mismatch_and_foreign_sources():
 
 # ----------------------------------------------------------------------------- whitelist / blind
 def test_whitelist_matches_readme_contract():
-    assert sources_for("claim-drafter", Scope.INDEPENDENT) == ["SUCCESS", "S11"]
-    assert all("S11" not in sources_for(r, s) for (r, s) in SOURCE_WHITELIST
+    assert sources_for("claim-drafter", Scope.INDEPENDENT) == ["SUCCESS", "S11", "S13"]
+    assert all("S11" not in sources_for(r, s) and "S13" not in sources_for(r, s) for (r, s) in SOURCE_WHITELIST
                if r in ("claim-style-adjuster", "syntax-scope-reviewer", "oa-strategy-reviewer"))
+    # S12 (판례 특허성) never reaches a role that designs, drafts or styles the independent claim
+    assert all("S12" not in sources_for(r, s) for (r, s) in SOURCE_WHITELIST
+               if r in ("claim-architect", "claim-drafter", "claim-style-adjuster", "claim-success-reviewer"))
     assert "S04" not in sources_for("claim-drafter", Scope.DEPENDENT_SET)
     assert sources_for("blind-claim-reconstruction-reviewer", Scope.DEPENDENT_SINGLE) == []
     assert "CORPUS" not in {k for keys in SOURCE_WHITELIST.values() for k in keys}

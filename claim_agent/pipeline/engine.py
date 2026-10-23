@@ -930,6 +930,7 @@ class PipelineEngine(PriorArtSteps):
         if st == Stage.OA:
             rid = record_id("oa", ids)
             pk = packets.oa_independent(state, self.store, bundle, ids, rid, c.design_record_id or "", cur.records.get("style", ""), cur.records.get("success", ""), cur.records.get("syntax", ""), exact)
+            pk.text = self.graph_hooks.oa_packet(state, pk.text, exact)
             env, ref = self._call(state, "oa-strategy-reviewer", Scope.INDEPENDENT, st, "oa", pk, ids, rid, expected_exact=exact)
             tr = self._decide(state, env, "oa-strategy-reviewer", Scope.INDEPENDENT, st, rid, c.loop_counts)
             if tr.kind == "RETURN":
@@ -1211,6 +1212,7 @@ class PipelineEngine(PriorArtSteps):
         if st == Stage.DEP_OA:
             rid = record_id("dependent_oa", ids)
             pk = packets.oa_dependent(state, self.store, bundle, ids, rid, d.root_lock_id, root_text, d.design_record_id or "", cur.records.get("dependent_style", ""), cur.records.get("dependent_success", ""), cur.records.get("dependent_syntax", ""), set_text)
+            pk.text = self.graph_hooks.oa_packet(state, pk.text, set_text)
             env, ref = self._call(state, "oa-strategy-reviewer", Scope.DEPENDENT_SET, st, "dependent_oa", pk, ids, rid, expected_exact=set_text)
             tr = self._decide(state, env, "oa-strategy-reviewer", Scope.DEPENDENT_SET, st, rid, d.loop_counts)
             if tr.kind == "RETURN":

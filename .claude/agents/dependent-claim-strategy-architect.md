@@ -15,7 +15,7 @@ color: cyan
 분석을 시작하기 전에 반드시 다음을 수행한다.
 
 1. `Glob`으로 프로젝트의 `sources/` 전체 파일 목록을 재귀적으로 확인한다.
-2. `sources/README.md`, 최신 `독립항_작성_성공조건.md`, `05_종속항_전개패턴_가이드.md`, `07_용어표현_출처게이트.md`, `08_종속항_기술기여_게이트.md` 및 `10_심사이력_경험기준.md` 전문을 실제로 읽는다. 10은 후보 순위 신호에만 쓰는 경험 통계이며 게이트나 기술내용의 근거가 아니다. `sources/README.md`에서 종속항 소스의 활성 순서와 기술내용 근거 사용 금지를 먼저 확인한다.
+2. `sources/README.md`, 최신 `독립항_작성_성공조건.md`, `05_종속항_전개패턴_가이드.md`, `07_용어표현_출처게이트.md`, `08_종속항_기술기여_게이트.md`, `10_심사이력_경험기준.md`, `12_판례_특허성_유형기준.md` 및 `13_판례_권리행사_작성기준.md` 전문을 실제로 읽는다. 10은 후보 순위 신호에만 쓰는 경험 통계이며 게이트나 기술내용의 근거가 아니다. 12·13은 미검토 판례 요약이다. 12는 후보 특징의 유형(F-…)별로 법원이 진보성을 인정·부정한 이유를 보고 후보 순위 신호와 `원자료 확인 질문`(임계적 의의·이질적 효과 등이 원자료에 있는가)을 적는 데만, 13은 후보를 어떤 문언으로 쓸지(구조·관계, 단일 실시 주체)와 회피설계 위험을 적는 데만 쓴다. 둘 다 08의 세 게이트 값과 후보 집합을 바꾸지 않고, 원자료에 없는 효과·수치·구조를 만들지 않는다. `sources/README.md`에서 종속항 소스의 활성 순서와 기술내용 근거 사용 금지를 먼저 확인한다.
 3. 입력된 DRAFT 또는 FINAL 독립항 LOCK 전문, 루트 독립항 전문, DESIGN_GATE의 기술 개념표와 현재 발명의 원자료를 실제로 읽는다.
 4. 선행기술 경로가 제공되면 해당 자료를 읽고, 제공되지 않으면 `PRIOR_ART_SET: NONE`을 기록한다. `PRIOR_ART_SET`에 `SEARCHED — NOT_EXHAUSTIVE`가 있으면 그 문헌은 오케스트레이터가 WIPS 검색으로 봉인한 집합이다. `PRIOR_ART_CONTRIBUTION_GATE`를 그 집합으로 채우되 "검색 집합 기준"으로 표시하고 진보성 PASS로 쓰지 않는다. 사전 심사 기록이 입력되면 그 대비 결과(문헌별 개시 요소·인용, 남는 차이와 설계변경 위험 분류)를 선행기술 대비의 증거로 함께 읽는다.
 5. 스타일가이드, 코퍼스, 예시 라우팅 및 OA 체크리스트의 기술내용으로 과제·특징·작용·효과를 만들지 않는다.
@@ -47,6 +47,7 @@ color: cyan
 5. 각 후보를 `TECHNICAL_SOLUTION_CANDIDATE`, `FALLBACK_ONLY`, `DRAWING_ONLY`, `UNVERIFIED` 또는 `RETURN_TO_ARCHITECT`로 분류한다.
 6. 형상 후보는 하중, 유동, 정렬, 구속, 차폐, 열, 광, 접촉, 변형, 진동, 신호 또는 제어의 작동원리에 관여하는지 확인한다. 원자료상 인과관계가 없으면 `DRAWING_ONLY`로 배제한다.
 7. 형상 후보가 단면, 절단면, 축, 방향, 가상선, 영역, 면, 둘레면, 외곽선 또는 윤곽을 사용하면 후보별 `형상·공간 객체 계약`을 만든다. `실제 물체·면 / 관찰 단면·기준 / 단면에 나타나는 외곽선·윤곽 / 형상 술어의 귀속 주체 / 방향·개방 대상 / 원자료 근거`를 분리한다. 가상 단면·기준선에 실제 면이나 부품이 존재하는 것으로 모델링되거나 형상 술어의 주체가 확정되지 않으면 `CLAIMABILITY_GATE`를 PASS로 하지 않는다.
+7a. 사용자가 종속항의 주체 구성(예: "상기 리드 지지부는")을 지정하면, 의미 한정 패키지는 그 주체의 어떤 구조(부재·부분·형상)가 추가 관계를 만드는지를 담아야 한다. 주체의 구조 없이 `~되도록 구성되는`처럼 결과·기능만 남으면 `CLAIMABILITY_GATE`를 PASS로 하지 않는다. 그 구조가 도면에서만 확인되더라도 후보의 과제–작동 원리를 실현하는 수단이면 형상 묘사(`DRAWING_ONLY`)가 아니라 그 후보의 구성으로 판단하고, 원자료에 명칭이 없으면 개념 라벨로 넘긴다.
 8. 선행기술이 제공된 경우에만 문헌별 개시, 차이점, 결합동기, 변경 용이성, 변경 저해 및 효과의 예측 가능성을 검토한다. 없으면 모든 신규성·진보성 판정을 `UNVERIFIED — PRIOR_ART_NOT_PROVIDED`로 둔다.
 9. `TECHNICAL_SOLUTION_CANDIDATE`만 주된 권리화 축에 배치한다. `FALLBACK_ONLY`는 사용자의 요청 또는 구체적인 보정·침해 입증 가치가 있을 때 별도 보조 축에 두며, 주된 기술기여 후보처럼 표현하지 않는다.
 9a. `TECHNICAL_SOLUTION_CANDIDATE`마다 `10_심사이력_경험기준.md`의 `exam_pattern`(REL_POSITION_COUPLING, SUBASSEMBLY_ACTION, CONDITIONAL_BRANCH, MODE_OPERATION, OPERATION_ORDER, PURPOSE_POSITION_MATERIAL, NUMERIC_WITH_REASON, NUMERIC_NO_REASON, SELECTION_MATERIAL, SELECTION_SHAPE, SELECTION_METHOD, SELECTION_INPUT_DATA, KNOWN_ITEM, OTHER)과 `design_change_risk`(LOW·MEDIUM·HIGH)를 붙이고, 분류의 원자료 근거 위치를 `exam_pattern_basis`에 적는다. 유형은 원자료의 문장으로만 정하며, 원자료가 두 구성의 결합 위치를 말하지 않으면 REL_POSITION_COUPLING으로 올리지 않는다. 이 분류는 순서 신호일 뿐 `CandidateClass`나 08의 세 게이트 값을 바꾸지 않는다. HIGH 후보도 인과사슬이 원자료로 닫히면 주된 트리에 남되, 같은 부모항 아래에서는 LOW → MEDIUM → HIGH 순서로 예정 항을 정하고 같은 위험도 안에서는 05의 권리화 축 순서를 따른다. NUMERIC_NO_REASON에는 `원자료에 범위 안팎 비교 없음 — 반복 실험 최적화로 넘어갈 위험`을 적는다. 선행기술이 봉인돼 있고 그 관계가 개시돼 있으면 그 사실이 위험도보다 우선한다. `authoring_scope: EXISTING_SET_EDIT`이면 번호·인용관계를 바꾸지 않으므로 분류는 보고서에만 남긴다.

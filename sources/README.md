@@ -14,13 +14,15 @@
 | `08_종속항_기술기여_게이트.md` | 종속항 후보의 과제–추가 기술특징–작동·협동 원리–효과 및 단순 도면 묘사 배제 검증 | dependent-claim-strategy-architect·claim-drafter; dependent success·syntax·OA reviewer가 검증 | DRAFT 또는 FINAL 독립항 LOCK 뒤, 종속항 트리·문언 작성 전 | 불가 |
 | `05_종속항_전개패턴_가이드.md` | 기술기여 후보의 부모항·권리화 축·종속항 트리 설계 | dependent-claim-strategy-architect·claim-drafter; claim-success-reviewer·syntax-scope-reviewer가 독립 검증 | 후보별 세 기술기여 게이트 PASS 뒤부터 dependent syntax까지 | 불가 |
 | `11_판례_청구항_주의시트.md` | 판례 DB(`case-graph-20260930-v2`) 교훈 기록에서 만든 청구항 문언 주의 시트(명확성 C1~C8·뒷받침·권리범위 P2/P4/P5); 미검토 요약, 판정 기준·게이트 아님 | claim-architect(`INDEPENDENT`)·claim-drafter(`INDEPENDENT`·`DEPENDENT_SET`); claim-success-reviewer가 사용 경계 준수만 감사. style·syntax·OA에는 전달하지 않고, syntax·OA 지적별 판례는 오케스트레이터가 `claim-agent graph caselaw find`로 붙인다 | 독립항 설계 시작부터 의미 초안까지 | 불가 — 발명 원자료 아님. 한정·구성·수치·효과를 만들지 않음 |
+| `12_판례_특허성_유형기준.md` | 판례 DB에서 뽑은 신규성·진보성 판단 기록(`docs/caselaw-patentability.json`)의 특징 유형(F-…)별 요약과 인정 요인별 원자료 확인 질문; 미검토, 판정 기준·게이트 아님 | prior-art-pre-examiner(`PREEXAM_JUDGE`)·dependent-claim-strategy-architect·oa-strategy-reviewer만; 독립항 설계·작성·스타일 역할에는 이 문서와 그 유형·신호를 전달하지 않음 | 사전 심사 JUDGE, 종속항 후보 순위, OA INV 지적 때만 | 불가 — 발명 원자료 아님. 판례만으로 신규성·진보성을 판정하지 않음 |
+| `13_판례_권리행사_작성기준.md` | 판례 DB에서 뽑은 권리범위확인·침해 판단 기록(`docs/caselaw-enforcement.json`)의 청구항 문언 유형(W…)별 요약; 미검토, 판정 기준·게이트 아님 | claim-architect(`INDEPENDENT`)·claim-drafter(`INDEPENDENT`·`DEPENDENT_SET`)·dependent-claim-strategy-architect; claim-success-reviewer가 사용 경계 준수만 감사. OA는 시트 대신 exact 문언의 점검표(`claim-agent graph caselaw enforce`)를 받음 | 독립항 설계 시작부터 의미 초안까지, 종속항 설계·초안 | 불가 — 발명 원자료 아님. 한정·구조·실시 주체를 만들지 않음 |
 | `10_심사이력_경험기준.md` | 등록 특허 30건 심사 이력의 경험 통계; 최신 성공조건 미검증, 판정 기준·게이트 아님 | dependent-claim-strategy-architect(후보 순위)와 prior-art-pre-examiner의 JUDGE(남는 차이의 설계변경 위험)만; 독립항 설계·작성·스타일 역할에는 이 문서와 그 분류 값을 전달하지 않음 | 종속항 후보 순위 결정과 사전 심사 JUDGE 때만; 독립항 생성에는 활성화하지 않음 | 불가 — 발명 원자료 아님 |
 
 현재 발명의 명세서, 도면, 발명 설명, 구성요소 관계표, 선행기술 및 확정 문언은 별도의 발명 원자료다. 현재 이 폴더에 그러한 원자료가 없으면 예시 코퍼스나 가이드로 기술내용을 보충하지 않고 `근거 미확인` 또는 `BLOCK`으로 처리한다.
 
 기본 활성 순서는 다음과 같다.
 
-1. 생성 방향: 현재 발명 원자료 + `독립항_작성_성공조건.md` (`11_판례_청구항_주의시트.md`는 claim-architect·claim-drafter가 피할 문언 유형 확인에만 사용)
+1. 생성 방향: 현재 발명 원자료 + `독립항_작성_성공조건.md` (`11_판례_청구항_주의시트.md`와 `13_판례_권리행사_작성기준.md`는 claim-architect·claim-drafter가 피할 문언 유형 확인과 권리행사에 불리하지 않은 문언 선택에만 사용)
 2. 권리범위 결정: 성공조건의 조건 6(선행기술이 있을 때만 — 사용자 제공 또는 봉인된 검색 집합) + 조건 8. 선행기술이 있으면 drafter 전에 별도 `prior-art-pre-examiner`가 `09_사전심사_기준.md`로 2a 사전 심사 감사를 한다
 3. `claim-drafter`의 보조 예시 없는 PRE_STYLE 의미 초안 작성
 4. 별도 `claim-style-adjuster`의 용어·표현·스타일 후처리: `07_용어표현_출처게이트.md` + 조건 7 + `04_청구항_스타일가이드.md` + `CLAIM_STYLE_GATE`

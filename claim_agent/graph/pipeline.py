@@ -19,6 +19,7 @@ from .store import Graph
 
 IDEA_TITLE = "발명 그래프 아이디어 시트 (INFERRED — 근거 아님, 원자료 위치만 근거)"
 PRECEDENT_TITLE = "심사 이력 참고 시트 (경험 통계 — 근거·게이트·선행기술 아님)"
+ENFORCE_TITLE = "권리행사 판례 점검표 (미검토 판례 — 근거·게이트 아님)"
 
 
 class GraphHooks:
@@ -92,6 +93,20 @@ class GraphHooks:
         if g is None:
             return text
         return inv.insert_before_contract(text, inv.sheet_section(IDEA_TITLE, inv.idea_sheet(g)))
+
+    def oa_packet(self, state: RunState, text: str, exact_text: str) -> str:
+        """OA (independent and dependent): enforcement check of the exact claim text with matching cases. Code only, no model call."""
+        if self.cfg.graph.caselaw_review != "on":
+            return text
+        from . import caselaw as cl
+
+        try:
+            data = cl.load_records(self.cfg.project_root / cl.ENFORCE_FILE)
+        except (OSError, ValueError, cl.CaseLawError) as exc:
+            state.notes.append(f"권리행사 판례 점검: 기록을 읽지 못함 — 점검표 없이 진행 ({exc})")
+            return text
+        body = cl.enforcement_markdown(cl.enforcement_report(data, exact_text))
+        return inv.insert_before_contract(text, inv.sheet_section(ENFORCE_TITLE, body))
 
     def dependent_packet(self, state: RunState, bundle: MaterialBundle, text: str) -> str:
         g = self.invention_graph(state, bundle) if self.cfg.graph.invention == "on" or self.cfg.graph.precedent == "on" else None
