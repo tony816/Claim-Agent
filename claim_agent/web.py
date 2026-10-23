@@ -444,9 +444,6 @@ class Workspace:
                 # A halted run waits for a decision: this chat message is that decision on the same run.
                 return self.resume(sid, dict(kind=kind, text=text, files=selected))
             self.require_connection()
-            mode = data.get("mode", "CHAT")
-            if mode not in {"CHAT", "AUTHORING_DRAFT"}:
-                raise ValueError("지원하지 않는 대화 모드입니다.")
             if not isinstance(selected, list) or any(not isinstance(x, str) for x in selected):
                 raise ValueError("첨부 파일 목록을 확인하세요.")
             known = {item["id"]: item for item in session["files"]}
@@ -458,13 +455,14 @@ class Workspace:
             rid = "web-" + uuid.uuid4().hex
             job_dir = self.root / ".tui" / "requests" / rid
             model = self.cfg.default_model
-            # Every web request is classified. The selection is a hint, never a
-            # bypass around interpretation of the user's current question.
+            # Every web request is classified from its text; the composer has no chat/authoring switch. The claim
+            # picker is a hint, never a bypass around interpretation of the user's current question.
             job_dir.mkdir(parents=True)
             history = (read_state(folder / "history.json") or {}).get("history", [])
             prior_users = [m for m in session["messages"] if m["role"] == "user"]
             material = "\n\n".join(m["text"] for m in prior_users)
-            context = "\n\n".join(m["text"] for m in session["messages"] if m.get("mode") == "AUTHORING_DRAFT" and m.get("status") in {"complete", "review"})
+            context = "\n\n".join(m["text"] for m in session["messages"] if m.get("role") == "assistant" and m.get("status") in {"complete", "review"}
+                                  and (m.get("pipeline_run_id") or m.get("mode") == "AUTHORING_DRAFT"))
             earlier_files = [f["id"] for m in prior_users for f in m.get("files", [])]
             preset = self.project_inputs(session)
             session_files = [str(validate_attachment(folder / "uploads" / fid / known[fid]["name"]).path) for fid in dict.fromkeys([*earlier_files, *selected])]
@@ -473,16 +471,16 @@ class Workspace:
             save_json(req, dict(text=text, material=material, reference=context,
                                 files=all_files, attachments=preset["attachments"], history=history, model=model, run_id=session["run_id"],
                                 instructions=preset["instructions"], user_lock=preset["user_lock"], project=preset["project"],
-                                ui_hints=dict(selected_mode=mode, dependent=dependent, target=target or "", target_mode=target_mode,
+                                ui_hints=dict(dependent=dependent, target=target or "", target_mode=target_mode,
                                               prior_search=bool(data.get("prior_search")))))
             command = [sys.executable, "-u", "-m", "claim_agent.chat", "--project-root", str(self.root), "--request", str(req)]
             if self.config:
                 command += ["--config", str(self.config)]
             mid = uuid.uuid4().hex
             session["messages"].extend([
-                dict(id=uuid.uuid4().hex, role="user", text=text, files=[known[f] for f in dict.fromkeys(selected)], mode=mode,
+                dict(id=uuid.uuid4().hex, role="user", text=text, files=[known[f] for f in dict.fromkeys(selected)], mode="CHAT",
                      claim_target=dict(mode=target_mode, dependent=dependent, target=target)),
-                dict(id=mid, role="assistant", text="", status="running", mode=mode, log_id=rid),
+                dict(id=mid, role="assistant", text="", status="running", mode="CHAT", log_id=rid),
             ])
             session["title"] = session["messages"][0]["text"][:36]
             session["updated"] = time.time()

@@ -60,7 +60,7 @@ def test_manual_authoring_selection_is_only_a_hint_for_advice(project_root):
         "mode": "REVIEW_ONLY", "reason": "변경 방향의 타당성과 선택 근거를 묻는 질문",
         "reviewers": ["syntax-scope-reviewer", "oa-strategy-reviewer"],
     }]})
-    hints = dict(selected_mode="AUTHORING_DRAFT", dependent=True, target="2~8")
+    hints = dict(dependent=True, target="2~8")
     route = classify_request(provider, project_root, "test", ADVICE_REQUEST, [], "advice", hints)
     assert route.mode == "REVIEW_ONLY" and not route.dependent
     packet = json.loads(provider.calls[0].packet_text)
@@ -263,7 +263,7 @@ def test_single_claim_picked_in_composer_limits_the_dependent_work(rt, request_i
     monkeypatch.setattr(R, "DEP_CLAIMS", R.DEP_CLAIMS[1:2])          # only 【청구항 3】 (parent 1)
     monkeypatch.setattr(R, "DEP_SET_TEXT", R.DEP_CLAIMS[0][3])
     request = {**request_data(request_indep), "text": "청구항 세트를 작성해줘",
-               "ui_hints": dict(selected_mode="AUTHORING_DRAFT", dependent=True, target="3", target_mode="single")}
+               "ui_hints": dict(dependent=True, target="3", target_mode="single")}
     blocks, paths = intake(request, folder)
     route = RouteDecision(mode="AUTHORING_DRAFT", reason="작성", dependent=True, dependent_target="2~8")
     provider = ScriptedProvider(R.happy_script(n_targets=1))

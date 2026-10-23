@@ -140,13 +140,13 @@ def test_draft_uses_earlier_user_material_and_uploads(workspace, monkeypatch):
         job["done"] = True
 
     monkeypatch.setattr(workspace, "execute", capture)
-    workspace.start(sid, {"mode": "AUTHORING_DRAFT", "text": "이걸로 독립항 작성해줘"})
+    workspace.start(sid, {"text": "이걸로 독립항 작성해줘"})
     wait_for(lambda: commands)
     assert "claim_agent.chat" in commands[0]
     req = json.loads(Path(commands[0][commands[0].index("--request") + 1]).read_text(encoding="utf-8"))
     assert any(Path(p).name == "발명.txt" for p in req["files"])
     assert "기존에 설명한 발명" in req["material"]
-    assert req["ui_hints"]["selected_mode"] == "AUTHORING_DRAFT"
+    assert "selected_mode" not in req["ui_hints"]
 
 
 def test_auto_chat_keeps_user_sources_separate_from_generated_reports(workspace, monkeypatch):
@@ -161,7 +161,7 @@ def test_auto_chat_keeps_user_sources_separate_from_generated_reports(workspace,
         commands.append(command)
         job["done"] = True
     monkeypatch.setattr(workspace, "execute", capture)
-    workspace.start(sid, {"text": "그렇게 수정해줘", "mode": "CHAT"})
+    workspace.start(sid, {"text": "그렇게 수정해줘"})
     wait_for(lambda: commands)
     req = json.loads(Path(commands[0][commands[0].index("--request") + 1]).read_text(encoding="utf-8"))
     assert req["material"] == "사용자 발명 설명"
@@ -191,14 +191,14 @@ def test_manual_advice_does_not_bypass_router_or_resume_authoring(workspace, mon
         calls.append((job, command))
         job["done"] = True
     monkeypatch.setattr(workspace, "execute", capture)
-    workspace.start(sid, dict(text=ADVICE_REQUEST, mode="AUTHORING_DRAFT", dependent=True, target="2~8"))
+    workspace.start(sid, dict(text=ADVICE_REQUEST, dependent=True, target="2~8"))
     wait_for(lambda: calls)
     job, command = calls[0]
     assert "claim_agent.chat" in command and "resume" not in command
     assert job["mode"] == "CHAT"
     req = json.loads(Path(command[command.index("--request") + 1]).read_text(encoding="utf-8"))
     assert req["text"] == ADVICE_REQUEST and req["run_id"] == "old-authoring-run"
-    assert req["ui_hints"]["selected_mode"] == "AUTHORING_DRAFT"
+    assert "selected_mode" not in req["ui_hints"]
     assert workspace.sessions[sid]["run_id"] == "old-authoring-run"
 
 
@@ -219,7 +219,7 @@ def test_web_auto_draft_records_effective_mode_and_preserves_run(rt, request_ind
     try:
         sid = workspace.create()["id"]
         for prompt in ["첨부한 발명으로 청구항 작성해줘", "그렇게 수정해줘"]:
-            workspace.start(sid, {"text": prompt, "mode": "CHAT"})
+            workspace.start(sid, {"text": prompt})
             wait_for(lambda: not workspace.snapshot(sid)["running"], timeout=30)
             message = workspace.snapshot(sid)["messages"][-1]
             assert message["status"] == "complete", message["text"]
@@ -256,7 +256,7 @@ def test_web_feedback_resumes_and_rechecks_same_run(rt, request_indep, tmp_path,
     try:
         sid = workspace.create()["id"]
         workspace.sessions[sid]["run_id"] = initial.run_id
-        workspace.start(sid, {"text": "부품 연결 관계를 다시 검토해서 수정해줘", "mode": "AUTHORING_DRAFT"})
+        workspace.start(sid, {"text": "부품 연결 관계를 다시 검토해서 수정해줘"})
         wait_for(lambda: not workspace.snapshot(sid)["running"], timeout=30)
         state = json.loads((rt.cfg.path("runs_dir") / initial.run_id / "state.json").read_text(encoding="utf-8"))
         assert state["candidate"]["revision"] == "r2"
@@ -397,21 +397,21 @@ def test_composer_claim_target_reaches_ui_hints_and_message(workspace, monkeypat
         job["done"] = True
 
     monkeypatch.setattr(workspace, "execute", capture)
-    workspace.start(sid, {"mode": "AUTHORING_DRAFT", "text": "청구항 작성", "target_mode": "single", "target_claim": 3})
+    workspace.start(sid, {"text": "청구항 작성", "target_mode": "single", "target_claim": 3})
     wait_for(lambda: len(commands) == 1)
     req = json.loads(Path(commands[0][commands[0].index("--request") + 1]).read_text(encoding="utf-8"))
-    assert req["ui_hints"] == dict(selected_mode="AUTHORING_DRAFT", dependent=True, target="3", target_mode="single", prior_search=False)
+    assert req["ui_hints"] == dict(dependent=True, target="3", target_mode="single", prior_search=False)
     assert workspace.snapshot(sid)["messages"][-2]["claim_target"] == dict(mode="single", dependent=True, target="3")
-    workspace.start(sid, {"mode": "AUTHORING_DRAFT", "text": "청구항 작성", "target_mode": "range", "target_segments": [{"from": 2, "to": 4}, {"from": 6, "to": 6}]})
+    workspace.start(sid, {"text": "청구항 작성", "target_mode": "range", "target_segments": [{"from": 2, "to": 4}, {"from": 6, "to": 6}]})
     wait_for(lambda: len(commands) == 2)
     req = json.loads(Path(commands[1][commands[1].index("--request") + 1]).read_text(encoding="utf-8"))
     assert req["ui_hints"]["target"] == "2~4,6" and req["ui_hints"]["target_mode"] == "range"
     workspace.start(sid, {"text": "안녕", "dependent": False, "target": "2~8"})      # legacy composer payload
     wait_for(lambda: len(commands) == 3)
     req = json.loads(Path(commands[2][commands[2].index("--request") + 1]).read_text(encoding="utf-8"))
-    assert req["ui_hints"] == dict(selected_mode="CHAT", dependent=False, target="", target_mode="independent", prior_search=False)
+    assert req["ui_hints"] == dict(dependent=False, target="", target_mode="independent", prior_search=False)
     with pytest.raises(ValueError, match="2항 이상"):
-        workspace.start(sid, {"mode": "AUTHORING_DRAFT", "text": "청구항 작성", "target_mode": "range", "target_segments": [{"from": 1, "to": 3}]})
+        workspace.start(sid, {"text": "청구항 작성", "target_mode": "range", "target_segments": [{"from": 1, "to": 3}]})
     assert len(workspace.sessions[sid]["messages"]) == 6
 
 

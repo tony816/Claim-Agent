@@ -63,9 +63,9 @@ class ClaimAgentService:
         """Start one turn. `target_mode` (independent | single | range) is the composer's 작성 대상, a hint the router
         and the scope guard use; without it the request is classified from the text alone. `prior_search` runs the WIPS
         search, Jev screening and pre-exam before the design of a new authoring run."""
-        data: dict = dict(text=text, files=list(attachment_ids or []), mode="CHAT", prior_search=bool(prior_search))
+        data: dict = dict(text=text, files=list(attachment_ids or []), prior_search=bool(prior_search))
         if target_mode is not None:
-            data.update(mode="AUTHORING_DRAFT", target_mode=target_mode, target_claim=target_claim, target_segments=target_segments)
+            data.update(target_mode=target_mode, target_claim=target_claim, target_segments=target_segments)
         self.workspace.start(conversation_id, data)
         return dict(message_id=self._last_assistant(conversation_id)["id"], status="running")
 

@@ -37,7 +37,7 @@ def test_attachments_reach_the_request_and_bad_input_is_refused(workspace, fake_
     requests = sorted((workspace.root / ".tui" / "requests").glob("web-*/chat.json"))
     request = json.loads(requests[-1].read_text(encoding="utf-8"))
     assert any(f.endswith("claims.md") for f in request["files"])
-    assert request["ui_hints"]["selected_mode"] == "AUTHORING_DRAFT" and request["ui_hints"]["target_mode"] == "single"
+    assert "selected_mode" not in request["ui_hints"] and request["ui_hints"]["target_mode"] == "single"
     with pytest.raises(ValueError, match="응답을 찾을 수 없습니다"):
         service.status(cid, "0" * 32)
     with pytest.raises(ValueError, match="kind"):

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from .models.request import IMAGE_EXT, TEXT_EXT, RunRequest
+from .models.request import IMAGE_EXT, TEXT_EXT
 from .sources.extract import DOC_EXT
 
 CATEGORIES = {"invention": "발명 자료", "drawing": "도면", "prior_art": "선행기술", "spec": "정식 명세서"}
@@ -70,50 +70,6 @@ def validate_attachment(path: Path, category: str = "invention") -> Attachment:
     if category == "invention" and path.suffix.lower() in IMAGE_EXT:
         category = "drawing"
     return Attachment(path, category)
-
-
-def prepare_request(
-    root: Path, run_id: str, request: str, pasted_material: str,
-    attachments: list[Attachment], dependent: bool, dependent_target: str,
-    mode: str = "AUTHORING_DRAFT",
-) -> Path:
-    if not request.strip():
-        raise ValueError("요청 내용을 입력해 주세요.")
-    if mode not in {"AUTHORING_DRAFT", "FINALIZATION"}:
-        raise ValueError("지원하지 않는 작성 모드입니다.")
-    checked = [validate_attachment(a.path, a.category) for a in attachments]
-    if not pasted_material.strip() and not any(a.category in {"invention", "drawing", "spec"} for a in checked):
-        raise ValueError("발명 자료를 첨부하거나 '발명 설명 붙여넣기'에 원자료를 입력해 주세요.")
-    specs = [str(a.path) for a in checked if a.category == "spec"]
-    if len(specs) > 1:
-        raise ValueError("정식 명세서는 한 파일만 선택하세요. 나머지는 발명 자료로 추가할 수 있습니다.")
-    if mode == "FINALIZATION" and not specs:
-        raise ValueError("출원용 최종 검증에는 정식 명세서 지정이 필요합니다. 통합 첨부는 '잠정안 작성'으로 실행하고, 명세서를 지정한 최종 검증은 CLI의 --spec 옵션을 사용하세요.")
-    if dependent and not dependent_target.strip():
-        raise ValueError("종속항 범위를 입력해 주세요. 예: 2~8")
-    folder = root / ".tui" / "requests" / run_id
-    folder.mkdir(parents=True, exist_ok=False)
-    sources = [str(a.path) for a in checked if a.category == "invention"]
-    if pasted_material.strip():
-        material = folder / "발명설명.txt"
-        material.write_text(pasted_material, encoding="utf-8")
-        sources.append(str(material))
-    req = RunRequest(
-        request_mode=mode, request_text=request.strip(), invention_sources=sources,
-        drawings=[str(a.path) for a in checked if a.category == "drawing"],
-        prior_art=[str(a.path) for a in checked if a.category == "prior_art"],
-        spec_path=specs[0] if specs else None, dependent=dependent,
-        dependent_target=dependent_target.strip() if dependent else None,
-    )
-    path = folder / "request.json"
-    # JSON is valid YAML; the existing request loader handles these absolute paths.
-    path.write_text(req.model_dump_json(indent=2), encoding="utf-8")
-    return path
-
-
-def run_command(root: Path, request_path: Path, run_id: str, model: str) -> list[str]:
-    return [sys.executable, "-u", "-m", "claim_agent.cli", "--project-root", str(root),
-            "run", "--request-yaml", str(request_path), "--run-id", run_id, "--model", model]
 
 
 RESUME_KINDS = {

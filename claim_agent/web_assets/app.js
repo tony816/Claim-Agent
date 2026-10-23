@@ -159,7 +159,7 @@ function markdown(node,text){
   }
 }
 function resize(){const p=$("prompt");p.style.height="auto";p.style.height=Math.min(p.scrollHeight,180)+"px";}
-function controls(){const running=!!state.data?.running;providerLock();$("send").hidden=running;$("stop").hidden=!running;$("send").disabled=state.busy||state.uploading>0||!$("prompt").value.trim()||!claimTarget().ok;$("attach").disabled=state.uploading>0;$("mode").disabled=running||state.busy;$("options").hidden=$("mode").value!=="AUTHORING_DRAFT";$("prompt").placeholder=$("mode").value==="CHAT"?"무엇이든 물어보세요":state.data?.run_id?"수정하고 싶은 내용을 알려주세요":"발명을 설명하거나 자료를 첨부해 주세요";}
+function controls(){const running=!!state.data?.running;providerLock();$("send").hidden=running;$("stop").hidden=!running;$("send").disabled=state.busy||state.uploading>0||!$("prompt").value.trim()||!claimTarget().ok;$("attach").disabled=state.uploading>0;$("prompt").placeholder=state.data?.run_id?"질문하거나 수정하고 싶은 내용을 알려주세요":"무엇이든 물어보세요 · 청구항 작성은 발명을 설명하거나 자료를 첨부해 주세요";}
 // ---- 작성 대상: 독립항만 / 특정 항 1개 / 종속항 범위. 서버의 resolve_claim_target와 같은 정규형(2~4,6)을 미리 보여 준다.
 const target={segments:[{from:2,to:8}]};
 function formatTarget(numbers){const a=[...numbers].sort((x,y)=>x-y);if(!a.length)return "";const parts=[];let start=a[0],prev=a[0];for(const n of a.slice(1).concat([null])){if(n!==null&&n===prev+1){prev=n;continue;}parts.push(start===prev?String(start):start+"~"+prev);if(n!==null)start=prev=n;}return parts.join(",");}
@@ -206,13 +206,13 @@ function render(data){
       if(m.role==="assistant"){
         const actions=el("div","message-actions"),copy=el("button","","복사"),revise=el("button","","수정 요청");
         copy.onclick=async()=>{try{await navigator.clipboard.writeText(view.text);copy.textContent="복사됨";setTimeout(()=>copy.textContent="복사",1300);}catch(e){error("텍스트를 선택한 뒤 Ctrl+C로 복사하세요.");}};
-        revise.onclick=()=>{$("mode").value=m.mode;$("prompt").focus();controls();};actions.append(copy,revise);article.append(actions);
+        revise.onclick=()=>{$("prompt").focus();controls();};actions.append(copy,revise);article.append(actions);
       }
       $("messages").append(article);view={article,body,logs,pre,summary,routeLabel,full,fullBody,text:null,status:null};state.nodes.set(m.id,view);
     }
     if(view.full)view.full.hidden=!(m.pipeline_run_id&&m.status&&m.status!=="running");
-    if(view.routeLabel){view.routeLabel.textContent=m.execution_mode?"자동 분류 · "+(routeNames[m.execution_mode]||m.execution_mode):m.mode==="AUTHORING_DRAFT"?"청구항 작성·수정":"";view.routeLabel.title=m.route_reason||"";}
-    if(view.text!==m.text||view.status!==m.status){if(m.role==="user")view.body.textContent=m.text;else if(m.text)markdown(view.body,m.text);else view.body.replaceChildren(el("span","pending",m.mode==="CHAT"?"답변을 작성하고 있어요…":"에이전트가 자료를 검토하고 있어요…"));view.text=m.text;}
+    if(view.routeLabel){view.routeLabel.textContent=m.execution_mode?"자동 분류 · "+(routeNames[m.execution_mode]||m.execution_mode):"";view.routeLabel.title=m.route_reason||"";}
+    if(view.text!==m.text||view.status!==m.status){if(m.role==="user")view.body.textContent=m.text;else if(m.text)markdown(view.body,m.text);else view.body.replaceChildren(el("span","pending","요청을 분류하고 답변을 준비하고 있어요…"));view.text=m.text;}
     if(view.logs){
       if(m.status==="running"){view.pre.textContent=state.log.text||"연결 중…";view.summary.textContent="작업 중 · 실시간 로그";if(view.status!=="running")view.logs.open=true;}
       else {view.summary.textContent=(m.status==="error"?"오류 확인 · ":m.status==="review"?"검토 필요 · ":"")+"작업 로그 펼치기";if(view.status==="running"){view.logs.open=false;view.pre.textContent="";}}
@@ -250,11 +250,10 @@ async function list(){
 function showChat(){state.view="chat";$("project-panel").hidden=true;$("improve-panel").hidden=true;$("conversation").hidden=false;document.querySelector("main footer").hidden=false;}
 async function open(id){
   if(state.busy||state.uploading)return;
-  if(state.id)drafts.set(state.id,{text:$("prompt").value,files:state.pending,mode:$("mode").value});
+  if(state.id)drafts.set(state.id,{text:$("prompt").value,files:state.pending});
   const version=++state.generation;state.log={cursor:null, text:""};const data=await fetchSession(id,false);if(version!==state.generation)return;
   state.id=id;state.nodes.clear();$("messages").replaceChildren();state.pending=drafts.get(id)?.files||[];
   $("prompt").value=drafts.get(id)?.text||localStorage.getItem("draft-"+id)||"";
-  $("mode").value=drafts.get(id)?.mode||data.messages.filter(m=>m.role==="user").at(-1)?.mode||"CHAT";
   state.project=data.project?data.project.id:null;if(state.project)localStorage.setItem("claim-project",state.project);else localStorage.removeItem("claim-project");
   showChat();localStorage.setItem("claim-session",id);document.body.classList.remove("sidebar-open");error("");render(data);pending();resize();await list();$("conversation").scrollTop=$("conversation").scrollHeight;$("prompt").focus();
 }
@@ -279,7 +278,7 @@ async function send(event){
   event.preventDefault();if(state.composing||state.busy||state.uploading||state.data?.running||!$("prompt").value.trim())return;
   state.busy=true;controls();error("");const id=state.id,text=$("prompt").value;
   const t=claimTarget();if(!t.ok){error(t.error);return;}
-  try{await api("/api/send",{id,text,mode:$("mode").value,files:state.pending.map(f=>f.id),target_mode:t.target_mode,target_claim:t.target_claim,target_segments:t.target_segments,dependent:t.dependent,target:t.target,prior_search:$("prior-search").checked});$("prompt").value="";localStorage.removeItem("draft-"+id);state.pending=[];drafts.delete(id);pending();resize();await refresh();restartPoll();await list();$("conversation").scrollTop=$("conversation").scrollHeight;}
+  try{await api("/api/send",{id,text,files:state.pending.map(f=>f.id),target_mode:t.target_mode,target_claim:t.target_claim,target_segments:t.target_segments,dependent:t.dependent,target:t.target,prior_search:$("prior-search").checked});$("prompt").value="";localStorage.removeItem("draft-"+id);state.pending=[];drafts.delete(id);pending();resize();await refresh();restartPoll();await list();$("conversation").scrollTop=$("conversation").scrollHeight;}
   catch(e){error(e.message);}finally{state.busy=false;controls();$("prompt").focus();}
 }
 $("composer").onsubmit=send;
@@ -295,7 +294,7 @@ document.addEventListener("dragleave",()=>{if(--drag<=0){drag=0;$("drop-overlay"
 document.addEventListener("drop",event=>{drag=0;$("drop-overlay").hidden=true;if(event.dataTransfer.files.length){event.preventDefault();upload([...event.dataTransfer.files]);}});
 $("new-chat").onclick=()=>create().catch(e=>error(e.message));$("menu").onclick=()=>document.body.classList.toggle("sidebar-open");
 $("new-project").onclick=()=>createProject().catch(e=>error(e.message));
-$("mode").onchange=controls;$("stop").onclick=async()=>{try{await api("/api/stop",{id:state.id});await refresh();}catch(e){error(e.message);}};
+$("stop").onclick=async()=>{try{await api("/api/stop",{id:state.id});await refresh();}catch(e){error(e.message);}};
 $("shutdown").onclick=async()=>{if(state.data?.running&&!confirm("진행 중인 응답을 중지하고 프로그램을 종료할까요?"))return;try{await api("/api/shutdown",{});stopPolling();$("composer").hidden=true;error("프로그램을 종료했습니다. 다시 이용하려면 바탕화면 실행기를 더블클릭하세요.");}catch(e){error(e.message);}};
 for(const button of document.querySelectorAll("[data-prompt]"))button.onclick=()=>{$("prompt").value=button.dataset.prompt;resize();controls();$("prompt").focus();};
 let timer=null,polling=true;

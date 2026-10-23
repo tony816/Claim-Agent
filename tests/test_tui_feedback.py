@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from textual.widgets import Button, Select
+from textual.widgets import Button
 
 from claim_agent.models.state import Halt
 from claim_agent.provider.scripted import ScriptedProvider
@@ -67,7 +67,7 @@ def test_tui_has_no_separate_feedback_controls_and_chat_resumes_a_halted_run(rt,
     async def scenario():
         app = ClaimAgentApp(rt.cfg.project_root, config_path=config)
         async with app.run_test(size=(132, 44)) as pilot:
-            assert "FEEDBACK" not in {value for _, value in app.query_one("#mode", Select)._options}
+            assert not app.query("#mode")
             assert not app.query("#feedback") and not app.query("#feedback-run")
             app.last_pipeline_run = "feedback-existing"
             app.add_files([extra])
