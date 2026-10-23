@@ -2,7 +2,7 @@
 name: picture-claim-reconstruction-reviewer
 description: 무도구 blind 에이전트가 봉인한 독립항 또는 개별 종속항의 관계·형상 snapshot을 설계 계약과 허용 원자료에 비교하는 최종 감사자다.
 tools: Read, Glob, Grep
-model: opus
+model: sonnet
 effort: high
 maxTurns: 12
 color: cyan

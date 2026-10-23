@@ -2,7 +2,7 @@
 name: claim-style-adjuster
 description: 작성자가 고정한 의미 초안에 용어·표현 출처 게이트와 청구항 스타일가이드를 적용해 범위 불변인 최종 표면 문언을 확정한다.
 tools: Read, Glob, Grep
-model: opus
+model: sonnet
 effort: high
 maxTurns: 8
 color: blue

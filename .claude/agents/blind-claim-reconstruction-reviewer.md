@@ -2,8 +2,8 @@
 name: blind-claim-reconstruction-reviewer
 description: 기준 발명이나 프로젝트 파일을 보지 않는 무도구 새 context에서 독립항 또는 개별 종속항의 문언만으로 비특허 기술 독자가 복원하는 관계·형상 모델을 봉인한다.
 tools: []
-model: opus
-effort: high
+model: sonnet
+effort: medium
 maxTurns: 5
 color: cyan
 ---

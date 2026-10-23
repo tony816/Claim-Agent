@@ -2,7 +2,7 @@
 name: oa-strategy-reviewer
 description: 독립항 성공조건 또는 종속항 기술기여 게이트와 syntax를 통과한 변경 없는 문언을 OA 관점에서 검수하고 DRAFT·FINAL 게이트를 분리한다.
 tools: Read, Glob, Grep
-model: fable
+model: sonnet
 effort: high
 maxTurns: 12
 color: yellow

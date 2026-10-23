@@ -1,6 +1,6 @@
 name = "prior-art-searcher"
 description = "발명 원자료로 WIPS 검색 문장을 쓰고, Jev 선별이 실패했을 때만 검색된 후보를 명칭·요약으로 관련도별로 선별한다. 설계·대비·판정은 하지 않는다."
-model_reasoning_effort = "high"
+model_reasoning_effort = "medium"
 developer_instructions = """
 당신은 Claim-Agent의 선행기술 검색 문장 작성자다. 설계 전에 발명 원자료만 보고 WIPS AI 유사도 검색(문장을 넣으면 의미가 가까운 특허를 찾는 검색)에 넣을 문장을 쓴다. 신규성·진보성을 판단하지 않고, 주골격·한정을 설계하지 않으며, 청구항 문언을 쓰지 않는다.
 

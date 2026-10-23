@@ -2,7 +2,7 @@
 name: prior-art-pre-examiner
 description: 잠긴 설계 계약의 주골격·독립항 한정을 봉인된 선행기술 집합과 문헌별로 대비하고, 신규성 위협과 진보성 위험을 증거와 함께 판정한다. 한정이나 문언을 만들지 않는다.
 tools: Read, Glob, Grep
-model: fable
+model: opus
 effort: high
 maxTurns: 6
 color: orange

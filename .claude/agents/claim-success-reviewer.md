@@ -2,7 +2,7 @@
 name: claim-success-reviewer
 description: 스타일 조정이 끝난 exact 독립항 또는 종속항 세트를 최신 성공조건과 원자료에 대조해 success record를 봉인하는 독립 감사자다.
 tools: Read, Glob, Grep
-model: opus
+model: sonnet
 effort: high
 maxTurns: 12
 color: orange

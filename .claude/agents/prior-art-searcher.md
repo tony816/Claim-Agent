@@ -3,7 +3,7 @@ name: prior-art-searcher
 description: 발명 원자료로 WIPS 검색 문장을 쓰고, Jev 선별이 실패했을 때만 검색된 후보를 명칭·요약으로 관련도별로 선별한다. 설계·대비·판정은 하지 않는다.
 tools: Read, Glob, Grep
 model: sonnet
-effort: high
+effort: medium
 maxTurns: 4
 color: cyan
 ---
