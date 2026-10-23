@@ -268,10 +268,12 @@ def _dependent_stable(state: RunState, store, bundle: MaterialBundle, root_lock_
 
 
 def dep_architect(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_design_record_id: str, root_text: str, request_text: str, redesign_goal: str | None,
-                  target_nos: set[int] | None = None, scope_repair: str | None = None) -> Packet:
+                  target_nos: set[int] | None = None, scope_repair: str | None = None, business_context: str | None = None) -> Packet:
     txt, imgs = _dependent_stable(state, store, bundle, root_lock_id, root_design_record_id, ("invention", "drawing", "spec", "prior_art"))
     txt += _hdr(state, ids, record_id, {"dependent_target_claim_nos": ", ".join(map(str, sorted(target_nos)))} if target_nos else None)
     txt += _section("현재 요청 (종속항 세트)", request_text)
+    txt += _section("BUSINESS_CONTEXT (사용자 제공 사업 입력 — 발명 원자료·한정 근거 아님, BUSINESS_FIT 순위 신호에만 사용)",
+                    business_context.strip() if business_context and business_context.strip() else "BUSINESS_CONTEXT: NONE")
     if state.candidate.preexam_record_id:
         txt += _report(state, store, state.candidate.preexam_record_id, "사전 심사 기록 전문 (봉인 선행기술 집합 기준; 설계변경 위험 분류 포함)")
     if redesign_goal:
@@ -280,7 +282,7 @@ def dep_architect(state: RunState, store, bundle: MaterialBundle, ids: Identifie
         txt += _section("번호 계약 위반 복구 (1회)", f"직전 설계가 번호 계약을 어겨 중지되었다: {scope_repair}\n"
                         "예정 항 번호와 부모항을 아래 출력 계약의 번호 집합·인용관계와 정확히 일치시켜 다시 설계한다.")
     txt += _section(_root_label(state)[1], root_text)
-    txt += _output_contract("`gates.DEPENDENT_DESIGN_GATE`, `gates.INVENTIVE_STEP`, `candidates[]`(DC-NN별 분류·세 게이트·예정 항·부모항과 10_심사이력_경험기준의 `exam_pattern`·`design_change_risk`·`exam_pattern_basis`)를 채운다."
+    txt += _output_contract("`gates.DEPENDENT_DESIGN_GATE`, `gates.INVENTIVE_STEP`, `candidates[]`(DC-NN별 분류·네 후보 게이트(DEPENDENT_SOURCE·CAUSAL_CONTRIBUTION·CLAIMABILITY·ENFORCEMENT_VALUE)·`enforcement_scenario`·`enforcement_failed_tests`·`business_fit`·`business_fit_basis`·예정 항·부모항과 10_심사이력_경험기준의 `exam_pattern`·`design_change_risk`·`exam_pattern_basis`)를 채운다. TECHNICAL_SOLUTION_CANDIDATE는 네 후보 게이트가 모두 PASS이고 `enforcement_scenario`가 비어 있지 않아야 한다."
                             + _number_contract(state, target_nos))
     return Packet(txt, imgs)
 

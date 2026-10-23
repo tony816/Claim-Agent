@@ -81,7 +81,8 @@ AUTHORING_DRAFT와 FINALIZATION의 독립항에는 다음을 exact 문언 기준
 DEPENDENT_SET에는 루트 독립항 success를 재사용하지 않고 다음을 세트와 목표항별로 추가 검사한다.
 
 1. 루트 LOCK의 식별자·문언·원자료·USER_LOCK이 현재 입력과 동일한가.
-2. 모든 목표항이 정확히 하나의 LOCK된 `DC-NN`과 대응하고 후보별 DEPENDENT_SOURCE_GATE·CAUSAL_CONTRIBUTION_GATE·CLAIMABILITY_GATE가 PASS인가.
+2. 모든 목표항이 정확히 하나의 LOCK된 `DC-NN`과 대응하고 후보별 DEPENDENT_SOURCE_GATE·CAUSAL_CONTRIBUTION_GATE·CLAIMABILITY_GATE·ENFORCEMENT_VALUE_GATE가 PASS인가.
+2a. `08_종속항_기술기여_게이트.md` 제5.4절에 따라 exact 목표항 문언과 부모항 체인으로 권리행사 내재 시험을 다시 돌리는가. 설계 기록의 권리행사 시나리오를 그대로 받지 않고, 문언만으로 EV1 한정 실익(부모항을 갖추면 언제나 충족되지 않는가), EV2 충족 확인(수치·파라미터 한정에 원자료의 측정 조건이 문언에 들어 있는가), EV3 단일 실시 주체, EV4 회피 대가(원자료에 적힌 같은 효과의 대안을 문언이 포섭하는가), EV5 독립 축(같은 부모 아래 형제항과 같은 차이점을 되풀이하지 않는가)을 확인한다. 하나라도 실패하면 PASS로 하지 않고 `RETURN_TO_DEPENDENT_ARCHITECT`로 낸다. `BUSINESS_FIT`과 `BUSINESS_CONTEXT`는 이 재검사의 근거가 아니며 `UNVERIFIED`여도 결함이 아니다.
 3. 각 목표항을 정확한 부모항 체인과 합친 전체 발명에서 과제–추가 기술특징–작동·협동 원리–효과에 필요한 수단·관계·조건이 보존되는가.
 4. `05_종속항_전개패턴_가이드.md`에 따라 인용항이 앞선 번호이고, 필요한 모든 선행 용어와 전제를 가진 가장 넓은 적정 부모이며, 대안 실시형태가 부당하게 누적되지 않는가.
 5. 선행기재, 카테고리, 상하위 모순, 수치범위 및 종속항 말미 명칭이 닫히는가.
@@ -131,7 +132,7 @@ DEPENDENT_SET에는 루트 독립항 success를 재사용하지 않고 다음을
 - GEOMETRIC_OBJECT_GATE 확인 결과
 - 한정별 원자료 근거와 F/E/C/N/I/S
 - 근거 미확인·REVIEW·BLOCK·비게이팅 UNVERIFIED
-- dependent success 추가표: DEPENDENT_SET이면 `DC-NN / 부모항 체인 / 세 기술기여 게이트 / 문언 대응 / 기술기여 보존 / DRAWING_ONLY 재유입 / 판정`, INDEPENDENT이면 `해당 없음`
+- dependent success 추가표: DEPENDENT_SET이면 `DC-NN / 부모항 체인 / 세 기술기여 게이트 / ENFORCEMENT_VALUE_GATE와 EV1~EV5 재검사 / 문언 대응 / 기술기여 보존 / DRAWING_ONLY 재유입 / 판정`, INDEPENDENT이면 `해당 없음`
 - 돌아갈 단계와 정확한 수정 목표
 - 문언 직접 수정 여부: 항상 `없음`
 - syntax 진행 가능: 모든 필수 항목 PASS이고 pipeline_eligible YES이면 `YES`, 그 외 `NO`

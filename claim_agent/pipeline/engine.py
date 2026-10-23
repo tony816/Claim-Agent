@@ -10,7 +10,7 @@ from typing import Any
 from ..claim_scope import parse_target
 from ..config import AppConfig
 from ..graph.pipeline import GraphHooks
-from ..models.contracts import COMBINED_REVIEW, combined_contract, contract_for
+from ..models.contracts import COMBINED_REVIEW, combined_contract, contract_for, main_tree_gate_gaps
 from ..models.enums import ExecStatus, NextStep, RequestMode, Scope, Status, StyleChangeMode
 from ..models.envelope import RoleEnvelope, envelope_schema_for
 from ..models.ids import Identifiers, bump_dependent_design_revision, bump_dependent_revision, bump_design_revision, bump_revision, input_revision_id, record_id
@@ -534,6 +534,12 @@ class PipelineEngine(PriorArtSteps):
             # 조건 4: 근거표 공란 0건. A PASS with UNCONFIRMED evidence rows contradicts itself → REVIEW.
             evidence_problem = f"EVIDENCE_UNCONFIRMED: 근거 미확인 한정 {len(unconfirmed)}건이 PASS 판정과 함께 보고됨: " + "; ".join(unconfirmed[:5])
             issued = False
+        tree_gaps = main_tree_gate_gaps(env) if stage == Stage.DEP_ARCHITECT and env.status == Status.PASS else []
+        if tree_gaps:
+            # 08 §5.6: a LOCKED tree whose main candidates lack a PASS candidate gate or the enforcement scenario contradicts itself.
+            evidence_problem = "MAIN_TREE_GATE_GAP: 주된 트리 후보의 필수 게이트 PASS 또는 권리행사 시나리오가 없음: " + "; ".join(tree_gaps)
+            unconfirmed = tree_gaps
+            issued = False
         if scope_problem:
             issued = False
         text_for_hash = env.exact_claim_text if env.exact_claim_text else expected_exact
@@ -596,8 +602,9 @@ class PipelineEngine(PriorArtSteps):
                     else f" 이미 확정된 독립항 {root_lock}은 변경하지 않았습니다." if root_lock else "")
             raise PipelineHalt(Halt(stage=stage.value, role=role, kind="REVIEW", reason_code="OTHER", message="REQUEST_SCOPE_MISMATCH: " + scope_problem + kept, record_id=rid))
         if evidence_problem:
+            kind_code = ("MAIN_TREE_GATE_GAP", "08-5.6") if tree_gaps else ("EVIDENCE_UNCONFIRMED", "COND4")
             raise PipelineHalt(Halt(stage=stage.value, role=role, kind="REVIEW", reason_code="OTHER", message=evidence_problem, record_id=rid,
-                                    open_issues=[{"kind": "EVIDENCE_UNCONFIRMED", "code": "COND4", "text": lim, "return_to": None} for lim in unconfirmed]))
+                                    open_issues=[{"kind": kind_code[0], "code": kind_code[1], "text": lim, "return_to": None} for lim in unconfirmed]))
         return env, ref
 
     def _guard_budget(self, state: RunState, stage: Stage) -> None:
@@ -1097,7 +1104,8 @@ class PipelineEngine(PriorArtSteps):
             goal = next((n.split(": ", 1)[1] for n in reversed(state.notes) if n.startswith(f"종속항 설계 변경 목표 ({d.dependent_design_revision})")), None)
             targets = parse_target(req.dependent_target)
             loop = d.loop_counts.get("DEPENDENT_ARCHITECT", 0)
-            pk = packets.dep_architect(state, self.store, bundle, ids, rid, d.root_lock_id, c.design_record_id or "", root_text, req.request_text, goal, targets)
+            pk = packets.dep_architect(state, self.store, bundle, ids, rid, d.root_lock_id, c.design_record_id or "", root_text, req.request_text, goal, targets,
+                                       business_context=req.business_context)
             pk.text = self.graph_hooks.dependent_packet(state, bundle, pk.text)
             try:
                 env, ref = self._call(state, "dependent-claim-strategy-architect", Scope.DEPENDENT_SET, st, "dependent_design", pk, ids, rid, loop_index=loop)
@@ -1109,7 +1117,7 @@ class PipelineEngine(PriorArtSteps):
                 state.records[rid].superseded = True
                 rid = record_id("dependent_design", ids, seq=2)
                 pk = packets.dep_architect(state, self.store, bundle, ids, rid, d.root_lock_id, c.design_record_id or "", root_text, req.request_text, goal, targets,
-                                           scope_repair=ph.halt.message)
+                                           scope_repair=ph.halt.message, business_context=req.business_context)
                 pk.text = self.graph_hooks.dependent_packet(state, bundle, pk.text)
                 env, ref = self._call(state, "dependent-claim-strategy-architect", Scope.DEPENDENT_SET, st, "dependent_design", pk, ids, rid, loop_index=loop)
             tr = self._decide(state, env, "dependent-claim-strategy-architect", Scope.DEPENDENT_SET, st, rid, d.loop_counts)

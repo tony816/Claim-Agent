@@ -112,9 +112,16 @@ class CandidateItem(BaseModel):
     DEPENDENT_SOURCE_GATE: GateValue | None = None
     CAUSAL_CONTRIBUTION_GATE: GateValue | None = None
     CLAIMABILITY_GATE: GateValue | None = None
+    ENFORCEMENT_VALUE_GATE: GateValue | None = None
     PRIOR_ART_CONTRIBUTION_GATE: GateValue | None = None
     planned_claim_no: int | None = None
     parent_claim_no: int | None = None
+    # 08 §1.5·5.4: one-line enforcement scenario and the EV1–EV5 results that back ENFORCEMENT_VALUE_GATE.
+    enforcement_scenario: str | None = None
+    enforcement_failed_tests: str | None = None   # e.g. "EV2, EV4"; schema stays flat (no nested arrays)
+    # 08 §5.4 BUSINESS_FIT: ordering signal from the optional user BUSINESS_CONTEXT; never a gate or technical evidence.
+    business_fit: str | None = None
+    business_fit_basis: str | None = None
     # 10_심사이력_경험기준 ordering signal (설계 14.2); never changes the classification or the 08 gates.
     exam_pattern: str | None = None
     design_change_risk: str | None = None
@@ -357,9 +364,14 @@ ENVELOPE_JSON_SCHEMA: dict[str, Any] = _obj(
                     "DEPENDENT_SOURCE_GATE": _enum(_GATE_ENUM, nullable=True),
                     "CAUSAL_CONTRIBUTION_GATE": _enum(_GATE_ENUM, nullable=True),
                     "CLAIMABILITY_GATE": _enum(_GATE_ENUM, nullable=True),
+                    "ENFORCEMENT_VALUE_GATE": _enum(_GATE_ENUM, nullable=True, desc="08 제5.4절 권리행사 가치(EV1~EV5)"),
                     "PRIOR_ART_CONTRIBUTION_GATE": _enum(_GATE_ENUM, nullable=True),
                     "planned_claim_no": _int(nullable=True),
                     "parent_claim_no": _int(nullable=True),
+                    "enforcement_scenario": _str("누가 무엇을 실시하면 이 한정의 충족을 어떻게 확인하고 회피하면 무엇을 잃는지 한 줄", nullable=True),
+                    "enforcement_failed_tests": _str("실패한 EV 시험 (예: EV2, EV4); 없으면 null", nullable=True),
+                    "business_fit": _enum(_RISK3 + ["UNVERIFIED"], nullable=True, desc="BUSINESS_CONTEXT 기준 순위 신호(게이트 아님)"),
+                    "business_fit_basis": _str("BUSINESS_CONTEXT 근거 위치 또는 사업 확인 질문", nullable=True),
                     "exam_pattern": _enum(list(EXAM_PATTERN_RISK), nullable=True, desc="10_심사이력_경험기준 유형(순위 신호, 게이트 아님)"),
                     "design_change_risk": _enum(_RISK3, nullable=True),
                     "exam_pattern_basis": _str("유형 분류의 원자료 근거 위치", nullable=True),

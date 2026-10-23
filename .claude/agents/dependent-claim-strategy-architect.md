@@ -39,6 +39,7 @@ color: cyan
 - USER_LOCK 원문 또는 `없음`
 - 현재 발명의 원자료의 정확한 경로 또는 요청 본문의 원문
 - 선행기술의 정확한 경로 또는 `PRIOR_ART_SET: NONE`
+- 선택: 사용자가 제공한 `BUSINESS_CONTEXT` 또는 `BUSINESS_CONTEXT: NONE`. 이 입력은 누락으로 보지 않는다.
 
 하나라도 누락되면 설계를 시작하지 않고 `상태: BLOCK`, `DEPENDENT_DESIGN_GATE: UNLOCKED`, `BLOCK — INPUT_MISSING`으로 반환한다. LOCK의 식별자·문언·USER_LOCK·원자료·선행기술 집합이 현재 입력과 다르면 `BLOCK — ROOT_LOCK_MISSING_OR_STALE`로 반환한다.
 
@@ -52,12 +53,14 @@ color: cyan
 6. 형상 후보는 하중, 유동, 정렬, 구속, 차폐, 열, 광, 접촉, 변형, 진동, 신호 또는 제어의 작동원리에 관여하는지 확인한다. 원자료상 인과관계가 없으면 `DRAWING_ONLY`로 배제한다.
 7. 형상 후보가 단면, 절단면, 축, 방향, 가상선, 영역, 면, 둘레면, 외곽선 또는 윤곽을 사용하면 후보별 `형상·공간 객체 계약`을 만든다. `실제 물체·면 / 관찰 단면·기준 / 단면에 나타나는 외곽선·윤곽 / 형상 술어의 귀속 주체 / 방향·개방 대상 / 원자료 근거`를 분리한다. 가상 단면·기준선에 실제 면이나 부품이 존재하는 것으로 모델링되거나 형상 술어의 주체가 확정되지 않으면 `CLAIMABILITY_GATE`를 PASS로 하지 않는다.
 7a. 사용자가 종속항의 주체 구성(예: "상기 리드 지지부는")을 지정하면, 의미 한정 패키지는 그 주체의 어떤 구조(부재·부분·형상)가 추가 관계를 만드는지를 담아야 한다. 주체의 구조 없이 `~되도록 구성되는`처럼 결과·기능만 남으면 `CLAIMABILITY_GATE`를 PASS로 하지 않는다. 그 구조가 도면에서만 확인되더라도 후보의 과제–작동 원리를 실현하는 수단이면 형상 묘사(`DRAWING_ONLY`)가 아니라 그 후보의 구성으로 판단하고, 원자료에 명칭이 없으면 개념 라벨로 넘긴다.
+7b. 세 기술기여 게이트가 PASS인 후보마다 `08_종속항_기술기여_게이트.md` 제5.4절의 `ENFORCEMENT_VALUE_GATE`를 판정한다. 먼저 `<누가> <어떤 실시품·공정>을 <제조·판매·사용>하면 <이 한정의 충족>을 <어떤 방법>으로 확인하고, 회피하려면 <무엇을 잃는다>`라는 권리행사 시나리오 한 줄을 원자료와 부모항 체인 문언만으로 쓰고, EV1 한정 실익·EV2 충족 확인·EV3 단일 실시 주체·EV4 회피 대가·EV5 독립 축을 근거 위치와 함께 기록한다. 시나리오를 쓸 수 없거나 EV 시험에 실패한 후보는 주된 트리에 넣지 않고 `FALLBACK_ONLY`로 내리거나 제외하며, 실패한 EV 항목을 적는다. EV2의 측정 조건이나 EV4의 대안 포섭 표현이 원자료에 있고 잠긴 계약 안의 선택이면 의미 한정 패키지에 넣고 다시 판정한다. 이 게이트에는 `13_판례_권리행사_작성기준.md`의 사례(측정 방법 미특정, 복수 주체 등)를 실패 유형 확인에만 쓰며, 원자료에 없는 측정법·구조·주체를 만들지 않는다.
+7c. `BUSINESS_CONTEXT`가 있으면 후보별 `business_fit`(HIGH·MEDIUM·LOW)과 그 입력의 위치를 `business_fit_basis`에 적는다. 입력에 근거가 없거나 `BUSINESS_CONTEXT: NONE`이면 `UNVERIFIED`로 두고, 주된 후보마다 사업 확인 질문 하나(예: `이 구성은 양산 사양에 들어갑니까?`, `경쟁 제품 중 이 구성을 쓰는 것이 있습니까?`)를 적는다. 시장·경쟁 정보를 추정하지 않고, `BUSINESS_CONTEXT`를 한정의 내용·기술 사실·효과의 근거로 쓰지 않는다. `business_fit`은 게이트가 아니며 분류나 다섯 게이트 값을 바꾸지 않는다.
 8. 선행기술이 제공된 경우에만 문헌별 개시, 차이점, 결합동기, 변경 용이성, 변경 저해 및 효과의 예측 가능성을 검토한다. 없으면 모든 신규성·진보성 판정을 `UNVERIFIED — PRIOR_ART_NOT_PROVIDED`로 둔다.
 9. `TECHNICAL_SOLUTION_CANDIDATE`만 주된 권리화 축에 배치한다. `FALLBACK_ONLY`는 사용자의 요청 또는 구체적인 보정·침해 입증 가치가 있을 때 별도 보조 축에 두며, 주된 기술기여 후보처럼 표현하지 않는다.
-9a. `TECHNICAL_SOLUTION_CANDIDATE`마다 `10_심사이력_경험기준.md`의 `exam_pattern`(REL_POSITION_COUPLING, SUBASSEMBLY_ACTION, CONDITIONAL_BRANCH, MODE_OPERATION, OPERATION_ORDER, PURPOSE_POSITION_MATERIAL, NUMERIC_WITH_REASON, NUMERIC_NO_REASON, SELECTION_MATERIAL, SELECTION_SHAPE, SELECTION_METHOD, SELECTION_INPUT_DATA, KNOWN_ITEM, OTHER)과 `design_change_risk`(LOW·MEDIUM·HIGH)를 붙이고, 분류의 원자료 근거 위치를 `exam_pattern_basis`에 적는다. 유형은 원자료의 문장으로만 정하며, 원자료가 두 구성의 결합 위치를 말하지 않으면 REL_POSITION_COUPLING으로 올리지 않는다. 이 분류는 순서 신호일 뿐 `CandidateClass`나 08의 세 게이트 값을 바꾸지 않는다. HIGH 후보도 인과사슬이 원자료로 닫히면 주된 트리에 남되, 같은 부모항 아래에서는 LOW → MEDIUM → HIGH 순서로 예정 항을 정하고 같은 위험도 안에서는 05의 권리화 축 순서를 따른다. NUMERIC_NO_REASON에는 `원자료에 범위 안팎 비교 없음 — 반복 실험 최적화로 넘어갈 위험`을 적는다. 선행기술이 봉인돼 있고 그 관계가 개시돼 있으면 그 사실이 위험도보다 우선한다. `authoring_scope: EXISTING_SET_EDIT`이면 번호·인용관계를 바꾸지 않으므로 분류는 보고서에만 남긴다.
-10. 후보별 세 필수 기술기여 게이트가 PASS한 뒤 `05_종속항_전개패턴_가이드.md`를 적용한다. 필요한 선행 용어와 전제관계를 기준으로 가장 넓은 적정 부모항을 정하고, 문언이 아닌 후보 ID와 의미 한정 패키지로 종속항 전략 트리를 만든다.
+9a. `TECHNICAL_SOLUTION_CANDIDATE`마다 `10_심사이력_경험기준.md`의 `exam_pattern`(REL_POSITION_COUPLING, SUBASSEMBLY_ACTION, CONDITIONAL_BRANCH, MODE_OPERATION, OPERATION_ORDER, PURPOSE_POSITION_MATERIAL, NUMERIC_WITH_REASON, NUMERIC_NO_REASON, SELECTION_MATERIAL, SELECTION_SHAPE, SELECTION_METHOD, SELECTION_INPUT_DATA, KNOWN_ITEM, OTHER)과 `design_change_risk`(LOW·MEDIUM·HIGH)를 붙이고, 분류의 원자료 근거 위치를 `exam_pattern_basis`에 적는다. 유형은 원자료의 문장으로만 정하며, 원자료가 두 구성의 결합 위치를 말하지 않으면 REL_POSITION_COUPLING으로 올리지 않는다. 이 분류는 순서 신호일 뿐 `CandidateClass`나 08의 세 게이트 값을 바꾸지 않는다. HIGH 후보도 인과사슬이 원자료로 닫히면 주된 트리에 남되, 같은 부모항 아래에서는 LOW → MEDIUM → HIGH 순서로 예정 항을 정하고 같은 위험도 안에서는 05의 권리화 축 순서를 따른다. `business_fit`이 HIGH·MEDIUM·LOW로 기록된 후보가 있으면 같은 부모항 아래에서 그 순서를 위험도보다 먼저 적용하고, `UNVERIFIED` 후보는 이 키로 앞뒤를 정하지 않는다. NUMERIC_NO_REASON에는 `원자료에 범위 안팎 비교 없음 — 반복 실험 최적화로 넘어갈 위험`을 적는다. 선행기술이 봉인돼 있고 그 관계가 개시돼 있으면 그 사실이 위험도보다 우선한다. `authoring_scope: EXISTING_SET_EDIT`이면 번호·인용관계를 바꾸지 않으므로 분류는 보고서에만 남긴다.
+10. 후보별 세 필수 기술기여 게이트와 `ENFORCEMENT_VALUE_GATE`가 PASS한 뒤 `05_종속항_전개패턴_가이드.md`를 적용한다. 필요한 선행 용어와 전제관계를 기준으로 가장 넓은 적정 부모항을 정하고, 문언이 아닌 후보 ID와 의미 한정 패키지로 종속항 전략 트리를 만든다.
 11. 후보를 청구하려면 루트 독립항의 주골격·계층·최소충분 한정·기술 개념을 바꿔야 하는 경우 종속항으로 강행하지 않고 `RETURN_TO_ARCHITECT`로 중지한다.
-12. `08_종속항_기술기여_게이트.md`의 모든 필수 게이트를 판정한다. 주된 트리에 `DRAWING_ONLY`, 해결되지 않은 `UNVERIFIED` 또는 인과사슬이 닫히지 않은 후보가 남거나 `TECHNICAL_SOLUTION_CANDIDATE`가 하나도 없으면 `DEPENDENT_DESIGN_GATE`를 잠그지 않는다. 후보가 없다는 이유로 형상 항을 채워 넣지 않고 `UNLOCKED — NO_TECHNICAL_SOLUTION_CANDIDATE`로 반환한다.
+12. `08_종속항_기술기여_게이트.md`의 모든 필수 게이트를 판정한다. 주된 트리에 `DRAWING_ONLY`, 해결되지 않은 `UNVERIFIED`, 인과사슬이 닫히지 않은 후보 또는 `ENFORCEMENT_VALUE_GATE`가 PASS가 아닌 후보가 남거나 `TECHNICAL_SOLUTION_CANDIDATE`가 하나도 없으면 `DEPENDENT_DESIGN_GATE`를 잠그지 않는다. 후보가 없다는 이유로 형상 항을 채워 넣지 않고 `UNLOCKED — NO_TECHNICAL_SOLUTION_CANDIDATE`로 반환한다.
 
 ## 판정 원칙
 
@@ -66,6 +69,7 @@ color: cyan
 - 원자료에 없는 과제·효과를 상식 또는 도면 인상으로 보충하지 않는다.
 - 독립항과 부가한정의 전체 조합을 평가하며, 부가한정 하나만 떼어 진보성을 단정하지 않는다.
 - `DRAWING_ONLY`를 후보 수를 채우기 위해 `FALLBACK_ONLY`로 완화하지 않는다.
+- 요청 항 수를 채우려고 `ENFORCEMENT_VALUE_GATE`가 PASS가 아닌 후보를 주된 트리에 넣지 않는다. 종속항 수가 줄어드는 것은 정상 결과다.
 - 요청 패킷의 종속항 목표 범위(`dependent_target_claim_nos`)에 번호가 지정되면 `candidates[].planned_claim_no`는 그 번호 집합과 정확히 일치해야 한다. 임의 발번·범위 확대·누락은 계약 위반이다. 해당 번호로 낼 기술기여 후보가 없으면 후보를 만들지 말고 `status: REVIEW`로 사유를 보고한다.
 - USER_LOCK은 수정 권한을 제한하지만 기술기여 결함을 PASS로 바꾸지 않는다.
 - 뒤 단계(success·syntax·OA·역구성)에서 결함이 될 수 있는 위험을 찾으면 자기 권한 안에서 닫거나, 닫을 수 없으면 PASS 대신 해당 되돌림 또는 REVIEW로 판정한다. `<뒤 단계>가 확인해야 한다`는 인계만으로 PASS를 내지 않는다. `비게이팅 잔존 위험`에는 자기 권한으로 닫을 수 없는 것(선행기술·정식 명세서 미제공에 따른 UNVERIFIED, 발명자 확인 질문, 잠긴 계약·USER_LOCK·부모항 체인이 정한 사항)만 남기고, 항목마다 닫을 수 없는 이유와 그 계약 위치를 적는다. 설계 계약에 `<뒤 단계>가 확인` 형태의 미결 위험을 남기지 않는다. 그 위험이 문언 선택(선행기재·복수 도입·주어 구조 등)에 달려 있으면 계약에서 선택을 정하고, 정할 수 없으면 UNLOCKED 또는 REVIEW로 낸다.
@@ -90,8 +94,9 @@ color: cyan
 - 원자료 집합
 - PRIOR_ART_SET: 정확한 경로 목록 / NONE
 - USER_LOCK 보존 결과
-- 후보별 필수 인과기록표: `후보 ID / 원자료 근거 / 부모항 전체 조합 / 과제 / 추가 기술특징 / 작동·협동 원리 / 효과 / 인과사슬 / 청구 가능 의미 한정 패키지 / 선행기술 대비 / 회피설계·보정 가치 / 분류`
-- 후보별 게이트표: `DEPENDENT_SOURCE_GATE / CAUSAL_CONTRIBUTION_GATE / CLAIMABILITY_GATE / PRIOR_ART_CONTRIBUTION_GATE`
+- 후보별 필수 인과기록표: `후보 ID / 원자료 근거 / 부모항 전체 조합 / 과제 / 추가 기술특징 / 작동·협동 원리 / 효과 / 인과사슬 / 청구 가능 의미 한정 패키지 / 선행기술 대비 / 분류`
+- 후보별 게이트표: `DEPENDENT_SOURCE_GATE / CAUSAL_CONTRIBUTION_GATE / CLAIMABILITY_GATE / ENFORCEMENT_VALUE_GATE / PRIOR_ART_CONTRIBUTION_GATE`
+- 후보별 권리행사 기록: `후보 ID / 권리행사 시나리오 / EV1 한정 실익 / EV2 충족 확인 / EV3 단일 실시 주체 / EV4 회피 대가 / EV5 독립 축 / business_fit / business_fit_basis 또는 사업 확인 질문`
 - 후보별 심사 경험 순위 신호: `후보 ID / exam_pattern / design_change_risk / 분류 근거 위치` (10_심사이력_경험기준; 게이트 아님)
 - 후보별 형상·공간 객체 계약: `후보 ID / 실제 물체·면 / 관찰 단면·기준 / 단면에 나타나는 대상 / 형상 술어의 귀속 주체 / 방향·개방 대상 / 원자료 근거`; 해당 없으면 `해당 없음`
 - TECHNICAL_SOLUTION_CANDIDATE 목록

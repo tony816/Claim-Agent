@@ -39,6 +39,9 @@ class RunRequest(BaseModel):
     # EXISTING_SET_EDIT rewrites only the dependent claims in dependent_target inside the numbered set in claim_file;
     # the rest of that set is a read-only baseline. NEW_INDEPENDENT / NEW_DEPENDENT_SET (or None) keep the authoring paths.
     authoring_scope: str | None = None
+    # 08 §1.5·5.4: optional user business input (own product spec, competitor products, target implementers, roadmap).
+    # It only ranks dependent candidates (BUSINESS_FIT); it is never invention material or a gate.
+    business_context: str | None = None
 
     @classmethod
     def from_yaml(cls, path: Path) -> RunRequest:
@@ -46,13 +49,16 @@ class RunRequest(BaseModel):
         base = path.parent
         for key in ("invention_sources", "drawings", "prior_art"):
             data[key] = [str((base / p).resolve()) if not Path(p).is_absolute() else p for p in data.get(key, []) or []]
-        for key in ("spec_path", "claim_file", "user_lock_file"):
+        for key in ("spec_path", "claim_file", "user_lock_file", "business_context_file"):
             v = data.get(key)
             if v and not Path(v).is_absolute():
                 data[key] = str((base / v).resolve())
         ulf = data.pop("user_lock_file", None)
         if ulf and not data.get("user_lock"):
             data["user_lock"] = Path(ulf).read_text(encoding="utf-8").strip()
+        bcf = data.pop("business_context_file", None)
+        if bcf and not data.get("business_context"):
+            data["business_context"] = Path(bcf).read_text(encoding="utf-8").strip()
         rf = data.pop("request_file", None)
         if rf and not data.get("request_text"):
             p = Path(rf) if Path(rf).is_absolute() else base / rf

@@ -113,11 +113,29 @@ def _picture(env: RoleEnvelope, mode: RequestMode) -> bool:
     )
 
 
+_DEP_CANDIDATE_GATES = ("DEPENDENT_SOURCE_GATE", "CAUSAL_CONTRIBUTION_GATE", "CLAIMABILITY_GATE", "ENFORCEMENT_VALUE_GATE")
+
+
+def main_tree_gate_gaps(env: RoleEnvelope) -> list[str]:
+    """08 §5.6: every TECHNICAL_SOLUTION_CANDIDATE in the main tree needs the four candidate gates at PASS and a scenario."""
+    gaps = []
+    for c in env.candidates:
+        if c.classification != CandidateClass.TECHNICAL_SOLUTION_CANDIDATE:
+            continue
+        bad = [g for g in _DEP_CANDIDATE_GATES if getattr(c, g) != GateValue.PASS]
+        if not (c.enforcement_scenario or "").strip():
+            bad.append("enforcement_scenario")
+        if bad:
+            gaps.append(f"{c.dc_id}: {', '.join(bad)}")
+    return gaps
+
+
 def _dep_architect(env: RoleEnvelope, mode: RequestMode) -> bool:
     return (
         env.status == Status.PASS
         and _g(env, "DEPENDENT_DESIGN_GATE", {GateValue.LOCKED})
         and any(c.classification == CandidateClass.TECHNICAL_SOLUTION_CANDIDATE for c in env.candidates)
+        and not main_tree_gate_gaps(env)
     )
 
 

@@ -175,6 +175,17 @@ def test_dependent_no_tsc_halts_without_padding(rt, request_dep):
     assert not [c for c in engine.provider.calls if c.role == "claim-drafter" and c.scope == "DEPENDENT_SET"]
 
 
+def test_dependent_main_tree_without_enforcement_value_halts(rt, request_dep):
+    script = R.happy_script(dependent=True)
+    script["dependent-claim-strategy-architect"] = [R.dep_architect(enforcement="BLOCK")]
+    engine = _engine(rt, script)
+    state = engine.run(engine.start(request_dep, "run-test-10b"))
+    assert state.outcome == "HALTED_REVIEW" and state.halt.stage == "DEP_ARCHITECT"
+    assert state.halt.message.startswith("MAIN_TREE_GATE_GAP")
+    assert "ENFORCEMENT_VALUE_GATE" in state.halt.message and "enforcement_scenario" in state.halt.message
+    assert not [c for c in engine.provider.calls if c.role == "claim-drafter" and c.scope == "DEPENDENT_SET"]
+
+
 def test_oa_merged_verdict_is_rejected(rt, request_indep):
     script = R.happy_script(dependent=False)
     script["oa-strategy-reviewer"] = [R.oa(merged=True), R.oa(merged=True)]
