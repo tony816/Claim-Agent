@@ -256,7 +256,7 @@ def build_server(service: ClaimAgentService, public_url: str, passphrase: str, s
     async def claim_send(conversation_id: str, text: str, attachment_ids: list[str] | None = None, target_mode: str | None = None,
                          target_claim: int | None = None, target_segments: str | None = None, prior_search: bool = False) -> dict:
         """요청 한 턴을 시작한다. 요청은 자동 분류되어 일반 답변·청구항 작성·검토 파이프라인으로 간다.
-        target_mode(independent | single | range)는 작성 대상 힌트다: single은 target_claim(항 번호), range는 target_segments('2~4,6').
+        target_mode(auto | independent | single | range)는 작성 대상 힌트다(생략·auto는 미지정): single은 target_claim(항 번호), range는 target_segments('2~4,6').
         prior_search=true이면 새 작성 run이 설계 전에 WIPS 선행기술 검색·Jev 선별·사전 심사를 한다(검색 집합 기준, 전수 조사 아님).
         반환된 message_id로 claim_status를 wait_seconds=120으로 호출해 결과를 기다린다."""
         return await call(service.send, conversation_id, text, attachment_ids, target_mode, target_claim, target_segments, prior_search)

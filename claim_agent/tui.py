@@ -345,6 +345,7 @@ class ClaimAgentApp(App):
             self.query_one("#result", TextArea).load_text("새 대화를 시작합니다.")
             self.query_one("#request", Composer).clear()
             self.query_one("#material", Composer).clear()
+            self.query_one("#dependent", Checkbox).value = False          # 작성 대상은 미지정으로 되돌린다
             self.attachments.clear()
             self.refresh_attachments()
             self.log_text = ""
@@ -357,7 +358,7 @@ class ClaimAgentApp(App):
     def claim_hints(self) -> dict:
         """The 종속항 checkbox as a router hint; the router still decides from the request whether claims are written."""
         if not self.query_one("#dependent", Checkbox).value:
-            return dict(dependent=False, target="", target_mode="independent")
+            return dict(dependent=False, target="", target_mode="auto")
         target = self.query_one("#dep-target", Input).value.strip()
         if not parse_target(target):
             raise ValueError("종속항 범위를 2~8, 3, 5처럼 적어 주세요.")

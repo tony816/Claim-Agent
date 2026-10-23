@@ -83,6 +83,8 @@ ui_hints에 작성 대상이 골라져 있어도 의견만 질문하면 REVIEW_O
   REVIEW_ONLY/META/CHAT은 dependent=false, dependent_target=null이다. 1항만 묻는데 첨부에 2~8항이
   있거나 ui_hints.dependent가 true라는 이유로 종속항 작성을 추가하지 않는다.
   작성 요청에 별도 범위 제한이 없을 때만 ui_hints의 종속항 옵션을 작성 범위 보조 정보로 사용한다.
+  ui_hints.target_mode가 auto이면 화면에서 작성 대상을 고르지 않았으므로 요청 문장과 자료만으로 범위를 정한다.
+  independent이면 사용자가 독립항만 골랐으므로 문장에 항 번호가 없으면 종속항 작성을 추가하지 않는다.
   ui_hints.target_mode가 single이면 사용자가 화면에서 항 하나(ui_hints.target)만 골랐고, range면 그 범위만 골랐다는 뜻이다.
   요청 문장에 항 번호가 없으면 그 선택을 dependent_target으로 쓰고, 문장의 항 번호가 있으면 문장이 우선한다.
 - 이전 작업(existing_claims 블록)이 있는 후속 수정 요청이면 revision_kind를 고른다. 조사·띄어쓰기·문장부호·범위가 같은 표면

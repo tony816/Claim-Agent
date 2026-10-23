@@ -409,7 +409,7 @@ def test_composer_claim_target_reaches_ui_hints_and_message(workspace, monkeypat
     workspace.start(sid, {"text": "안녕", "dependent": False, "target": "2~8"})      # legacy composer payload
     wait_for(lambda: len(commands) == 3)
     req = json.loads(Path(commands[2][commands[2].index("--request") + 1]).read_text(encoding="utf-8"))
-    assert req["ui_hints"] == dict(dependent=False, target="", target_mode="independent", prior_search=False)
+    assert req["ui_hints"] == dict(dependent=False, target="", target_mode="auto", prior_search=False)
     with pytest.raises(ValueError, match="2항 이상"):
         workspace.start(sid, {"text": "청구항 작성", "target_mode": "range", "target_segments": [{"from": 1, "to": 3}]})
     assert len(workspace.sessions[sid]["messages"]) == 6

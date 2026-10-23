@@ -60,7 +60,7 @@ class ClaimAgentService:
 
     def send(self, conversation_id: str, text: str, attachment_ids: list[str] | None = None, target_mode: str | None = None,
              target_claim: int | None = None, target_segments: str | None = None, prior_search: bool = False) -> dict:
-        """Start one turn. `target_mode` (independent | single | range) is the composer's 작성 대상, a hint the router
+        """Start one turn. `target_mode` (auto | independent | single | range) is the composer's 작성 대상, a hint the router
         and the scope guard use; without it the request is classified from the text alone. `prior_search` runs the WIPS
         search, Jev screening and pre-exam before the design of a new authoring run."""
         data: dict = dict(text=text, files=list(attachment_ids or []), prior_search=bool(prior_search))

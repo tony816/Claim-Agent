@@ -151,7 +151,7 @@ def test_headless_claim_request_runs_through_chat(project_root, tmp_path, monkey
                 while app.running:
                     await asyncio.sleep(0.1)
             await pilot.pause()
-            assert requests[0]["ui_hints"] == dict(dependent=False, target="", target_mode="independent")
+            assert requests[0]["ui_hints"] == dict(dependent=False, target="", target_mode="auto")
             assert app.current_state()["outcome"] == "DRAFT_CLAIM_LOCK", notes
             assert app.last_pipeline_run and app.result_text and app.query_one("#result", TextArea).text == app.result_text
             assert not app.query_one("#copy", Button).disabled
@@ -165,7 +165,7 @@ def test_dependent_checkbox_is_a_router_hint(tmp_path):
     async def scenario():
         app = ClaimAgentApp(tmp_path)
         async with app.run_test(size=(130, 45)):
-            assert app.claim_hints() == dict(dependent=False, target="", target_mode="independent")
+            assert app.claim_hints() == dict(dependent=False, target="", target_mode="auto")
             app.query_one("#dependent", Checkbox).value = True
             app.query_one("#dep-target", Input).value = "2~4"
             assert app.claim_hints() == dict(dependent=True, target="2~4", target_mode="range")
