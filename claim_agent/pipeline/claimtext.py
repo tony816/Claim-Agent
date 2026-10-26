@@ -296,6 +296,48 @@ def numbered_claims(text: str) -> dict[int, Claim]:
     return out
 
 
+_ANY_HEAD = re.compile(r"【\s*청구항\s*(\d*)\s*】")
+
+
+def claim_slots(text: str) -> list[tuple[int | None, str]]:
+    """Every claim of a document in order as (number, body); the number is None where the header was left blank."""
+    text = normalize_headers(text)[0]
+    heads = list(_ANY_HEAD.finditer(text))
+    return [(int(m.group(1)) if m.group(1) else None, text[m.end():heads[i + 1].start() if i + 1 < len(heads) else len(text)].strip())
+            for i, m in enumerate(heads)]
+
+
+def _blank_citation(body: str) -> bool:
+    """'제항에 있어서': a dependent preamble whose cited number was left blank."""
+    head = body[:_PREAMBLE_WINDOW]
+    cut = head.find("있어서")
+    return cut >= 0 and bool(re.search(r"제\s*항", head[:cut]))
+
+
+def _gist(body: str) -> str:
+    cut = body.find("있어서")
+    rest = " ".join((body[cut + 3:].lstrip(" ,\n") if 0 <= cut < _PREAMBLE_WINDOW else body).split())
+    return rest[:24] + ("…" if len(rest) > 24 else "")
+
+
+def numbering_blanks(text: str) -> list[str]:
+    """Where a claim set leaves a number blank (【청구항 】 headers, 제항 citations), one line per claim by its place.
+
+    The user then counts claims by place, but no parent chain can be told until the numbers are filled in.
+    """
+    out = []
+    for place, (no, body) in enumerate(claim_slots(text), 1):
+        missing = (["항 번호(【청구항 】)"] if no is None else []) + (["인용항 번호(제항)"] if _blank_citation(body) else [])
+        if missing:
+            out.append(f"{f'제{no}항' if no else f'{place}번째 항'}({_gist(body)}): {'와 '.join(missing)}가 비어 있음")
+    return out
+
+
+def unfinished(body: str) -> bool:
+    """A claim cut off mid-sentence ('…을 포함하고,'), with no closing subject."""
+    return body.rstrip().endswith((",", ";"))
+
+
 def parent_chain_text(chain: list[Claim]) -> str:
     return "\n\n".join(c.text for c in chain)
 
@@ -306,6 +348,15 @@ def contains_user_lock(claim_text: str, user_lock: str | None) -> bool:
         return True
     norm = lambda s: re.sub(r"\s+", " ", s).strip()  # noqa: E731
     return norm(user_lock) in norm(claim_text)
+
+
+def user_lock_kept(claim_text: str, user_lock: str | None, released: set[int]) -> bool:
+    """contains_user_lock for an edit of the user's set: the USER_LOCK claims the request names for editing are released
+    (the request is their explicit re-approval), and every other USER_LOCK claim must survive verbatim."""
+    locked = numbered_claims(user_lock or "")
+    if not released or not locked:
+        return contains_user_lock(claim_text, user_lock)
+    return all(contains_user_lock(claim_text, c.text) for n, c in locked.items() if n not in released)
 
 
 def claim_set_text(claims: list[Claim]) -> str:

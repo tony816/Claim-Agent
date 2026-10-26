@@ -65,12 +65,12 @@ def edit_script(**override):
     return script
 
 
-def _conversation(tmp_path, request_indep, name, text=INCIDENT_TEXT, previous=None, instructions="미완성된 9항 작성하기.\n\n" + BASELINE):
+def _conversation(tmp_path, request_indep, name, text=INCIDENT_TEXT, previous=None, instructions="미완성된 9항 작성하기.\n\n" + BASELINE, user_lock=""):
     folder = tmp_path / name
     folder.mkdir()
     # A follow-up attaches nothing new: the previous run's materials come back through intake(previous).
     files = [] if previous else list(request_indep.invention_sources)
-    request = dict(text=text, files=files, history=[], instructions=instructions)
+    request = dict(text=text, files=files, history=[], instructions=instructions, user_lock=user_lock)
     blocks, paths = intake(request, folder, previous)
     return request, blocks, paths, folder
 
@@ -299,3 +299,109 @@ def test_eval_cases_hold_on_a_clean_scripted_run(rt, case_id, edit_roles):
     tokens, calls = summarize(state, read_telemetry(rt.store.telemetry_path(state.run_id)))
     checks = evaluate(state, case.expected, edited_set_text(state), tokens, calls)
     assert checks and all(c["ok"] for c in checks), [c for c in checks if not c["ok"]]
+
+
+# Run web-c9131a10ecba461e89c443ab5f09b0a4: the set sat in the project USER_LOCK, which neither the router nor the set
+# finder read. The request became a new dependent set, the independent architect ran on it and stopped (2.5 min, 127k
+# tokens) asking which claims '4·5·6항' were. The set also had blank numbers and a parent claim cut off mid-sentence.
+LID_LOCK = """【청구항 1】
+반응 용기가 안착되는 안착부;
+상기 안착부의 상부에 위치하는 리드 지지부;
+상기 리드 지지부에 착탈 가능하게 결합되는 히트리드 모듈을 포함하는 핵산 증폭 장치.
+
+【청구항 2】
+제1항에 있어서,
+상기 히트리드 모듈에 포고 핀이 포함되는 핵산 증폭 장치.
+
+【청구항 3】
+제1항에 있어서,
+상기 제2 전력 전달부는,
+포고 핀; 및
+상기 포고 핀이 수용되는 수형 하우징;
+을 포함하고,
+
+【청구항 4】
+제3항에 있어서,
+상기 제1 전력 전달부는 상기 수형 하우징이 수용되는 수용부가 마련되는 암형 하우징을 포함하는 핵산 증폭 장치.
+
+【청구항 】
+제1항에 있어서,
+상기 리드 지지부는, 바디와, 상기 바디로부터 돌출되는 복수의 돌출부를 포함하는 핵산 증폭 장치.
+
+【청구항 】
+제항에 있어서,
+상기 복수의 돌출부는, 서로 인접하는 상기 히트리드 모듈들 사이에 개재되는 핵산 증폭 장치."""
+LID_REQUEST = "4항,5항,6항이 첨부 이미지를 온전하게 설명하도록 하고, 바닥부는 그 배치된 위치 구조와 같은 것이 더 구체화될 필요가 있어보임"
+
+
+def test_a_set_kept_in_the_project_user_lock_is_edited_in_place_with_only_the_named_claim_released(rt, request_indep, tmp_path, edit_roles):
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "lock", instructions="", user_lock=BASELINE)
+    route = _route(blocks)
+    provider = ScriptedProvider(edit_script())
+    result = run_pipeline(rt, provider, request, route, blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
+    assert route.authoring_scope == "EXISTING_SET_EDIT" and "claim-architect" not in [c.role for c in provider.calls]
+    assert state.baseline_set.user_lock_released == [9] and state.request["user_lock"] == BASELINE.strip()
+    assert Path(state.baseline_set.source_path).name.startswith("project-user-lock-")
+    design = next(c for c in provider.calls if c.role == "dependent-claim-strategy-architect")
+    assert "USER_LOCK 해제: 제9항" in design.packet_text
+    full = edited_set_text(state)
+    assert EDITED_9 in full and all(c.text in full for c in parse_claim_set(BASELINE)[:8])
+    assert any("USER_LOCK 중 제9항은 이번 요청이 편집 대상으로 지정해 잠금 해제" in n for n in state.notes)
+
+
+def test_an_edit_that_changes_a_user_lock_claim_it_did_not_name_is_still_blocked():
+    from claim_agent.pipeline.claimtext import user_lock_kept
+
+    full = BASELINE.replace(parse_claim_set(BASELINE)[8].text, EDITED_9)
+    assert user_lock_kept(full, BASELINE, {9}) and not user_lock_kept(full, BASELINE, set())
+    assert not user_lock_kept(full.replace("조임 나사", "조임 볼트"), BASELINE, {9})
+    assert user_lock_kept(full, "책상 가장자리에 걸리는 클램프부", {9})          # a phrase lock is never released by a claim number
+
+
+def test_a_user_lock_set_with_blank_numbers_stops_before_any_call_and_says_what_to_fill(rt, request_indep, tmp_path):
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "blank", text=LID_REQUEST, instructions="", user_lock=LID_LOCK)
+    route = _route(blocks, target="4,5,6")
+    provider = ScriptedProvider({})
+    result = run_pipeline(rt, provider, request, route, blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert route.authoring_scope == "EXISTING_SET_EDIT" and provider.calls == []
+    assert state.halt.reason_code == "BASELINE_SET_UNNUMBERED" and "프로젝트 USER_LOCK 확정 문언" in state.halt.message
+    assert [i["text"] for i in state.halt.open_issues] == [
+        "5번째 항(상기 리드 지지부는, 바디와, 상기 바디로부…): 항 번호(【청구항 】)가 비어 있음",
+        "6번째 항(상기 복수의 돌출부는, 서로 인접하는 상기 …): 항 번호(【청구항 】)와 인용항 번호(제항)가 비어 있음",
+        "3번째 항: 종결부 없이 '…하우징; 을 포함하고,'로 끝남",
+    ]
+
+
+def test_a_numbered_set_whose_parent_claim_is_cut_off_stops_before_any_call(rt, request_indep, tmp_path):
+    numbered = LID_LOCK.replace("【청구항 】\n제1항", "【청구항 5】\n제1항").replace("【청구항 】\n제항", "【청구항 6】\n제5항")
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "unfinished", text=LID_REQUEST, instructions="", user_lock=numbered)
+    route = _route(blocks, target="4,5,6")
+    provider = ScriptedProvider({})
+    result = run_pipeline(rt, provider, request, route, blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert provider.calls == [] and state.halt.reason_code == "BASELINE_SET_UNFINISHED"
+    assert [i["text"][:4] for i in state.halt.open_issues] == ["제3항:"]
+
+
+def test_a_fixed_user_lock_sent_again_starts_a_new_run_on_the_fixed_set(rt, request_indep, tmp_path, edit_roles):
+    blank = BASELINE.replace("【청구항 9】", "【청구항 】")
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "before-fix", instructions="", user_lock=blank)
+    first = run_pipeline(rt, ScriptedProvider({}), request, _route(blocks), blocks, paths, folder)
+    previous = rt.store.load_state(first["run_id"])
+    assert previous.halt.reason_code == "BASELINE_SET_UNNUMBERED"
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "after-fix", previous=previous, instructions="", user_lock=BASELINE)
+    result = run_pipeline(rt, ScriptedProvider(edit_script()), request, _route(blocks), blocks, paths, folder, previous)
+    state = rt.store.load_state(result["run_id"])
+    assert result["revision_path"] == "new" and state.request["user_lock"] == BASELINE.strip()
+    assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
+
+
+def test_the_router_sees_the_project_user_lock(project_root):
+    from claim_agent.routing import classify_request
+
+    provider = ScriptedProvider({"request-router": [{"mode": "AUTHORING_DRAFT", "reason": "편집", "dependent": True, "dependent_target": "9"}]})
+    classify_request(provider, project_root, "test", "9항을 정리해줘", [], "lock-route", user_lock=BASELINE)
+    assert '"project_user_lock": "【청구항 1】' in provider.calls[0].packet_text

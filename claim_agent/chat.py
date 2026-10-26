@@ -101,7 +101,7 @@ def routed_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
     # Front of the moderator: it reads the intent (CLAUDE.md 대화 모더레이터), on its own model when it is on.
     role, model = moderator.router_model(cfg, request["model"])
     route = classify_request(provider, cfg.project_root, model, request["text"], blocks, folder.name,
-                             request.get("ui_hints"), request.get("instructions"), role)
+                             request.get("ui_hints"), request.get("instructions"), role, request.get("user_lock"))
     halted = bool((request.get("ui_hints") or {}).get("halted")) and previous is not None and previous.halt is not None
     if route.resumes_halt and not halted:
         route.resumes_halt = False                 # only a run that is actually waiting can take the message as its decision

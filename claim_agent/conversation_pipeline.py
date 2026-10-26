@@ -97,12 +97,12 @@ def resolve_edit_scope(route: RouteDecision, request: dict, blocks: list[dict], 
     """Set route.authoring_scope from the parsed input; returns (claim_file path, baseline digest) for EXISTING_SET_EDIT.
 
     An authoring request that names dependent claims (in its text or the composer pick, already narrowed onto
-    route.dependent_target) is an in-place edit when a user-provided numbered set — a pasted or attached block, or the
-    project instructions — holds every named claim as a dependent claim. The work then stays inside that set: no new
-    independent claim, no renumbering. A previous run's own dependent set keeps the ordinary follow-up path, because
-    those claims are this harness's output, not a set the user supplied.
+    route.dependent_target) is an in-place edit when a user-provided numbered set — a pasted or attached block, the
+    project instructions or the project USER_LOCK — holds every named claim as a dependent claim. The work then stays
+    inside that set: no new independent claim, no renumbering. A previous run's own dependent set keeps the ordinary
+    follow-up path, because those claims are this harness's output, not a set the user supplied.
     """
-    from .pipeline.claimtext import baseline_digest
+    from .pipeline.claimtext import ClaimParseError, baseline_digest, exact_sha256
 
     targets = parse_target(route.dependent_target) if route.dependent else None
     route.authoring_scope, route.edit_targets = ("NEW_DEPENDENT_SET" if route.dependent else "NEW_INDEPENDENT"), []
@@ -113,12 +113,24 @@ def resolve_edit_scope(route: RouteDecision, request: dict, blocks: list[dict], 
         return None
     # User blocks include the project instructions (intake turns them into a material block), so a set kept there is found.
     ordered = sorted(reversed(blocks), key=lambda b: b["id"] != route.claim_source_id)   # the router's pick first, then newest
-    found = find_existing_set(targets, [(b["id"], b["text"]) for b in ordered if b["origin"] == "user"])
+    sources = [(b["id"], b["text"]) for b in ordered if b["origin"] == "user"]
+    # A set kept in the project USER_LOCK is the user's too. It is no material block (USER_LOCK travels on its own), so
+    # it is searched last and written out as the edit's claim file.
+    lock = str(request.get("user_lock") or "").strip()
+    found = find_existing_set(targets, sources + ([("user_lock", lock)] if lock else []))
     if not found:
         return None
     source_id, text = found
     route.authoring_scope, route.edit_targets = "EXISTING_SET_EDIT", sorted(targets)
-    return next(b["path"] for b in blocks if b["id"] == source_id), baseline_digest(text)
+    try:
+        digest = baseline_digest(text)
+    except ClaimParseError:
+        digest = exact_sha256(text)        # every number blank: the engine stops on the blanks before any call
+    if source_id == "user_lock":
+        path = folder / "intake" / f"project-user-lock-{hashlib.sha256(text.encode('utf-8')).hexdigest()[:12]}.txt"
+        path.write_text(text, encoding="utf-8", newline="")
+        return str(path), digest
+    return next(b["path"] for b in blocks if b["id"] == source_id), digest
 
 
 def revision_path(route: RouteDecision, request: dict, blocks: list[dict], paths: dict, previous,
@@ -243,10 +255,11 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
     if source is None and previous and authoring:
         source = next((b for b in blocks if b["category"] == "existing_claims"), None)
     text = effective_request_text(request, with_previous_answer=authoring)
+    current_lock = str(request.get("user_lock") or "").strip() or None
     req = RunRequest(
         request_mode=route.mode, request_text=text,
         candidate_id=previous.candidate.candidate_id if previous else "cand-01",
-        user_lock=previous.request.get("user_lock") if previous else (str(request.get("user_lock") or "").strip() or None),
+        user_lock=previous.request.get("user_lock") if previous else current_lock,
         dependent=route.dependent if route.mode != "REVIEW_ONLY" else False,
         dependent_target=route.dependent_target if route.mode != "REVIEW_ONLY" else None,
         dependent_set_id=previous.request.get("dependent_set_id") if previous else None,
@@ -266,7 +279,9 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
         kind, scope = revision_path(route, request, blocks, paths, previous, baseline[1] if baseline else None)
         applied = kind + (f"/{scope}" if scope else "")
         if kind == "new":
-            state = engine.run(engine.start(req, folder.name))
+            # A new run takes the project USER_LOCK as it is now (the user may have just fixed the set kept there);
+            # a resumed run keeps the one its records were built on.
+            state = engine.run(engine.start(req.model_copy(update={"user_lock": current_lock}), folder.name))
         elif kind == "restart":
             state = engine.resume(previous.run_id, Decision(text=text, restart_from="ARCHITECT", request_update=req, feedback_text=request["text"]))
         elif kind == "redesign":

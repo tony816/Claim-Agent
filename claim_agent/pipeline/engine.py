@@ -45,13 +45,17 @@ from .claimtext import (
     as_claim_set,
     baseline_digest,
     claim_set_text,
+    claim_slots,
     contains_user_lock,
     exact_sha256,
     numbered_claims,
+    numbering_blanks,
     ordered_claims,
     parent_chain,
     parent_chain_text,
     parse_claim_set,
+    unfinished,
+    user_lock_kept,
     validate_parent_refs,
 )
 from .corpus_tool import ToolLog, make_tools
@@ -203,6 +207,17 @@ class PipelineEngine(PriorArtSteps):
             halt("EDIT_SCOPE_DRAFT_ONLY", "기존 청구항 세트 편집(EXISTING_SET_EDIT)은 AUTHORING_DRAFT에서만 실행합니다. "
                                           "부모항 체인이 이번 run에서 검증되지 않아 FINAL LOCK의 근거가 될 수 없습니다.")
         text = bundle.claim_file_text() or ""
+        lock = (req.user_lock or "").replace("\r\n", "\n").strip()
+        origin = "프로젝트 USER_LOCK 확정 문언" if lock and text.replace("\r\n", "\n").strip() == lock else "제공된 청구항 세트"
+        targets = parse_target(req.dependent_target) or set()
+        named = ", ".join(f"제{n}항" for n in sorted(targets))
+        blanks = numbering_blanks(text)
+        if blanks:
+            # Parsed as is, a blank header would fold the claims after it into the claim before it.
+            loose = [f"{place}번째 항: 종결부 없이 '…{' '.join(body.split())[-12:]}'로 끝남" for place, (_, body) in enumerate(claim_slots(text), 1)
+                     if place not in targets and unfinished(body)]
+            halt("BASELINE_SET_UNNUMBERED", f"편집할 기존 청구항 세트({origin})에 비어 있는 번호가 있어 {named}과 그 부모항 체인을 정할 수 없습니다. "
+                                            "번호를 채워 세트를 고친 뒤 같은 요청을 다시 보내 주세요. 번호가 없는 항은 세트 안의 순서로 표시합니다.", blanks + loose)
         try:
             claims = parse_claim_set(text)
         except ClaimParseError as exc:
@@ -210,7 +225,6 @@ class PipelineEngine(PriorArtSteps):
         problems = validate_parent_refs(claims)
         if problems:
             halt("BASELINE_SET_INVALID", "기존 청구항 세트의 번호·인용관계가 올바르지 않아 편집 대상의 부모항 체인을 정할 수 없습니다.", problems)
-        targets = parse_target(req.dependent_target) or set()
         by_no = {c.claim_no: c for c in claims}
         new = appended_nos(claims, targets)
         wrong = [f"제{n}항: 세트에 없음" for n in sorted(targets) if n not in by_no and n not in new]
@@ -223,19 +237,27 @@ class PipelineEngine(PriorArtSteps):
         # A new claim's parent is chosen by the dependent design, so the whole set stays available as its chain.
         cited = set().union(*(ancestor_nos(claims, n) for n in targets - new)) | (set(by_no) if new else set())
         chain = sorted(cited - targets)
+        loose = [f"제{n}항: 종결부 없이 '…{' '.join(by_no[n].body.split())[-12:]}'로 끝남" for n in chain if unfinished(by_no[n].body)]
+        if loose:
+            halt("BASELINE_SET_UNFINISHED", f"{named}의 부모항이 끝맺어지지 않았습니다. 부모항은 이 편집에서 고치지 않으므로 {origin}에서 고친 뒤 "
+                                            "같은 요청을 다시 보내 주세요. 그 부모항까지 고치려면 그 항도 편집 대상으로 지정해 주세요.", loose)
+        # Naming a USER_LOCK claim for editing is its explicit re-approval; the other USER_LOCK claims stay locked.
+        released = sorted(targets & set(numbered_claims(lock)))
         ids = Identifiers(state.candidate.candidate_id, "r1", "N/A", input_revision=state.input_revision)
         rid = record_id("baseline_set", ids)
         state.baseline_set = BaselineSet(
             record_id=rid, source_path=req.claim_file or "", sha256=digest,
             claims=[BaselineClaim(claim_no=c.claim_no, parent_nos=c.parent_nos, text=c.text) for c in claims],
             edit_targets=sorted(targets), chain_nos=chain, chain_text=claim_set_text([by_no[n] for n in chain]),
+            user_lock_released=released,
         )
         record, md = build_baseline_record(state)
         self.store.write_record(state.run_id, rid, {**record, "report_markdown": md}, md)
         state.records[rid] = RecordRef(record_id=rid, kind="baseline_set", role="engine", scope=Scope.DEPENDENT_SET.value, stage="BASELINE",
                                        status="BASELINE", gates={}, text_sha256=digest, ids=ids.as_dict(), source_set_id=state.source_set_id)
-        state.notes.append(f"기존 청구항 세트 편집: {', '.join(f'제{n}항' for n in sorted(targets))}만 작성 — 부모항 체인 "
-                           f"{', '.join(f'제{n}항' for n in chain)}은 읽기 전용(BASELINE_SET {rid}, 미검증)")
+        state.notes.append(f"기존 청구항 세트 편집: {named}만 작성 — 부모항 체인 "
+                           f"{', '.join(f'제{n}항' for n in chain)}은 읽기 전용(BASELINE_SET {rid}, 미검증)"
+                           + (f"; USER_LOCK 중 {', '.join(f'제{n}항' for n in released)}은 이번 요청이 편집 대상으로 지정해 잠금 해제" if released else ""))
 
     def scope_guard(self, state: RunState, bundle: MaterialBundle) -> None:
         """Refuse a dependent-claim request that has no independent claim to hang it on — before any model call.
@@ -1174,7 +1196,15 @@ class PipelineEngine(PriorArtSteps):
             problems = validate_parent_refs(all_claims)
             if problems:
                 raise PipelineHalt(Halt(stage=st.value, role="engine", kind="BLOCK", reason_code="OTHER", message="인용관계 오류: " + "; ".join(problems), record_id=rid))
-            if not contains_user_lock(root_text + "\n" + set_text, bundle.user_lock):
+            lock_text, released = root_text + "\n" + set_text, set()
+            if state.baseline_set:
+                # An edit hands back the user's whole set with the targets replaced, so that is where USER_LOCK must hold.
+                base = state.baseline_set
+                edits = {cl.claim_no: cl.text for cl in all_claims if cl.claim_no in set_nos}
+                kept = {b.claim_no for b in base.claims}
+                lock_text = "\n\n".join([edits.get(b.claim_no, b.text) for b in base.claims] + [edits[n] for n in sorted(edits) if n not in kept])
+                released = set(base.user_lock_released)
+            if not user_lock_kept(lock_text, bundle.user_lock, released):
                 raise PipelineHalt(Halt(stage=st.value, role="engine", kind="BLOCK", reason_code="USER_LOCK_NOT_PRESERVED", message="USER_LOCK 문언 미보존", record_id=rid))
             dc_by_no = {cl.claim_no: cl.dc_id for cl in env.claims}
             cur.exact_text = set_text

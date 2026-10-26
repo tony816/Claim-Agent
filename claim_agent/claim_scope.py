@@ -136,10 +136,17 @@ def find_existing_set(targets: set[int], sources: list[tuple[str, str]]) -> tupl
     takes it as a new claim right after its end (제3항 added to a set of 1~2).
 
     The set must also contain an independent claim: a lone fragment ('제8항에 있어서, …') is not a set to edit in place.
+    A set with blank numbers (【청구항 】, 제항) is matched by place, as the user counts it; the engine then stops on the
+    blanks before any call instead of the request falling through to a new independent claim.
     """
-    from .pipeline.claimtext import ClaimParseError, appended_nos, parse_claim_set
+    from .pipeline.claimtext import ClaimParseError, appended_nos, claim_slots, numbering_blanks, parse_claim_set
 
     for source_id, text in sources:
+        if numbering_blanks(text):
+            slots = claim_slots(text)
+            if len(slots) > 1 and all(1 < n <= len(slots) for n in targets):
+                return source_id, text
+            continue
         try:
             claims = parse_claim_set(text)
         except ClaimParseError:

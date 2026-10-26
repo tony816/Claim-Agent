@@ -160,6 +160,7 @@ class BaselineSet(BaseModel):
     edit_targets: list[int]
     chain_nos: list[int]            # every claim the targets cite, directly or not (targets excluded), ascending; the whole set when a target is appended
     chain_text: str
+    user_lock_released: list[int] = Field(default_factory=list)   # USER_LOCK claims the request names for editing; the rest stay locked
 
 
 class Halt(BaseModel):

@@ -48,6 +48,10 @@ def _hdr(state: RunState, ids: Identifiers, record_id: str, extra: dict[str, str
     if state.baseline_set:
         lines.append(f"authoring_scope: EXISTING_SET_EDIT (루트 기준: BASELINE_SET {state.baseline_set.record_id} — LOCK 아님, 이번 run 미검증)")
         lines.append("edit_targets: " + ", ".join(f"제{n}항" for n in state.baseline_set.edit_targets))
+        if state.baseline_set.user_lock_released:
+            lines.append("USER_LOCK 해제: " + ", ".join(f"제{n}항" for n in state.baseline_set.user_lock_released)
+                         + " — 현재 요청이 편집 대상으로 지정한 항(명시적 재승인)이라 USER_LOCK 원문의 해당 항 문언은 보존 대상이 아니다. "
+                           "USER_LOCK의 나머지 항은 그대로 보존한다")
     for k, v in (extra or {}).items():
         lines.append(f"{k}: {v}")
     return "\n".join(lines) + "\n\n"
