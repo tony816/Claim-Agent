@@ -749,7 +749,7 @@ class Workspace:
         changes = proposal_outside_targets(base["claims"], base["edit_targets"], text) if base else []
         if not changes:
             return False
-        nos = ", ".join(f"제{n}항" for n in base["edit_targets"])
+        nos = ", ".join(f"제{n}항" for n in base["edit_targets"]) or "세트 끝에 붙일 새 종속항"
         lines = ["## 피드백 확인 — 파이프라인을 실행하지 않았습니다", "",
                  f"이 대화의 작업은 기존 청구항 세트에서 {nos}만 고치는 편집입니다. 다른 항과 인용관계는 읽기 전용이라, 붙여 넣은 문언의 "
                  f"아래 변경은 이 작업으로 반영할 수 없습니다. 그대로 실행하면 기존 세트를 기준으로 {nos}만 다시 작성되고 이 변경은 버려집니다.", ""]

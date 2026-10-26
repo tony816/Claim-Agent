@@ -47,7 +47,7 @@ def _hdr(state: RunState, ids: Identifiers, record_id: str, extra: dict[str, str
     ]
     if state.baseline_set:
         lines.append(f"authoring_scope: EXISTING_SET_EDIT (루트 기준: BASELINE_SET {state.baseline_set.record_id} — LOCK 아님, 이번 run 미검증)")
-        lines.append("edit_targets: " + ", ".join(f"제{n}항" for n in state.baseline_set.edit_targets))
+        lines.append("edit_targets: " + state.baseline_set.targets_label())
         if state.baseline_set.renumbered:
             lines.append("번호 재배열 (사용자 결정 — 요청 항을 새 항으로 끼움): " + renumber_line(state.baseline_set.renumbered)
                          + ". BASELINE_SET은 옮긴 번호 기준이며, USER_LOCK 원문의 옛 번호는 이 대응으로 읽는다")
@@ -242,7 +242,23 @@ def _root_label(state: RunState) -> tuple[str, str]:
     return "루트 독립항 LOCK 전문", "변경 없는 루트 독립항 전문"
 
 
+def _excluded_note(state: RunState) -> str:
+    base = state.baseline_set
+    if not base or not base.excluded:
+        return ""
+    return (" 부모항은 부모항 체인 전문에 있는 항(" + ", ".join(f"제{n}항" for n in base.chain_nos) + ")이나 그보다 앞의 새 항 "
+            "중에서만 고른다. " + ", ".join(f"제{n}항({why})" for n, why in sorted(base.excluded.items()))
+            + "은(는) 사용자가 아직 마무리하지 않은 항이라 부모항으로 쓰지 않으며, USER_LOCK에 있어도 그 선행 용어를 근거로 삼지 않는다.")
+
+
 def _number_contract(state: RunState, target_nos: set[int] | None) -> str:
+    base = state.baseline_set
+    if not target_nos and base and base.numbered_by_design:
+        last = max((c.claim_no for c in base.claims), default=0)
+        return (f" 요청에 항 번호가 없다. 기존 세트는 제{last}항에서 끝나므로 `TECHNICAL_SOLUTION_CANDIDATE`의 `planned_claim_no`는 제{last + 1}항부터 "
+                "빈 번호 없이 이어 매기고, 후보 수는 기술기여가 확인된 만큼만 둔다(항 수를 채우려고 후보를 넣지 않는다). `parent_claim_no`는 기존 세트의 항이나 "
+                "그보다 앞의 새 항 중에서 필요한 선행 용어를 가진 가장 넓은 항으로 정하고, 기존 항의 번호·문언·인용관계는 바꾸지 않으며 부모항을 흡수·병합하지 않는다."
+                + _excluded_note(state))
     if not target_nos:
         return ""
     nos = ", ".join(map(str, sorted(target_nos)))
@@ -258,10 +274,7 @@ def _number_contract(state: RunState, target_nos: set[int] | None) -> str:
         if new:
             text += (f" {', '.join(f'제{n}항' for n in new)}은(는) 기존 세트 끝에 새로 붙는 항이다. `parent_claim_no`는 기존 세트의 항 중에서 "
                      "필요한 선행 용어를 가진 가장 넓은 항으로 정하고, 기존 항의 번호·문언·인용관계는 바꾸지 않으며 부모항을 흡수·병합하지 않는다.")
-            if state.baseline_set.excluded:
-                text += (" 부모항은 부모항 체인 전문에 있는 항(" + ", ".join(f"제{n}항" for n in state.baseline_set.chain_nos) + ")이나 그보다 앞의 새 항 "
-                         "중에서만 고른다. " + ", ".join(f"제{n}항({why})" for n, why in sorted(state.baseline_set.excluded.items()))
-                         + "은(는) 사용자가 아직 마무리하지 않은 항이라 부모항으로 쓰지 않으며, USER_LOCK에 있어도 그 선행 용어를 근거로 삼지 않는다.")
+            text += _excluded_note(state)
         inserted = [n for n in sorted(target_nos) if n not in parents and n < last]
         if inserted:
             text += (f" {', '.join(f'제{n}항' for n in inserted)}은(는) 사용자가 새로 만들라고 한 항으로, 기존 항을 뒤로 밀고 그 번호에 끼운다. "
@@ -274,7 +287,7 @@ def _edit_contract(state: RunState) -> str:
     base = state.baseline_set
     if not base:
         return ""
-    nos = ", ".join(f"제{n}항" for n in base.edit_targets)
+    nos = base.targets_label()
     return (f" EXISTING_SET_EDIT: `claims[]`와 `exact_claim_text`에는 편집 대상 {nos}만 넣고 기존 세트의 번호·인용관계를 그대로 유지한다. "
             "부모항 체인은 읽기 전용이며 흡수·병합·재작성하지 않는다.")
 

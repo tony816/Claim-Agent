@@ -120,7 +120,7 @@ def seal_summary(state) -> str:
     root = "FINAL_CLAIM_LOCK" if c.final_claim_lock else "DRAFT_CLAIM_LOCK(잠정안)" if c.draft_claim_lock else "LOCK 없음"
     if state.baseline_set:
         lock = "DRAFT_DEPENDENT_SET_LOCK(잠정안)" if dep and dep.draft_set_lock else "LOCK 없음"
-        nos = ", ".join(f"제{n}항" for n in state.baseline_set.edit_targets)
+        nos = state.baseline_set.targets_label()
         out.append(f"사용자가 준 청구항 세트에서 {nos}만 편집 — 편집 항 {lock}, 나머지 항은 사용자 원문(미검증)")
         text = edited_set_text(state)
         if text:

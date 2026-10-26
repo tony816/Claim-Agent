@@ -376,6 +376,9 @@ def test_a_user_lock_set_with_blank_numbers_stops_before_any_call_and_says_what_
     ]
     # The request names claims the set already has without saying edit or new, so the same stop asks that too.
     assert issues[2].startswith("요청한 제4항, 제5항, 제6항은 세트에 이미 있는 번호입니다.") and len(issues) == 3
+    # Stopped before the set was sealed, it still reports as a set edit (run web-f09a88a6 said 독립항 LOCK 없음).
+    chat = render_chat_report(state)
+    assert "기존 세트 편집" in chat and "독립항 LOCK 없음" not in chat and "독립항 문언 없음" not in chat and "미실행: ARCHITECT" not in chat
 
 
 def test_a_new_claim_request_on_a_set_whose_parent_claim_is_cut_off_stops_before_any_call(rt, request_indep, tmp_path):
@@ -468,15 +471,10 @@ def test_new_claims_on_a_set_with_blanks_skip_the_unfinished_claims_as_parents(r
                                                    instructions="", user_lock=LID_LOCK)
     route = _append_route(blocks)
     provider = ScriptedProvider(edit_script())
-    first = run_pipeline(rt, provider, request, route, blocks, paths, folder)
-    state = rt.store.load_state(first["run_id"])
-    assert route.authoring_scope == "EXISTING_SET_EDIT" and route.edit_targets == [] and provider.calls == []
-    assert state.halt.reason_code == "APPEND_TARGET_NEEDED" and "제6항에서 끝납니다" in state.halt.message
-    assert [i["text"][:4] for i in state.halt.open_issues] == ["제3항:", "제4항:", "제6항:"]
-    chat = render_chat_report(state)
-    assert "기존 세트 편집" in chat and "독립항 LOCK 없음" not in chat and "독립항 문언 없음" not in chat and "미실행: ARCHITECT" not in chat
-    state = rt.engine(provider).resume(state.run_id, Decision(text="7항으로 해줘"))
+    result = run_pipeline(rt, provider, request, route, blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
     assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
+    assert route.authoring_scope == "EXISTING_SET_EDIT" and route.edit_targets == []
     base = state.baseline_set
     assert base.edit_targets == [7] and base.chain_nos == [1, 2, 5] and sorted(base.excluded) == [3, 4, 6]
     design = next(c for c in provider.calls if c.role == "dependent-claim-strategy-architect")
@@ -497,21 +495,43 @@ def test_a_new_claim_citing_a_claim_left_out_of_the_chain_is_refused(rt, request
     assert "REQUEST_SCOPE_MISMATCH" in state.halt.message and "DC-01 제7항의 부모 제4항" in state.halt.message
 
 
-def test_dependents_asked_for_without_a_number_ask_for_it_and_the_answer_appends_them(rt, request_indep, tmp_path, monkeypatch):
-    monkeypatch.setattr(R, "DEP_CLAIMS", [(10, 9, "DC-01", NEW_10)])
-    monkeypatch.setattr(R, "DEP_SET_TEXT", NEW_10)
-    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "open-ask", text="구속부에 대한 종속항들 작성해줘",
+NEW_11 = "【청구항 11】\n제10항에 있어서,\n상기 구속부의 두께는 상기 슬롯의 깊이 방향을 따라 일정한 케이블 클립 홀더."
+
+
+def test_dependents_asked_for_without_a_number_are_counted_and_numbered_by_the_design(rt, request_indep, tmp_path, monkeypatch):
+    """User decision 2026-10-26 (run web-53aa9366): no number is asked for. The design writes as many claims as it finds
+    technical contributions, numbered on from the set's end, and its numbers become the edit targets."""
+    monkeypatch.setattr(R, "DEP_CLAIMS", [(10, 9, "DC-01", NEW_10), (11, 10, "DC-02", NEW_11)])
+    monkeypatch.setattr(R, "DEP_SET_TEXT", NEW_10 + "\n\n" + NEW_11)
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "open-count", text="구속부에 대한 종속항들 작성해줘",
                                                    instructions="", user_lock=BASELINE)
-    provider = ScriptedProvider(edit_script())
-    first = run_pipeline(rt, provider, request, _append_route(blocks), blocks, paths, folder)
-    state = rt.store.load_state(first["run_id"])
-    assert provider.calls == [] and state.halt.kind == "USER_DECISION" and state.halt.reason_code == "APPEND_TARGET_NEEDED"
-    assert "제9항에서 끝납니다" in state.halt.message and "제10항부터" in state.halt.message
-    state = rt.engine(provider).resume(state.run_id, Decision(text="10항으로 해줘"))
+    provider = ScriptedProvider(edit_script(**{"blind-claim-reconstruction-reviewer": [R.blind()] * 2,
+                                               "picture-claim-reconstruction-reviewer": [R.picture()] * 2}))
+    result = run_pipeline(rt, provider, request, _append_route(blocks), blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
     assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
-    assert state.request["dependent_target"] == "10" and state.baseline_set.edit_targets == [10]
+    base = state.baseline_set
+    assert base.numbered_by_design and base.edit_targets == [10, 11] and state.request["dependent_target"] == "10~11"
+    assert base.chain_nos == list(range(1, 10)) and "claim-architect" not in [c.role for c in provider.calls]
+    design = next(c for c in provider.calls if c.role == "dependent-claim-strategy-architect")
+    assert "제10항부터 빈 번호 없이" in design.packet_text and "dependent_target_claim_nos" not in design.packet_text
+    assert "세트 끝에 붙일 새 종속항(번호는 종속항 설계가 정함)" in design.packet_text
+    assert any("제10항, 제11항으로 정함" in n for n in state.notes)
     full = edited_set_text(state)
-    assert full.count("【청구항") == 10 and full.endswith(NEW_10)
+    assert full.count("【청구항") == 11 and full.endswith(NEW_10 + "\n\n" + NEW_11)
+
+
+def test_a_design_numbering_an_open_append_with_a_gap_gets_one_repair_call_then_stops(rt, request_indep, tmp_path, monkeypatch):
+    monkeypatch.setattr(R, "DEP_CLAIMS", [(11, 9, "DC-01", NEW_10.replace("10】", "11】"))])
+    monkeypatch.setattr(R, "DEP_SET_TEXT", NEW_10.replace("10】", "11】"))
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "open-gap", text="구속부에 대한 종속항들 작성해줘",
+                                                   instructions="", user_lock=BASELINE)
+    provider = ScriptedProvider(edit_script(**{"dependent-claim-strategy-architect": [R.dep_architect()] * 2}))
+    result = run_pipeline(rt, provider, request, _append_route(blocks), blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert [c.role for c in provider.calls] == ["dependent-claim-strategy-architect"] * 2
+    assert "REQUEST_SCOPE_MISMATCH" in state.halt.message and "제10항부터 빈 번호 없이" in state.halt.message
+    assert state.baseline_set.edit_targets == [] and not state.dependent.draft_set_lock
 
 
 def test_an_open_append_needs_a_set_that_already_holds_a_dependent_claim():

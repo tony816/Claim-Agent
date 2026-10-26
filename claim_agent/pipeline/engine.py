@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from typing import Any
 
-from ..claim_scope import claim_intent, explicit_mentions, format_target, parse_target
+from ..claim_scope import claim_intent, format_target, parse_target
 from ..config import AppConfig
 from ..graph.pipeline import GraphHooks
 from ..models.contracts import COMBINED_REVIEW, combined_contract, contract_for, main_tree_gate_gaps
@@ -209,8 +209,9 @@ class PipelineEngine(PriorArtSteps):
         numbers with the set's own claims moved back and their citations following (NEW, 사용자 결정 2026-10-26). When
         the user's words say neither, the run asks first; the answer comes back as the resumed run's feedback.
 
-        Claims added after the end of the set with no number named (edit_targets empty) stop on the set's blanks like
-        any edit, then ask for the numbers from the one after the set's last claim; the answer names them the same way.
+        Claims added after the end of the set with no number named are sealed with edit_targets empty and the whole
+        set as their chain: the dependent design decides how many there are, numbered on from the set's end, and
+        fixes the targets (사용자 결정 2026-10-26: the count is not asked before the candidates are known).
         """
         def halt(code: str, message: str, issues: list[str] | None = None, kind: str = "BLOCK") -> None:
             raise PipelineHalt(Halt(stage=Stage.DEP_ARCHITECT.value, role="engine", kind=kind, reason_code=code, message=message,
@@ -223,10 +224,6 @@ class PipelineEngine(PriorArtSteps):
         lock = (req.user_lock or "").replace("\r\n", "\n").strip()
         origin = "프로젝트 USER_LOCK 확정 문언" if lock and text.replace("\r\n", "\n").strip() == lock else "제공된 청구항 세트"
         targets = parse_target(req.dependent_target) or set()
-        if not targets:
-            targets = explicit_mentions(str((state.feedback or {}).get("text") or "")) or set()
-            if targets:
-                state.request = {**state.request, "dependent_target": format_target(targets)}
         named = ", ".join(f"제{n}항" for n in sorted(targets)) or "세트 끝에 붙일 새 종속항"
         intent = req.edit_intent
         if intent == "UNCLEAR":
@@ -274,24 +271,22 @@ class PipelineEngine(PriorArtSteps):
         if append and len(excluded) == len(claims):
             halt("BASELINE_SET_UNFINISHED", f"편집할 기존 청구항 세트({origin})에 새 항이 인용할 수 있는 끝맺어진 항이 없습니다. "
                                             f"{origin}에서 고친 뒤 같은 요청을 다시 보내 주세요.", kept)
-        if not targets:
-            halt("APPEND_TARGET_NEEDED", f"편집할 기존 청구항 세트({origin})는 제{last}항에서 끝납니다. 새 종속항을 붙일 번호를 제{last + 1}항부터 정해 답해 주세요 "
-                                         f"(예: '제{last + 1}항', '제{last + 1}~{last + 3}항').", kept, kind="USER_DECISION")
         beyond = {n for n in targets if n > last}
         # New claims: inserted ones (their numbers were left free) and ones right after the end of the set.
         new = (targets - set(by_no) - beyond if moved else set()) | appended_nos(claims, beyond)
         wrong = [f"제{n}항: 세트에 없음" for n in sorted(targets) if n not in by_no and n not in new]
         wrong += [f"제{n}항: 독립항" for n in sorted(targets) if n in by_no and by_no[n].is_independent]
-        if not targets or wrong:
-            halt("EDIT_TARGET_INVALID", "편집 대상은 제공된 세트에 있는 종속항 번호이거나 세트 끝에 바로 이어지는 새 번호여야 합니다.", wrong or ["편집 대상 번호 없음"])
+        if wrong:
+            halt("EDIT_TARGET_INVALID", "편집 대상은 제공된 세트에 있는 종속항 번호이거나 세트 끝에 바로 이어지는 새 번호여야 합니다.", wrong)
         try:
             digest = baseline_digest(text)
         except ClaimParseError:
             digest = exact_sha256(text)
         if state.baseline_set and state.baseline_set.sha256 == digest and state.baseline_set.edit_targets == sorted(targets):
             return
-        # A new claim's parent is chosen by the dependent design, so every claim before it stays available as its chain.
-        cited = set().union(*(ancestor_nos(claims, n) for n in targets - new)) | ({n for n in by_no if n < max(new)} if new else set())
+        # A new claim's parent is chosen by the dependent design, so every claim before it stays available as its chain;
+        # with no number named, that is the whole set.
+        cited = set().union(*(ancestor_nos(claims, n) for n in targets - new)) | ({n for n in by_no if n < max(new)} if new else set(by_no) if not targets else set())
         chain = sorted(cited - targets - set(excluded))
         loose = [f"제{n}항: 종결부 없이 '…{' '.join(by_no[n].body.split())[-12:]}'로 끝남" for n in chain if unfinished(by_no[n].body)]
         if loose:
@@ -306,7 +301,7 @@ class PipelineEngine(PriorArtSteps):
             record_id=rid, source_path=req.claim_file or "", sha256=digest,
             claims=[BaselineClaim(claim_no=c.claim_no, parent_nos=c.parent_nos, text=c.text) for c in claims],
             edit_targets=sorted(targets), chain_nos=chain, chain_text=claim_set_text([by_no[n] for n in chain]),
-            user_lock_released=released, renumbered=moved, excluded=excluded,
+            user_lock_released=released, renumbered=moved, excluded=excluded, numbered_by_design=not targets,
         )
         record, md = build_baseline_record(state)
         self.store.write_record(state.run_id, rid, {**record, "report_markdown": md}, md)
@@ -589,6 +584,15 @@ class PipelineEngine(PriorArtSteps):
         base_parents = {b.claim_no: b.parent_nos for b in state.baseline_set.claims} if state.baseline_set else {}
         moved: list[str] = []
         outside: list[str] = []         # a new claim citing a claim outside the chain (e.g. one left cut off) or a later one
+        if (stage == Stage.DEP_ARCHITECT and state.baseline_set and state.baseline_set.numbered_by_design
+                and env.status in (Status.PASS, Status.PASS_RANGE)):
+            # No number asked for: the design's own numbers are the targets, if they go on from the set's end without a gap.
+            last = max(base_parents, default=0)
+            planned = sorted(x.planned_claim_no or 0 for x in env.candidates if x.classification.value == "TECHNICAL_SOLUTION_CANDIDATE")
+            if planned != list(range(last + 1, last + 1 + len(planned))):
+                scope_problem = (f"번호 없이 세트 끝에 붙이는 새 항은 제{last + 1}항부터 빈 번호 없이 이어 매겨야 합니다: 설계 예정 항 "
+                                 + (", ".join(f"제{n}항" if n else "번호 없음" for n in planned) or "없음"))
+            requested = set(planned)
 
         def allowed(n: int) -> set[int]:
             return set(state.baseline_set.chain_nos if state.baseline_set else ()) | {t for t in requested or () if t < n}
@@ -1203,7 +1207,10 @@ class PipelineEngine(PriorArtSteps):
             ids.dependent_revision = d.dependent_revision
             rid = record_id("dependent_design", ids)
             goal = next((n.split(": ", 1)[1] for n in reversed(state.notes) if n.startswith(f"종속항 설계 변경 목표 ({d.dependent_design_revision})")), None)
-            targets = parse_target(req.dependent_target)
+            base = state.baseline_set
+            by_design = bool(base and base.numbered_by_design)
+            # Asked for with no number: each design numbers its claims anew, so an earlier design's numbers bind nothing.
+            targets = None if by_design else parse_target(req.dependent_target)
             loop = d.loop_counts.get("DEPENDENT_ARCHITECT", 0)
             pk = packets.dep_architect(state, self.store, bundle, ids, rid, d.root_lock_id, c.design_record_id or "", root_text, req.request_text, goal, targets,
                                        business_context=req.business_context)
@@ -1211,7 +1218,7 @@ class PipelineEngine(PriorArtSteps):
             try:
                 env, ref = self._call(state, "dependent-claim-strategy-architect", Scope.DEPENDENT_SET, st, "dependent_design", pk, ids, rid, loop_index=loop)
             except PipelineHalt as ph:
-                if not (targets and ph.halt.message.startswith("REQUEST_SCOPE_MISMATCH")):
+                if not ((targets or by_design) and ph.halt.message.startswith("REQUEST_SCOPE_MISMATCH")):
                     raise
                 # Fail fast on numbering: one repair call that restates the number contract; a second miss stops here,
                 # before any drafting, instead of after the rest of the pipeline has run.
@@ -1225,6 +1232,13 @@ class PipelineEngine(PriorArtSteps):
             if tr.kind == "RETURN":
                 self._apply_return(state, tr, env, rid, dependent=True)
                 return
+            planned = sorted(x.planned_claim_no for x in env.candidates if x.classification.value == "TECHNICAL_SOLUTION_CANDIDATE" and x.planned_claim_no)
+            if by_design and planned:
+                base.edit_targets = planned                      # type: ignore[union-attr]
+                state.request = {**state.request, "dependent_target": format_target(set(planned))}
+                record, md = build_baseline_record(state)
+                self.store.write_record(state.run_id, base.record_id, {**record, "report_markdown": md}, md)   # type: ignore[union-attr]
+                state.notes.append(f"종속항 설계가 세트 끝에 붙일 새 항을 {base.targets_label()}으로 정함")     # type: ignore[union-attr]
             d.design_record_id = rid
             d.current = DependentRevisionState(dependent_revision=d.dependent_revision, dependent_design_revision=d.dependent_design_revision)
             state.stage = Stage.DEP_DRAFT

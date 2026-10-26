@@ -103,8 +103,8 @@ def resolve_edit_scope(route: RouteDecision, request: dict, blocks: list[dict], 
     follow-up path, because those claims are this harness's output, not a set the user supplied.
 
     Dependent claims asked for with no number ('히트리드 모듈에 대한 종속항들 작성해줘', run web-b013b034) that the router
-    puts on such a set go after its end too, with edit_targets empty: the engine stops on the set's blanks, or asks for
-    the numbers, before any call, instead of a new dependent set renumbering over the user's claims.
+    puts on such a set go after its end too, with edit_targets empty: the dependent design decides how many and numbers
+    them on from the set's end, instead of a new dependent set renumbering over the user's claims.
     """
     from .pipeline.claimtext import ClaimParseError, baseline_digest, exact_sha256
 
@@ -158,8 +158,9 @@ def revision_path(route: RouteDecision, request: dict, blocks: list[dict], paths
 
     if previous is not None and (route.authoring_scope == "EXISTING_SET_EDIT" or previous.baseline_set is not None):
         base = previous.baseline_set
-        same_set = (route.authoring_scope == "EXISTING_SET_EDIT" and base is not None
-                    and base.sha256 == baseline_digest and base.edit_targets == route.edit_targets)
+        # A follow-up that again names no number stays on claims the previous design numbered itself.
+        same_set = (route.authoring_scope == "EXISTING_SET_EDIT" and base is not None and base.sha256 == baseline_digest
+                    and (base.edit_targets == route.edit_targets or (base.numbered_by_design and not route.edit_targets)))
         if not same_set or _new_material(request, blocks, paths, previous):
             return "new", None
         dep = previous.dependent

@@ -164,6 +164,13 @@ class BaselineSet(BaseModel):
     renumbered: dict[int, int] = Field(default_factory=dict)      # old → new number of the set's claims moved back for new ones (NEW)
     # Appended claims only: the set's claims left out of the chain, kept as written, with why (blank citation, cut off, citing one)
     excluded: dict[int, str] = Field(default_factory=dict)
+    # Claims asked for with no number: every dependent design decides how many and numbers them on from the set's end,
+    # and edit_targets follow its latest design.
+    numbered_by_design: bool = False
+
+    def targets_label(self) -> str:
+        """The edit targets as reports say them. Empty until the dependent design numbers claims asked for without one."""
+        return ", ".join(f"제{n}항" for n in self.edit_targets) or "세트 끝에 붙일 새 종속항(번호는 종속항 설계가 정함)"
 
 
 class Halt(BaseModel):

@@ -271,7 +271,7 @@ def _edit_section(state: RunState) -> list[str]:
     base, dep = state.baseline_set, state.dependent
     if base is None:            # stopped before the set was sealed: nothing was written
         return [no_lock_line(state), "", "기존 청구항 세트를 봉인하기 전에 멈췄습니다. 새로 쓴 항은 없고, 세트는 제공된 원문 그대로입니다.", ""]
-    nos = ", ".join(f"제{n}항" for n in base.edit_targets)
+    nos = base.targets_label()
     lock = dep.draft_set_lock if dep else None
     text = dep.current.exact_text if dep and dep.current and dep.current.exact_text else None
     if lock:
