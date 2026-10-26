@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from .claim_scope import resolve_claim_target
 from .config import load_config
-from .free_work import FREE, FREE_ROLE, GATED, REVIEW_ROLES, review_request_text, review_target
+from .free_work import FREE, FREE_ROLE, GATED, REVIEW_ROLES, review_asked_text, review_request_text, review_target
 from .live_events import EventReader
 from .live_log import LiveLogFormatter
 from .sources.extract import DOC_EXT, ExtractionError, extract_text
@@ -519,7 +519,10 @@ class Workspace:
         self.spawn_chat(sid, request, dict(text=text, files=[known[f] for f in selected]), "FREE", files=selected)
 
     def review(self, sid: str, data: dict) -> None:
-        """자유 작업: run one clicked gate role on the claim wording of one message (REVIEW_ONLY — no LOCK, no PASS evidence)."""
+        """자유 작업: run the chosen gate roles on the claim wording of one message (REVIEW_ONLY — no LOCK, no PASS evidence).
+
+        `text` is what the user typed beside the chosen tools; it reaches the reviewers as an added request.
+        """
         with self.lock:
             folder = self.directory(sid)
             session = self.sessions[sid]
@@ -527,9 +530,13 @@ class Workspace:
                 raise ValueError("현재 응답을 완료하거나 중지한 뒤 검수하세요.")
             if session.get("work_mode") != FREE:
                 raise ValueError("선택 검수는 자유 작업 모드에서 실행합니다. 작업 방식을 자유 작업으로 바꾸세요.")
-            role = data.get("role")
-            if role not in REVIEW_ROLES:
+            roles = data.get("roles") if data.get("roles") is not None else [data.get("role")]
+            if not isinstance(roles, list) or not roles or any(role not in REVIEW_ROLES for role in roles):
                 raise ValueError("지원하지 않는 검수 역할입니다.")
+            roles = [role for role in REVIEW_ROLES if role in roles]       # one run, in the panel's order
+            note = str(data.get("text") or "").strip()
+            if len(note) > 200000:
+                raise ValueError("메시지는 최대 20만 글자까지 보낼 수 있습니다.")
             source = next((m for m in session["messages"] if m["id"] == data.get("message")), None)
             if not source or source.get("status") == "running" or source.get("mode") == "REVIEW":
                 raise ValueError("검수할 메시지를 찾을 수 없습니다.")
@@ -539,13 +546,31 @@ class Workspace:
             self.require_connection()
             # The conversation's own uploads are in the history already; the project's files travel as material.
             preset = self.project_inputs(session)
-            request = dict(text=review_request_text([role]), files=preset["files"], attachments=preset["attachments"],
+            request = dict(text=review_request_text(roles, note), files=preset["files"], attachments=preset["attachments"],
                            history=(read_state(folder / "history.json") or {}).get("history", []), model=self.cfg.default_model,
                            instructions=preset["instructions"], user_lock=preset["user_lock"], project=preset["project"],
-                           review=dict(roles=[role], claim_text=target, message_id=source["id"]))
-            detail = dict(role=role, source=source["id"])
-            self.spawn_chat(sid, request, dict(text=f"[선택 검수 · {REVIEW_ROLES[role]}]\n\n{target}", files=[], review=detail), "REVIEW",
+                           review=dict(roles=roles, claim_text=target, message_id=source["id"], note=note))
+            detail = dict(roles=roles, source=source["id"])
+            self.spawn_chat(sid, request, dict(text=review_asked_text(roles, note, target), files=[], review=detail), "REVIEW",
                             answer=dict(execution_mode="REVIEW_ONLY", review=detail))
+
+    def phrases(self) -> dict:
+        from . import phrases
+
+        with self.lock:
+            return phrases.load(self.folder)
+
+    def save_phrases(self, items) -> dict:
+        from . import phrases
+
+        with self.lock:
+            return phrases.save(self.folder, items)
+
+    def reset_phrases(self) -> dict:
+        from . import phrases
+
+        with self.lock:
+            return phrases.reset(self.folder)
 
     def spawn_chat(self, sid: str, request: dict, user: dict, mode: str, files: list[str] | None = None, answer: dict | None = None) -> None:
         """Write one chat.json, add the user turn and a running answer, and run claim_agent.chat on it (caller holds the lock)."""
@@ -960,6 +985,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send(200, (ASSETS / name).read_bytes(), mime + "; charset=utf-8")
             elif url.path == "/api/model-settings":
                 self.json(workspace.model_settings())
+            elif url.path == "/api/phrases":
+                self.json(workspace.phrases())
             elif url.path == "/api/auth/status":
                 self.json(workspace.auth_status())
             elif url.path == "/api/sessions":
@@ -1075,6 +1102,10 @@ class Handler(BaseHTTPRequestHandler):
             elif url.path == "/api/review":
                 workspace.review(str(data.get("id", "")), data)
                 self.json({"ok": True})
+            elif url.path == "/api/phrases":
+                self.json(workspace.save_phrases(data.get("phrases")))
+            elif url.path == "/api/phrases/reset":
+                self.json(workspace.reset_phrases())
             elif url.path == "/api/improve/mine":
                 self.json(workspace.improve_mine())
             elif url.path == "/api/improve/decide":

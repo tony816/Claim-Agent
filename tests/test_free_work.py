@@ -52,10 +52,10 @@ def test_free_turn_answers_without_the_router_and_labels_the_draft(rt, tmp_path)
     assert "프로젝트 발명 자료" not in json.dumps(result["history"], ensure_ascii=False)   # preset files are resent, not stored
 
 
-def _review_request(role: str) -> dict:
+def _review_request(role: str, note: str = "") -> dict:
     history = [{"role": "user", "parts": [{"text": USER_FACT}]}, {"role": "model", "parts": [{"text": DRAFT}]}]
-    return dict(text=free_work.review_request_text([role]), files=[], attachments=[], history=history, model="m", instructions="", user_lock="",
-                review=dict(roles=[role], claim_text=free_work.review_target(DRAFT)))
+    return dict(text=free_work.review_request_text([role], note), files=[], attachments=[], history=history, model="m", instructions="", user_lock="",
+                review=dict(roles=[role], claim_text=free_work.review_target(DRAFT), note=note))
 
 
 def test_review_click_runs_only_the_chosen_role_on_the_claim_block(rt, tmp_path, monkeypatch):
@@ -64,17 +64,19 @@ def test_review_click_runs_only_the_chosen_role_on_the_claim_block(rt, tmp_path,
     monkeypatch.setattr(runtime, "make_provider", lambda *a, **k: provider)
     folder = tmp_path / "request"
     folder.mkdir()
-    result = free_work.review_turn(rt.cfg, None, _review_request("syntax-scope-reviewer"), folder)
+    result = free_work.review_turn(rt.cfg, None, _review_request("syntax-scope-reviewer", "돌출부 지칭 위주로 봐 줘"), folder)
     (call,) = provider.calls
     target = free_work.review_target(DRAFT)
     assert call.role == "syntax-scope-reviewer" and "design_revision: N/A" in call.packet_text and "review_scope: DEPENDENT_SET" in call.packet_text
     assert target in call.packet_text and USER_FACT in call.packet_text
+    assert "사용자 추가 요청: 돌출부 지칭 위주로 봐 줘" in call.packet_text      # what the user typed beside the tool
     assert "묶었습니다" not in call.packet_text                          # the general agent's prose is neither target nor material
     state = rt.store.load_state(result["run_id"])
     assert state.outcome == "REVIEW_ONLY_DONE" and state.candidate.draft_claim_lock is None
     assert [m["category"] for m in state.material_meta].count("invention") == 1   # the click's request text is not material
     assert result["effective_mode"] == "REVIEW_ONLY" and result["answer"].startswith(free_work.REVIEW_NOTE)
     asked, answered = result["history"][-2:]
+    assert asked["parts"][0]["text"].startswith("[선택 검수 · 통사·범위 검수] 돌출부 지칭 위주로 봐 줘")
     assert asked["parts"][0]["text"].endswith(target) and answered["parts"][0]["text"] == result["answer"]
 
 
@@ -84,11 +86,13 @@ def test_blind_click_reads_the_independent_claim_alone_and_skips_picture(rt, tmp
     monkeypatch.setattr(runtime, "make_provider", lambda *a, **k: provider)
     folder = tmp_path / "request"
     folder.mkdir()
-    result = free_work.review_turn(rt.cfg, None, _review_request("blind-claim-reconstruction-reviewer"), folder)
+    result = free_work.review_turn(rt.cfg, None, _review_request("blind-claim-reconstruction-reviewer", "형상 위주로"), folder)
     (call,) = provider.calls
     assert "mode: BLIND_SNAPSHOT" in call.packet_text and "【청구항 1】" in call.packet_text
     assert "【청구항 2】" not in call.packet_text and USER_FACT not in call.packet_text and "검수" not in call.packet_text
-    assert free_work.BLIND_NOTE in result["answer"] and rt.store.load_state(result["run_id"]).outcome == "REVIEW_ONLY_DONE"
+    assert "형상 위주로" not in call.packet_text                         # the blind reader gets the wording alone, never the note
+    assert free_work.BLIND_NOTE in result["answer"] and free_work.BLIND_NOTE_TEXT in result["answer"]
+    assert rt.store.load_state(result["run_id"]).outcome == "REVIEW_ONLY_DONE"
 
 
 @pytest.fixture
@@ -120,9 +124,17 @@ def test_free_conversation_sends_plainly_and_reviews_one_message(workspace, monk
         workspace.review(sid, {"message": answer["id"], "role": "claim-drafter"})
     workspace.review(sid, {"message": answer["id"], "role": "oa-strategy-reviewer"})
     wait_for(lambda: len(requests) == 2)
-    assert requests[1]["review"] == dict(roles=["oa-strategy-reviewer"], claim_text=free_work.review_target(DRAFT), message_id=answer["id"])
+    assert requests[1]["review"] == dict(roles=["oa-strategy-reviewer"], claim_text=free_work.review_target(DRAFT), message_id=answer["id"], note="")
     asked, placeholder = workspace.sessions[sid]["messages"][-2:]
     assert asked["mode"] == placeholder["mode"] == "REVIEW" and placeholder["execution_mode"] == "REVIEW_ONLY"
+    # Several tools picked in the panel, plus what the user typed before Enter: one run, in the panel's order.
+    workspace.review(sid, {"message": answer["id"], "roles": ["oa-strategy-reviewer", "syntax-scope-reviewer"], "text": " 명확성 위주로 "})
+    wait_for(lambda: len(requests) == 3)
+    assert requests[2]["review"]["roles"] == ["syntax-scope-reviewer", "oa-strategy-reviewer"] and requests[2]["review"]["note"] == "명확성 위주로"
+    assert requests[2]["text"].endswith("사용자 추가 요청: 명확성 위주로")
+    assert workspace.sessions[sid]["messages"][-2]["text"].startswith("[선택 검수 · 통사·범위 검수, OA 검수] 명확성 위주로")
+    with pytest.raises(ValueError, match="검수 역할"):
+        workspace.review(sid, {"message": answer["id"], "roles": []})
     assert workspace.set_work_mode(sid, free_work.GATED)["work_mode"] == free_work.GATED
     with pytest.raises(ValueError, match="자유 작업"):
         workspace.review(sid, {"message": answer["id"], "role": "oa-strategy-reviewer"})
@@ -167,3 +179,22 @@ def test_free_draft_then_review_through_the_chat_worker(rt, tmp_path, monkeypatc
         assert [h["role"] for h in history] == ["user", "model", "user", "model"] and history[-1]["parts"][0]["text"] == review["text"]
     finally:
         workspace.close()
+
+
+def test_feedback_phrases_default_save_validate_and_reset(workspace):
+    from claim_agent import phrases
+
+    first = workspace.phrases()
+    assert first["custom"] is False and first["phrases"] == phrases.defaults() and len(first["phrases"]) == len(phrases.DEFAULT_PHRASES)
+    kept = first["phrases"][:2] + [dict(group=" ", text="  돌출부를 '걸림 돌기'로 통일해 줘. "), dict(id="bad id!", group="용어", text="상기를 빼 줘.")]
+    saved = workspace.save_phrases(kept)
+    assert saved["custom"] is True and [p["text"] for p in saved["phrases"]][2:] == ["돌출부를 '걸림 돌기'로 통일해 줘.", "상기를 빼 줘."]
+    assert saved["phrases"][2]["group"] == phrases.DEFAULT_GROUP and saved["phrases"][3]["id"] != "bad id!"
+    assert workspace.phrases() == saved                                  # kept on this computer, read back as saved
+    for bad in ([dict(text="   ")], [dict(text="x" * (phrases.MAX_TEXT + 1))], [dict(text="a")] * (phrases.MAX_PHRASES + 1), "not a list"):
+        with pytest.raises(ValueError):
+            workspace.save_phrases(bad)
+    assert workspace.phrases() == saved                                  # a refused save leaves the list as it was
+    (workspace.folder / phrases.FILE).write_text("{broken", encoding="utf-8")
+    assert workspace.phrases()["custom"] is False                       # an unreadable file falls back to the defaults
+    assert workspace.reset_phrases() == dict(phrases=phrases.defaults(), custom=False)

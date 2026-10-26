@@ -12,7 +12,7 @@
   <div class="side-bottom"><span class="local-dot"></span> 이 컴퓨터에 저장됨<button id="shutdown">프로그램 종료</button></div>
 </aside>
 <main>
-  <header><div class="header-left"><button id="menu" aria-label="대화 목록 열기">☰</button><strong>Claim-Agent</strong><div class="provider-switch"><select id="provider-kind" aria-label="연결 방식"></select><select id="provider-model" aria-label="사용 모델"></select><span id="provider-note" class="provider-note"></span></div><div id="work-mode" class="work-mode" role="group" aria-label="작업 방식"><button type="button" data-mode="gated" aria-pressed="true" title="모든 요청을 분류해, 청구항 문언은 설계부터 역구성·LOCK까지 전체 게이트로 작성·검수합니다">게이트 자동</button><button type="button" data-mode="free" aria-pressed="false" title="게이트 없는 일반 에이전트와 1차 작업하고, 필요한 검수 역할만 답변 아래 버튼으로 실행합니다">자유 작업</button></div><button id="project-chip" class="project-chip" hidden title="프로젝트 설정 열기"></button></div><span class="header-note">대화에서 초안까지</span></header>
+  <header><div class="header-left"><button id="menu" aria-label="대화 목록 열기">☰</button><strong>Claim-Agent</strong><div class="provider-switch"><select id="provider-kind" aria-label="연결 방식"></select><select id="provider-model" aria-label="사용 모델"></select><span id="provider-note" class="provider-note"></span></div><div id="work-mode" class="work-mode" role="group" aria-label="작업 방식"><button type="button" data-mode="gated" aria-pressed="true" title="모든 요청을 분류해, 청구항 문언은 설계부터 역구성·LOCK까지 전체 게이트로 작성·검수합니다">게이트 자동</button><button type="button" data-mode="free" aria-pressed="false" title="게이트 없는 일반 에이전트와 1차 작업하고, 필요한 검수 역할만 작업 도구 패널에서 골라 실행합니다">자유 작업</button></div><button id="project-chip" class="project-chip" hidden title="프로젝트 설정 열기"></button></div><div class="header-right"><span class="header-note">대화에서 초안까지</span><button type="button" id="tool-toggle" class="tool-toggle" aria-controls="tool-panel" aria-expanded="false" title="검수 도구와 피드백 멘트를 여는 오른쪽 패널">▤ 작업 도구</button></div></header>
   <section id="project-panel" aria-label="프로젝트 설정" hidden>
     <div class="project-inner">
       <div class="project-head"><h2 id="project-title">프로젝트</h2><div class="project-head-actions"><button type="button" id="project-new-chat" class="primary">＋ 이 프로젝트에서 새 대화</button><button type="button" id="project-delete" class="danger">프로젝트 삭제</button></div></div>
@@ -70,8 +70,9 @@
   </div>
   <footer>
     <div id="error" role="alert" hidden></div>
-    <p id="free-banner" class="free-banner" hidden><strong>자유 작업 모드</strong> · 일반 에이전트의 답변은 게이트를 거치지 않은 <strong>미검수 초안</strong>입니다. 청구항 아래 <strong>검수 실행</strong> 버튼으로 필요한 검수 역할만 돌려 보세요(검수 결과는 LOCK 근거가 아님). 잠정 LOCK이 필요하면 위에서 <strong>게이트 자동</strong>으로 바꿔 작성을 요청하세요.</p>
+    <p id="free-banner" class="free-banner" hidden><strong>자유 작업 모드</strong> · 일반 에이전트의 답변은 게이트를 거치지 않은 <strong>미검수 초안</strong>입니다. 오른쪽 <strong>작업 도구</strong>에서 필요한 검수만 골라 Enter로 실행하세요(검수 결과는 LOCK 근거가 아님). 잠정 LOCK이 필요하면 위에서 <strong>게이트 자동</strong>으로 바꿔 작성을 요청하세요.</p>
     <form id="composer">
+      <div id="tool-chip" class="tool-chip" role="status" hidden></div>
       <div id="attachments" aria-label="보낼 첨부 파일"></div>
       <textarea id="prompt" rows="1" placeholder="무엇이든 물어보세요" aria-label="메시지 입력" autofocus></textarea>
       <div class="composer-tools"><div class="tools-left"><button type="button" id="attach" title="파일 첨부" aria-label="파일 첨부">＋</button><details id="options"><summary id="options-summary">작성 옵션 · 미지정</summary><div class="options-panel"><p class="options-title">작성 대상</p><label class="target-mode"><input type="radio" name="target-mode" value="auto" checked> 미지정 (요청 내용대로)</label><label class="target-mode"><input type="radio" name="target-mode" value="independent"> 독립항만</label><label class="target-mode"><input type="radio" name="target-mode" value="single"> 특정 항 1개 <span class="target-single">제 <input id="target-claim" type="number" min="1" max="1000" value="2" aria-label="항 번호"> 항만</span></label><label class="target-mode"><input type="radio" name="target-mode" value="range"> 종속항 범위</label><div id="target-segments" class="target-segments" aria-label="종속항 구간"></div><button type="button" id="target-add" class="target-add">＋ 구간 추가</button><p class="target-preview">전달 범위 <code id="target-preview">—</code></p><p class="target-hint">미지정이면 요청 문장과 자료로 범위를 정합니다. 문장에 항 번호를 적으면 문장이 우선합니다. 1항만 고르면 독립항만 작성합니다.</p><p class="options-title">선행기술</p><label class="target-mode"><input type="checkbox" id="prior-search"> 설계 전에 WIPS 선행기술 검색·사전 심사 (검색 집합 기준, 전수 조사 아님)</label></div></details></div><button type="submit" id="send" title="보내기" aria-label="보내기">↑</button><button type="button" id="stop" title="응답 중지" aria-label="응답 중지" hidden>■</button></div>
@@ -80,6 +81,28 @@
     <input id="file-picker" type="file" accept=".txt,.md,.json,.yaml,.yml,.csv,.pdf,.docx,.hwpx,.hwp,.png,.jpg,.jpeg,.webp" multiple hidden>
   </footer>
 </main>
+<div id="tool-panel" class="tool-panel" role="complementary" aria-label="작업 도구" hidden>
+  <div class="tool-head"><strong>작업 도구</strong><button type="button" id="tool-close" aria-label="작업 도구 닫기">✕</button></div>
+  <p class="tool-lead">도구와 멘트는 누르면 <strong>고르기만</strong> 합니다. 필요하면 입력창에 말을 덧붙이고 <strong>Enter</strong>로 실행하세요.</p>
+  <section class="tool-section" aria-labelledby="review-tools-title">
+    <h3 id="review-tools-title">검수 도구</h3>
+    <p id="review-note" class="tool-note"></p>
+    <label class="tool-field">검수 대상<select id="review-target" aria-label="검수 대상 메시지"></select></label>
+    <pre id="review-preview" class="review-preview" hidden></pre>
+    <div id="review-buttons" class="review-buttons" role="group" aria-label="검수 역할 (여러 개 고를 수 있음)"></div>
+  </section>
+  <section class="tool-section" aria-labelledby="phrase-title">
+    <div class="tool-section-head"><h3 id="phrase-title">피드백 멘트</h3><button type="button" id="phrase-edit" aria-pressed="false">편집</button></div>
+    <p class="tool-note">누르면 입력창 커서 자리에 들어갑니다. 고치거나 덧붙여서 Enter로 보내세요.</p>
+    <div id="phrase-list" class="phrase-list"></div>
+    <form id="phrase-form" class="phrase-form" hidden>
+      <input id="phrase-group" list="phrase-groups" maxlength="30" placeholder="묶음 (예: 문언 다듬기)" aria-label="멘트 묶음">
+      <datalist id="phrase-groups"></datalist>
+      <textarea id="phrase-text" rows="3" maxlength="2000" placeholder="새 피드백 멘트" aria-label="새 피드백 멘트"></textarea>
+      <div class="phrase-form-row"><button type="submit" class="primary">멘트 추가</button><button type="button" id="phrase-reset">기본값 복원</button></div>
+    </form>
+  </section>
+</div>
 <div id="drop-overlay" hidden>파일을 놓아서 대화에 첨부하세요</div>
 <dialog id="model-settings-dialog" aria-labelledby="model-settings-title">
   <div class="settings-heading"><div><h2 id="model-settings-title">에이전트 모델 설정</h2><p>구독 계정을 연결하고, 역할에 맞는 모델을 선택하세요.</p></div><button id="model-settings-close" type="button" aria-label="모델 설정 닫기">✕</button></div>
