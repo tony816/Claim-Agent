@@ -123,6 +123,17 @@ def test_question_on_a_halted_run_is_answered_and_the_run_keeps_waiting(rt, requ
     assert rt.store.load_state("halted-run").halt is not None
 
 
+def test_the_moderator_sees_the_findings_a_halt_carries(rt, request_indep):
+    """Regression for run replay2-e69bc8-165948: given only the halt message, the answer guessed a reason no reviewer gave."""
+    state = _halted_run(rt, request_indep)
+    long_text = "제3항: 제1 전력 전달부의 장착 부위 미결정 " + "가" * 1000
+    state.halt.open_issues = [{"kind": "BLOCK", "code": "OPENNESS_NOT_IN_CONTRACT", "text": long_text, "return_to": None}] + \
+                             [{"kind": "REVIEW", "code": f"C{n}", "text": f"지적 {n}"} for n in range(7)]
+    summary = moderator.seal_summary(state)
+    assert "중지 지적" in summary and "[OPENNESS_NOT_IN_CONTRACT] 제3항: 제1 전력 전달부의 장착 부위 미결정" in summary
+    assert "가" * (moderator.ISSUE_CHARS + 10) not in summary and "- 외 2건" in summary
+
+
 def test_unlocked_wording_never_fills_the_final_slot(rt, request_indep):
     state = _halted_run(rt, request_indep)
     for text in (render_chat_report(state), render_report(state)):
