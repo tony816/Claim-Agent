@@ -519,11 +519,11 @@ class Workspace:
         self.spawn_chat(sid, request, dict(text=text, files=[known[f] for f in selected]), "FREE", files=selected)
 
     def review(self, sid: str, data: dict) -> None:
-        """자유 작업: run the chosen gate roles on the claim wording of one message (REVIEW_ONLY — no LOCK, no PASS evidence),
-        then let the general agent fix that wording from the reviews and the feedback.
+        """자유 작업: run the chosen gate roles on the claim wording of one message (REVIEW_ONLY — no LOCK, no PASS evidence).
 
-        `text` is the feedback the user typed beside the chosen tools; the reviewers and the fix both get it. A fixed
-        answer can be the next target; an older review answer, which only quotes the wording it read, cannot.
+        `text` is the request the user typed beside the chosen tools. Without it the answer is the review itself; with it
+        the reviewers focus on it and the general agent then carries it out (a fix, or an answer from the findings). A
+        fixed answer can be the next target; a review answer, which only quotes the wording it read, cannot.
         """
         with self.lock:
             folder = self.directory(sid)
@@ -553,9 +553,10 @@ class Workspace:
                            history=(read_state(folder / "history.json") or {}).get("history", []), model=self.cfg.default_model,
                            instructions=preset["instructions"], user_lock=preset["user_lock"], project=preset["project"],
                            review=dict(roles=roles, claim_text=target, message_id=source["id"], note=note))
-            detail = dict(roles=roles, source=source["id"], revise=True)
+            # `revise` turns true once the answer comes back as fixed wording (execute reads it from the result).
+            detail = dict(roles=roles, source=source["id"], asked=bool(note))
             self.spawn_chat(sid, request, dict(text=review_asked_text(roles, note, target), files=[], review=detail), "REVIEW",
-                            answer=dict(execution_mode="REVIEW_ONLY", review=detail))
+                            answer=dict(execution_mode="REVIEW_ONLY", review={**detail, "revise": False}))
 
     def phrases(self) -> dict:
         from . import phrases
@@ -849,6 +850,8 @@ class Workspace:
                     message["pipeline_run_id"] = result.get("run_id")
                     if result.get("revision_path"):
                         message["revision_path"] = result["revision_path"]
+                    if "revised" in result and message.get("review") is not None:
+                        message["review"]["revise"] = bool(result["revised"])     # fixed wording can be the next review target
                     if result.get("run_id") and result.get("effective_mode") in {"AUTHORING_DRAFT", "FINALIZATION"}:
                         session["run_id"] = result["run_id"]
                 else:

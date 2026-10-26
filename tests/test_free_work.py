@@ -69,43 +69,77 @@ def _offline(rt, monkeypatch, provider):
 
 
 def _blind_calls(provider, *marks: str) -> list:
-    """The blind calls, one per mark found in its packet (they may run in parallel, in any order), then the fix call."""
+    """The blind calls, one per mark found in its packet (they may run in parallel, in any order)."""
     blind = [c for c in provider.calls if c.role == "blind-claim-reconstruction-reviewer"]
-    (fix,) = [c for c in provider.calls if c.role == free_work.FREE_ROLE]
     assert len(blind) == len(marks)
-    return [next(c for c in blind if mark in c.packet_text) for mark in marks] + [fix]
+    return [next(c for c in blind if mark in c.packet_text) for mark in marks]
 
 
-def test_review_runs_the_chosen_role_then_fixes_the_wording_from_it_and_the_feedback(rt, tmp_path, monkeypatch):
+def _agent_calls(provider) -> list:
+    return [c for c in provider.calls if c.role == free_work.FREE_ROLE]
+
+
+def test_review_without_a_request_answers_with_the_review_itself(rt, tmp_path, monkeypatch):
+    provider = ScriptedProvider({"oa-strategy-reviewer": [R.oa()]})       # no general agent turn is scripted
+    _offline(rt, monkeypatch, provider)
+    folder = tmp_path / "request"
+    folder.mkdir()
+    request = _review_request("oa-strategy-reviewer")
+    result = free_work.review_turn(provider, rt.cfg, None, request, folder)
+    (review,) = provider.calls
+    target = free_work.review_target(DRAFT)
+    assert review.role == "oa-strategy-reviewer" and target in review.packet_text and "사용자 요청:" not in review.packet_text
+    assert result["revised"] is False and result["effective_mode"] == "REVIEW_ONLY"
+    assert result["answer"].startswith(free_work.REVIEW_NOTE) and "## 검토 의견" in result["answer"] and "### oa-strategy-reviewer" in result["answer"]
+    assert (rt.store.run_dir(result["run_id"]) / "report-chat.md").read_text(encoding="utf-8") == result["answer"]
+    asked, reports = result["history"][-2:]
+    assert result["history"][:-2] == request["history"]
+    assert asked["parts"][0]["text"] == "[선택 검수 · OA 검수] 아래 문언을 검수해 줘.\n\n" + target and reports["parts"][0]["text"] == result["answer"]
+
+
+def test_a_fix_request_steers_the_review_then_the_agent_fixes_the_wording(rt, tmp_path, monkeypatch):
     provider = ScriptedProvider({"syntax-scope-reviewer": [R.syntax()], free_work.FREE_ROLE: [FIXED]})
     _offline(rt, monkeypatch, provider)
     folder = tmp_path / "request"
     folder.mkdir()
-    request = _review_request("syntax-scope-reviewer", "돌출부 지칭 위주로 봐 줘")
+    request = _review_request("syntax-scope-reviewer", "돌출부 지칭 위주로 보고 지적대로 고쳐 줘")
     result = free_work.review_turn(provider, rt.cfg, None, request, folder)
     review, fix = provider.calls
     target = free_work.review_target(DRAFT)
     assert review.role == "syntax-scope-reviewer" and "design_revision: N/A" in review.packet_text and "review_scope: DEPENDENT_SET" in review.packet_text
     assert target in review.packet_text and USER_FACT in review.packet_text
-    assert "사용자 피드백: 돌출부 지칭 위주로 봐 줘" in review.packet_text      # the feedback typed beside the tool reaches the reviewer
+    assert "사용자 요청: 돌출부 지칭 위주로 보고 지적대로 고쳐 줘" in review.packet_text   # the request typed beside the tool steers the reviewer
     assert "묶었습니다" not in review.packet_text                        # the general agent's prose is neither target nor material
     state = rt.store.load_state(result["run_id"])
     assert state.outcome == "REVIEW_ONLY_DONE" and state.candidate.draft_claim_lock is None
     assert [m["category"] for m in state.material_meta].count("invention") == 1   # the tool's request text is not material
-    # The general agent fixes the wording with the reviewer's report right above its turn and the feedback in it.
+    # The general agent carries the request out with the reviewer's report right above its turn.
     assert fix.role == free_work.FREE_ROLE and fix.system_instruction.startswith(free_work.FREE_SYSTEM)
-    assert "사용자 피드백: 돌출부 지칭 위주로 봐 줘" in fix.packet_text and fix.packet_text.endswith(target)
+    assert "사용자 요청: 돌출부 지칭 위주로 보고 지적대로 고쳐 줘" in fix.packet_text and fix.packet_text.endswith(target)
     assert fix.history[:2] == request["history"] and fix.history[-1]["parts"][0]["text"].startswith(free_work.REVIEW_NOTE)
     assert "### syntax-scope-reviewer" in fix.history[-1]["parts"][0]["text"]
-    # The answer is the fixed claims with what changed, not the report.
-    assert result["effective_mode"] == "REVIEW_ONLY"
+    # The request asked for a fix: the answer is the fixed claims with what changed, not the report.
+    assert result["effective_mode"] == "REVIEW_ONLY" and result["revised"] is True
     assert result["answer"].startswith(free_work.REVISED_LABEL.format(labels="통사·범위 검수")) and FIXED in result["answer"]
     assert "## 검토 의견" not in result["answer"] and "※ 작업 소요" in result["answer"]
     assert (rt.store.run_dir(result["run_id"]) / "report-chat.md").read_text(encoding="utf-8") == result["answer"]
     asked, reports, fix_asked, fixed = result["history"][-4:]
-    assert asked["parts"][0]["text"].startswith("[검수 반영 · 통사·범위 검수] 돌출부 지칭 위주로 봐 줘") and asked["parts"][0]["text"].endswith(target)
+    assert asked["parts"][0]["text"].startswith("[선택 검수 · 통사·범위 검수] 돌출부 지칭 위주로 보고 지적대로 고쳐 줘") and asked["parts"][0]["text"].endswith(target)
     assert reports["parts"][0]["text"] == fix.history[-1]["parts"][0]["text"]
     assert fix_asked["parts"][0]["text"] == fix.packet_text and fixed["parts"][0]["text"] == FIXED   # the bare fix, without labels
+
+
+def test_a_question_beside_the_review_is_answered_without_rewriting_a_claim(rt, tmp_path, monkeypatch):
+    answer = "명확성 위주로 보면 제2항의 `상기 돌출부`가 복수 중 어느 것인지 정해지지 않은 점이 첫 지적입니다 (OA 검수 보고서)."
+    provider = ScriptedProvider({"oa-strategy-reviewer": [R.oa()], free_work.FREE_ROLE: [answer]})
+    _offline(rt, monkeypatch, provider)
+    folder = tmp_path / "request"
+    folder.mkdir()
+    result = free_work.review_turn(provider, rt.cfg, None, _review_request("oa-strategy-reviewer", "명확성 위주로 봐 줘"), folder)
+    review, follow_up = provider.calls
+    assert "사용자 요청: 명확성 위주로 봐 줘" in review.packet_text and "사용자 요청: 명확성 위주로 봐 줘" in follow_up.packet_text
+    assert result["revised"] is False                                   # no claim block came back, so nothing was rewritten
+    assert result["answer"].startswith(free_work.ANSWERED_LABEL.format(labels="OA 검수")) and answer in result["answer"]
 
 
 def test_blind_reads_each_claim_with_its_parent_chain_and_skips_picture(rt, tmp_path, monkeypatch):
@@ -113,17 +147,18 @@ def test_blind_reads_each_claim_with_its_parent_chain_and_skips_picture(rt, tmp_
     _offline(rt, monkeypatch, provider)
     folder = tmp_path / "request"
     folder.mkdir()
-    result = free_work.review_turn(provider, rt.cfg, None, _review_request("blind-claim-reconstruction-reviewer", "형상 위주로"), folder)
-    first, second, fix = _blind_calls(provider, "claim_scope: INDEPENDENT", "claim_scope: DEPENDENT_SINGLE")
+    result = free_work.review_turn(provider, rt.cfg, None, _review_request("blind-claim-reconstruction-reviewer", "형상 위주로 보고 고쳐 줘"), folder)
+    first, second = _blind_calls(provider, "claim_scope: INDEPENDENT", "claim_scope: DEPENDENT_SINGLE")
+    (fix,) = _agent_calls(provider)
     for call in (first, second):
         assert call.role == "blind-claim-reconstruction-reviewer" and "mode: BLIND_SNAPSHOT" in call.packet_text
         assert USER_FACT not in call.packet_text and "검수" not in call.packet_text and not call.history
-        assert "형상 위주로" not in call.packet_text                     # the blind reader gets the wording alone, never the feedback
+        assert "형상 위주로" not in call.packet_text                     # the blind reader gets the wording alone, never the request
     assert "claim_scope: INDEPENDENT" in first.packet_text and "【청구항 1】" in first.packet_text and "【청구항 2】" not in first.packet_text
     assert "claim_scope: DEPENDENT_SINGLE" in second.packet_text and "target_claim_id: 2" in second.packet_text
     chain, claim = second.packet_text.split("parent_chain_text:\n")[1].split("\ntarget_claim_text:\n")
     assert chain.startswith("【청구항 1】") and "【청구항 2】" not in chain and claim.startswith("【청구항 2】")
-    assert "형상 위주로" in fix.packet_text                               # the feedback goes to the fix instead
+    assert "형상 위주로" in fix.packet_text                               # the request goes to the follow-up instead
     assert free_work.BLIND_NOTE in result["answer"] and free_work.BLIND_NOTE_TEXT in result["answer"]
     state = rt.store.load_state(result["run_id"])
     assert state.outcome == "REVIEW_ONLY_DONE" and len(state.candidate.current.records) == 2
@@ -140,19 +175,19 @@ def test_blind_finds_parents_in_the_conversation_and_user_lock_and_never_guesses
               "【청구항 7】\n제7항에 있어서,\n상기 홀은 관통하는,\n핵산 증폭 장치.\n\n"
               "【청구항 9】\n제8항에 있어서,\n상기 홀은 원형인,\n핵산 증폭 장치.")
     history = [{"role": "user", "parts": [{"text": "4항을 인용하는 5항을 써 줘\n---\n\n" + claim_4}]}, {"role": "model", "parts": [{"text": "초안입니다.\n\n" + claims}]}]
-    provider = ScriptedProvider({"blind-claim-reconstruction-reviewer": [R.blind(), R.blind()], free_work.FREE_ROLE: [FIXED]})
+    provider = ScriptedProvider({"blind-claim-reconstruction-reviewer": [R.blind(), R.blind()]})   # review only: no agent turn
     _offline(rt, monkeypatch, provider)
     folder = tmp_path / "request"
     folder.mkdir()
     result = free_work.review_turn(provider, rt.cfg, None, _review_request("blind-claim-reconstruction-reviewer", claims=claims, history=history, user_lock=user_lock), folder)
-    five, six, fix = _blind_calls(provider, "target_claim_id: 5", "target_claim_id: 6")
-    assert FIXED in result["answer"]
+    five, six = _blind_calls(provider, "target_claim_id: 5", "target_claim_id: 6")
+    assert not _agent_calls(provider) and result["revised"] is False
     chains = [call.packet_text.split("parent_chain_text:\n")[1].split("\ntarget_claim_text:\n")[0] for call in (five, six)]
     expected = [c.text for c in parse_claim_set(user_lock)[:2]] + [claim_4]
     assert chains[0] == "\n\n".join(expected)                             # the conversation's 제4항 wins over USER_LOCK's
     assert chains[1] == "\n\n".join([*expected, parse_claim_set(claims)[0].text])
     assert "번호 없는 초안" not in chains[0] and "예전 문언" not in chains[0]
-    report = fix.history[-1]["parts"][0]["text"]
+    report = result["answer"]
     assert "#### 제9항" in report and "부모 제8항 없음" in report             # no chain, no snapshot, said so
     assert "#### 제7항" in report and "자기 자신" in report                  # a self-citing draft has no chain (and no loop)
 
@@ -189,15 +224,17 @@ def test_free_conversation_sends_plainly_and_reviews_one_message(workspace, monk
     assert requests[1]["review"] == dict(roles=["oa-strategy-reviewer"], claim_text=free_work.review_target(DRAFT), message_id=answer["id"], note="")
     asked, placeholder = workspace.sessions[sid]["messages"][-2:]
     assert asked["mode"] == placeholder["mode"] == "REVIEW" and placeholder["execution_mode"] == "REVIEW_ONLY"
-    assert placeholder["review"]["revise"] is True                      # the answer will be the fixed wording
-    # Several tools picked in the panel, plus the feedback typed before Enter: one run, in the panel's order.
+    assert asked["review"]["asked"] is False and placeholder["review"]["revise"] is False   # an empty input: the review only
+    # Several tools picked in the panel, plus the request typed before Enter: one run, in the panel's order.
     workspace.review(sid, {"message": answer["id"], "roles": ["oa-strategy-reviewer", "syntax-scope-reviewer"], "text": " 명확성 위주로 "})
     wait_for(lambda: len(requests) == 3)
     assert requests[2]["review"]["roles"] == ["syntax-scope-reviewer", "oa-strategy-reviewer"] and requests[2]["review"]["note"] == "명확성 위주로"
-    assert requests[2]["text"].endswith("사용자 피드백: 명확성 위주로")
-    assert workspace.sessions[sid]["messages"][-2]["text"].startswith("[검수 반영 · 통사·범위 검수, OA 검수] 명확성 위주로")
+    assert requests[2]["text"].endswith("사용자 요청: 명확성 위주로")
+    assert workspace.sessions[sid]["messages"][-2]["text"].startswith("[선택 검수 · 통사·범위 검수, OA 검수] 명확성 위주로")
     fixed = workspace.sessions[sid]["messages"][-1]
+    assert fixed["review"]["asked"] is True
     fixed.update(text=FIXED, status="complete")
+    fixed["review"]["revise"] = True                                     # what execute records when the answer is fixed wording
     workspace.review(sid, {"message": fixed["id"], "role": "oa-strategy-reviewer"})        # a fixed answer is the next target
     wait_for(lambda: len(requests) == 4)
     assert requests[3]["review"]["claim_text"] == free_work.review_target(FIXED)
@@ -240,16 +277,25 @@ def test_free_draft_then_review_through_the_chat_worker(rt, tmp_path, monkeypatc
         draft = workspace.snapshot(sid)["messages"][-1]
         assert draft["status"] == "complete" and draft["execution_mode"] == "FREE", draft["text"]
         assert draft["text"].startswith(free_work.UNREVIEWED_LABEL)
+        # Enter on an empty input: the review itself.
         workspace.review(sid, {"message": draft["id"], "role": "syntax-scope-reviewer"})
         wait_for(lambda: not workspace.snapshot(sid)["running"], timeout=30)
         review = workspace.snapshot(sid)["messages"][-1]
         assert review["status"] == "complete" and review["execution_mode"] == "REVIEW_ONLY", review["text"]
-        assert review["text"].startswith(free_work.REVISED_LABEL.format(labels="통사·범위 검수")) and review["pipeline_run_id"]
-        assert DRAFT in review["text"] and "## 검토 의견" not in review["text"]      # the fixed wording, the report stays in the full report
+        assert review["text"].startswith(free_work.REVIEW_NOTE) and "## 검토 의견" in review["text"] and review["pipeline_run_id"]
+        assert review["review"]["revise"] is False
+        # Enter with a request: reviewed in that direction, then carried out (here a fix, so the answer is the wording).
+        workspace.review(sid, {"message": draft["id"], "role": "syntax-scope-reviewer", "text": "지적대로 고쳐 줘"})
+        wait_for(lambda: not workspace.snapshot(sid)["running"], timeout=30)
+        fixed = workspace.snapshot(sid)["messages"][-1]
+        assert fixed["status"] == "complete" and fixed["text"].startswith(free_work.REVISED_LABEL.format(labels="통사·범위 검수")), fixed["text"]
+        assert DRAFT in fixed["text"] and "## 검토 의견" not in fixed["text"]   # the fixed wording; the report stays in the full report
+        assert fixed["review"]["revise"] is True                         # so it can be the next review target
         assert workspace.sessions[sid]["run_id"] is None                   # a review never becomes the conversation's run
         history = json.loads((workspace.directory(sid) / "history.json").read_text(encoding="utf-8"))["history"]
-        assert [h["role"] for h in history] == ["user", "model"] * 3 and history[-1]["parts"][0]["text"] == DRAFT
-        assert history[3]["parts"][0]["text"].startswith(free_work.REVIEW_NOTE)
+        # draft asked/answered, review asked/answered, then review asked/answered and the request asked/answered
+        assert [h["role"] for h in history] == ["user", "model"] * 4 and history[-1]["parts"][0]["text"] == DRAFT
+        assert history[3]["parts"][0]["text"] == review["text"] and history[5]["parts"][0]["text"].startswith(free_work.REVIEW_NOTE)
     finally:
         workspace.close()
 
