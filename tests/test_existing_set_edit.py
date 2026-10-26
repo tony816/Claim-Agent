@@ -140,6 +140,43 @@ def test_resolver_needs_a_user_supplied_set_that_holds_the_target(tmp_path, requ
     assert RouteDecision(mode="REVIEW_ONLY", reason="의견", reviewers=["syntax-scope-reviewer"], authoring_scope="EXISTING_SET_EDIT").authoring_scope == "NEW_INDEPENDENT"
 
 
+NEW_10 = "【청구항 10】\n제9항에 있어서,\n상기 구속부는 상기 슬롯의 입구 쪽으로 갈수록 서로 가까워지는 케이블 클립 홀더."
+
+
+def test_a_new_claim_appended_after_the_set_is_an_edit_with_the_whole_set_as_its_chain(rt, request_indep, tmp_path, monkeypatch):
+    """Regression for run web-e69bc8a54174415cb943d99bccd59893: '돌출부에 대한 3항을 추가해줘' on a pasted set of 1~2 became a
+    new dependent set, re-ran the independent pipeline, and stopped at DEP_STYLE because 제2항 was in neither text."""
+    monkeypatch.setattr(R, "DEP_CLAIMS", [(10, 9, "DC-01", NEW_10)])
+    monkeypatch.setattr(R, "DEP_SET_TEXT", NEW_10)
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "append", text="10항을 추가해줘")
+    route = _route(blocks, target="10")
+    provider = ScriptedProvider(edit_script())
+    result = run_pipeline(rt, provider, request, route, blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
+    assert route.authoring_scope == "EXISTING_SET_EDIT" and route.edit_targets == [10]
+    assert "claim-architect" not in [c.role for c in provider.calls]
+    assert state.baseline_set.chain_nos == list(range(1, 10))
+    design = next(c for c in provider.calls if c.role == "dependent-claim-strategy-architect")
+    assert "제10항은(는) 기존 세트 끝에 새로 붙는 항" in design.packet_text
+    full = edited_set_text(state)
+    assert full.count("【청구항") == 10 and full.endswith(NEW_10)
+    blind = next(c for c in provider.calls if c.role == "blind-claim-reconstruction-reviewer")
+    assert all(f"【청구항 {n}】" in blind.packet_text for n in (1, 5, 8, 9, 10))       # the exact chain 10→9→8→5→1 only
+    assert not any(f"【청구항 {n}】" in blind.packet_text for n in (2, 6, 7))
+
+
+def test_appended_numbers_must_follow_the_set_without_a_gap():
+    from claim_agent.claim_scope import find_existing_set
+    from claim_agent.pipeline.claimtext import appended_nos
+
+    claims = parse_claim_set(BASELINE)
+    assert appended_nos(claims, {10, 11}) == {10, 11} and appended_nos(claims, {11}) == set() and appended_nos(claims, {9}) == set()
+    assert find_existing_set({10}, [("a", BASELINE)]) == ("a", BASELINE)
+    assert find_existing_set({11}, [("a", BASELINE)]) is None
+    assert find_existing_set({1}, [("a", BASELINE)]) is None          # an independent claim is never an edit target
+
+
 def test_a_design_numbered_2_to_6_gets_one_repair_call_then_stops_before_drafting(rt, request_indep, tmp_path, edit_roles):
     request, blocks, paths, folder = _conversation(tmp_path, request_indep, "numbers")
     provider = ScriptedProvider(edit_script(**{"dependent-claim-strategy-architect": [_numbered_design([2, 3, 4, 5, 6])] * 2}))
@@ -221,7 +258,8 @@ def test_an_edit_request_after_an_ordinary_run_starts_a_new_run_instead_of_resta
 def test_engine_refuses_an_edit_it_cannot_anchor_before_any_call(rt, request_indep, tmp_path):
     claims = tmp_path / "claims.md"
     claims.write_text(BASELINE, encoding="utf-8")
-    edit = request_indep.model_copy(update=dict(dependent=True, dependent_target="10", claim_file=str(claims), authoring_scope="EXISTING_SET_EDIT"))
+    # 제11항 leaves a gap after the set of 1~9 (제10항 would be a valid append).
+    edit = request_indep.model_copy(update=dict(dependent=True, dependent_target="11", claim_file=str(claims), authoring_scope="EXISTING_SET_EDIT"))
     finalize = edit.model_copy(update=dict(dependent_target="9", request_mode=RequestMode.FINALIZATION))
     for req, code in ((edit, "EDIT_TARGET_INVALID"), (finalize, "EDIT_SCOPE_DRAFT_ONLY")):
         provider = ScriptedProvider({})

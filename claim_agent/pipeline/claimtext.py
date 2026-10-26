@@ -71,7 +71,8 @@ def proposal_outside_targets(baseline: list[dict], targets: list[int], text: str
     for no, claim in sorted(pasted_claims(text).items()):
         old = base.get(no)
         if old is None:
-            out.append(f"제{no}항: 기존 세트에 없는 항")
+            if no not in targets:                           # a target appended after the set is new by definition
+                out.append(f"제{no}항: 기존 세트에 없는 항")
             continue
         cite = f"인용 {_cites(list(old['parent_nos']))} → {_cites(claim.parent_nos)}" if claim.parent_nos != list(old["parent_nos"]) else ""
         if no in targets:
@@ -254,6 +255,16 @@ def ordered_claims(*texts: str | None) -> list[Claim]:
     """
     claims = [c for t in texts if t and t.strip() for c in parse_claim_set(t)]
     return sorted(claims, key=lambda c: c.claim_no)
+
+
+def appended_nos(claims: list[Claim], targets: set[int]) -> set[int]:
+    """Targets an edit adds right after the end of the set (N+1, N+2, … without a gap), e.g. 제3항 on a set of 1~2.
+
+    A gap (제5항 on a set of 1~2) returns nothing, so those numbers stay outside the set and the edit is refused.
+    """
+    last = max((c.claim_no for c in claims), default=0)
+    new = {n for n in targets if n > last}
+    return new if new == set(range(last + 1, last + 1 + len(new))) else set()
 
 
 def ancestor_nos(claims: list[Claim], target_no: int) -> set[int]:

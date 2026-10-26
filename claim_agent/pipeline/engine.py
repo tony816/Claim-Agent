@@ -12,7 +12,7 @@ from ..config import AppConfig
 from ..graph.pipeline import GraphHooks
 from ..models.contracts import COMBINED_REVIEW, combined_contract, contract_for, main_tree_gate_gaps
 from ..models.enums import ExecStatus, NextStep, RequestMode, Scope, Status, StyleChangeMode
-from ..models.envelope import RoleEnvelope, envelope_schema_for
+from ..models.envelope import OpenIssue, RoleEnvelope, envelope_schema_for
 from ..models.ids import Identifiers, bump_dependent_design_revision, bump_dependent_revision, bump_design_revision, bump_revision, input_revision_id, record_id
 from ..models.request import EXISTING_SET_EDIT, MaterialBundle, RunRequest
 from ..models.state import (
@@ -41,6 +41,7 @@ from .claimtext import (
     ClaimParseError,
     MultiDependentChain,
     ancestor_nos,
+    appended_nos,
     as_claim_set,
     baseline_digest,
     claim_set_text,
@@ -210,14 +211,17 @@ class PipelineEngine(PriorArtSteps):
             halt("BASELINE_SET_INVALID", "기존 청구항 세트의 번호·인용관계가 올바르지 않아 편집 대상의 부모항 체인을 정할 수 없습니다.", problems)
         targets = parse_target(req.dependent_target) or set()
         by_no = {c.claim_no: c for c in claims}
-        wrong = [f"제{n}항: 세트에 없음" for n in sorted(targets) if n not in by_no]
+        new = appended_nos(claims, targets)
+        wrong = [f"제{n}항: 세트에 없음" for n in sorted(targets) if n not in by_no and n not in new]
         wrong += [f"제{n}항: 독립항" for n in sorted(targets) if n in by_no and by_no[n].is_independent]
         if not targets or wrong:
-            halt("EDIT_TARGET_INVALID", "편집 대상은 제공된 세트에 있는 종속항 번호여야 합니다.", wrong or ["편집 대상 번호 없음"])
+            halt("EDIT_TARGET_INVALID", "편집 대상은 제공된 세트에 있는 종속항 번호이거나 세트 끝에 바로 이어지는 새 번호여야 합니다.", wrong or ["편집 대상 번호 없음"])
         digest = baseline_digest(text)
         if state.baseline_set and state.baseline_set.sha256 == digest and state.baseline_set.edit_targets == sorted(targets):
             return
-        chain = sorted(set().union(*(ancestor_nos(claims, n) for n in targets)) - targets)
+        # A new claim's parent is chosen by the dependent design, so the whole set stays available as its chain.
+        cited = set().union(*(ancestor_nos(claims, n) for n in targets - new)) | (set(by_no) if new else set())
+        chain = sorted(cited - targets)
         ids = Identifiers(state.candidate.candidate_id, "r1", "N/A", input_revision=state.input_revision)
         rid = record_id("baseline_set", ids)
         state.baseline_set = BaselineSet(
@@ -1043,7 +1047,7 @@ class PipelineEngine(PriorArtSteps):
         assert d is not None and d.current is not None
         cur = d.current
         d.history.append(cur)
-        state.mark_superseded(list(cur.records.values()))
+        state.mark_superseded(cur.record_ids())
         nxt = DependentRevisionState(
             dependent_revision=bump_dependent_revision(cur.dependent_revision), dependent_design_revision=cur.dependent_design_revision,
             style_change_mode=mode, change_goal=feedback, meaning_draft_text=cur.meaning_draft_text if mode == StyleChangeMode.STYLE_ONLY_REVISION else None,
@@ -1060,7 +1064,7 @@ class PipelineEngine(PriorArtSteps):
         assert d is not None
         if d.current:
             d.history.append(d.current)
-            state.mark_superseded(list(d.current.records.values()))
+            state.mark_superseded(d.current.record_ids())
         if d.design_record_id:
             state.mark_superseded([d.design_record_id])
         d.dependent_design_revision = bump_dependent_design_revision(d.dependent_design_revision)
@@ -1310,6 +1314,10 @@ class PipelineEngine(PriorArtSteps):
         gate = "PASS"
         first_return: tuple[Transition, RoleEnvelope, str] | None = None
         halts: list[str] = []
+        # Every failed target's findings, so a return fixes them in one revision and a halt shows the user what was found.
+        issues: list[OpenIssue] = []
+        reports: list[str] = []
+        first_rid: str | None = None
         for tid, benv, penv, brid, prid, tr in results:
             t = TargetRecon(target_claim_id=tid, parent_chain_text=next(j[1] for j in jobs if j[0] == tid), target_claim_text=next(j[2] for j in jobs if j[0] == tid), blind_record_id=brid, picture_record_id=prid or None)
             t.blind_status = benv.execution_status.value if benv else None
@@ -1318,7 +1326,15 @@ class PipelineEngine(PriorArtSteps):
             if penv is None or tr is None:
                 gate = "UNVERIFIED"
                 halts.append(f"{tid}: blind {t.blind_status}")
-            elif tr.kind == "RETURN":
+                issues.append(OpenIssue(kind="UNVERIFIED", code="BLIND_NOT_COMPLETE", text=f"제{tid}항: blind snapshot {t.blind_status}"))
+                first_rid = first_rid or brid
+                continue
+            if tr.kind == "PROCEED":
+                continue
+            issues += [o.model_copy(update={"text": f"제{tid}항: {o.text}"}) for o in penv.open_issues]
+            reports.append(f"### 제{tid}항 비교 보고서 ({prid})\n\n{penv.report_markdown}")
+            first_rid = first_rid or prid
+            if tr.kind == "RETURN":
                 gate = "BLOCK"
                 if first_return is None:
                     first_return = (tr, penv, prid)
@@ -1330,11 +1346,15 @@ class PipelineEngine(PriorArtSteps):
         if gate == "PASS":
             state.stage = Stage.DEP_LOCK
             return
+        report = "\n\n".join(reports) or None
         if first_return is not None:
             tr, penv, prid = first_return
-            self._apply_return(state, tr, penv, prid, dependent=True)
+            merged = penv.model_copy(update={"open_issues": issues, "report_markdown": report or penv.report_markdown})
+            self._apply_return(state, tr, merged, prid, dependent=True)
             return
-        raise PipelineHalt(Halt(stage=st.value, role="picture-claim-reconstruction-reviewer", kind=gate if gate in ("REVIEW", "BLOCK", "UNVERIFIED", "LOOP_LIMIT") else "BLOCK", message="DEPENDENT_RECONSTRUCTION_GATE 실패: " + "; ".join(halts)))
+        raise PipelineHalt(Halt(stage=st.value, role="picture-claim-reconstruction-reviewer", kind=gate if gate in ("REVIEW", "BLOCK", "UNVERIFIED", "LOOP_LIMIT") else "BLOCK",
+                                message="DEPENDENT_RECONSTRUCTION_GATE 실패: " + "; ".join(halts),
+                                open_issues=[o.model_dump() for o in issues], record_id=first_rid, report_markdown=report))
 
     # ------------------------------------------------------------------ review only
     def _run_review_only(self, state: RunState, bundle: MaterialBundle) -> None:

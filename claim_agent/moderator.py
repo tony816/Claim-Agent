@@ -47,6 +47,7 @@ DELIVER_SYSTEM = f"""너는 Claim-Agent의 대화 모더레이터다. 검수 플
 
 - 첫 문장에서 사용자가 물은 것 또는 요청한 것에 답한다: 무엇을 했고 결과가 어떤지. 요청과 실제 수행이 다르면 그렇다고 말한다.
 - LOCK 여부와 중지 여부는 '실행 상태'에 적힌 대로만 말한다. 중지됐으면 왜 멈췄는지 한두 줄로 풀고, 사용자가 정할 것 하나를 질문으로 묻는다.
+- 멈춘 이유는 '중지 지적'에 적힌 내용으로만 설명한다. 지적에 없는 이유를 추측하지 않고, 지적이 없으면 없다고 말한다. 지적이 사용자가 준 부모항 문언에서 온 것이면 그렇게 말한다.
 - 검토 의견(REVIEW_ONLY)이면 결론, 핵심 이유 2~3개, 고칠 방향 순서로 리뷰어 지적을 사용자 질문의 말로 옮긴다. 리뷰어가 하지 않은 지적을 더하지 않는다.
 - 청구항 문언을 다시 쓰거나 인용하지 않는다(아래에 그대로 붙는다). 새 문언 후보도 만들지 않는다.
 - 5~10줄.
@@ -133,7 +134,23 @@ def seal_summary(state) -> str:
     if state.halt:
         h = state.halt
         out.append(f"중지: {h.stage} {h.kind} — {h.message}".strip())
+        # The reviewer's own findings, so the answer explains the stop from them instead of guessing (run replay2-e69bc8-165948).
+        issues = h.open_issues or []
+        if issues:
+            out.append("중지 지적 (검수 역할이 남긴 그대로):")
+            out += [f"- [{o.get('code') or o.get('kind')}] {_clip(o.get('text', ''), ISSUE_CHARS)}" for o in issues[:MAX_ISSUES]]
+            if len(issues) > MAX_ISSUES:
+                out.append(f"- 외 {len(issues) - MAX_ISSUES}건")
     return "\n".join(out)
+
+
+MAX_ISSUES = 6
+ISSUE_CHARS = 600
+
+
+def _clip(text: str, limit: int) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[:limit] + "…"
 
 
 def sealed_texts(state) -> list[str]:

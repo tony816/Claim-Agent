@@ -240,7 +240,9 @@ def edited_set_text(state: RunState) -> str | None:
     if not base or not dep or not dep.current or not dep.current.exact_text:
         return None
     edited = {c["claim_no"]: c["text"] for c in dep.current.claims}
-    return "\n\n".join(edited.get(c.claim_no, c.text) for c in base.claims)
+    kept = {c.claim_no for c in base.claims}
+    appended = [edited[n] for n in sorted(edited) if n not in kept]      # new claims added after the end of the set
+    return "\n\n".join([edited.get(c.claim_no, c.text) for c in base.claims] + appended)
 
 
 def no_lock_line(state: RunState) -> str:

@@ -117,6 +117,13 @@ class DependentRevisionState(BaseModel):
     targets: dict[str, TargetRecon] = Field(default_factory=dict)
     reconstruction_gate: str | None = None
 
+    def record_ids(self) -> list[str]:
+        """Every record this revision produced, including the per-target blind and picture records kept in `targets`."""
+        ids = list(self.records.values())
+        for t in self.targets.values():
+            ids += [rid for rid in (t.blind_record_id, t.picture_record_id) if rid]
+        return ids
+
 
 class DependentSetState(BaseModel):
     dependent_set_id: str
@@ -151,7 +158,7 @@ class BaselineSet(BaseModel):
     sha256: str                     # claimtext.baseline_digest of the parsed set
     claims: list[BaselineClaim]
     edit_targets: list[int]
-    chain_nos: list[int]            # every claim the targets cite, directly or not (targets excluded), ascending
+    chain_nos: list[int]            # every claim the targets cite, directly or not (targets excluded), ascending; the whole set when a target is appended
     chain_text: str
 
 

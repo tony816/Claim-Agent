@@ -132,11 +132,12 @@ def _claim_number(value, label: str) -> int:
 
 
 def find_existing_set(targets: set[int], sources: list[tuple[str, str]]) -> tuple[str, str] | None:
-    """(source_id, text) of the first source whose numbered claim set holds every target as a dependent claim.
+    """(source_id, text) of the first source whose numbered claim set holds every target as a dependent claim, or
+    takes it as a new claim right after its end (제3항 added to a set of 1~2).
 
     The set must also contain an independent claim: a lone fragment ('제8항에 있어서, …') is not a set to edit in place.
     """
-    from .pipeline.claimtext import ClaimParseError, parse_claim_set
+    from .pipeline.claimtext import ClaimParseError, appended_nos, parse_claim_set
 
     for source_id, text in sources:
         try:
@@ -144,7 +145,8 @@ def find_existing_set(targets: set[int], sources: list[tuple[str, str]]) -> tupl
         except ClaimParseError:
             continue
         by_no = {c.claim_no: c for c in claims}
-        if any(c.is_independent for c in claims) and all(n in by_no and not by_no[n].is_independent for n in targets):
+        new = appended_nos(claims, targets)
+        if any(c.is_independent for c in claims) and all(n in new or (n in by_no and not by_no[n].is_independent) for n in targets):
             return source_id, text
     return None
 

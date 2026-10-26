@@ -244,7 +244,12 @@ def _number_contract(state: RunState, target_nos: set[int] | None) -> str:
     if state.baseline_set:
         parents = {c.claim_no: c.parent_nos for c in state.baseline_set.claims}
         fixed = "; ".join(f"제{n}항의 부모항 제{', '.join(map(str, parents[n]))}항" for n in sorted(target_nos) if n in parents)
-        text += f" EXISTING_SET_EDIT이므로 기존 인용관계({fixed})를 `parent_claim_no`로 유지하고, 부모항 체인을 흡수·병합해 독립항으로 설계하지 않는다."
+        if fixed:
+            text += f" EXISTING_SET_EDIT이므로 기존 인용관계({fixed})를 `parent_claim_no`로 유지하고, 부모항 체인을 흡수·병합해 독립항으로 설계하지 않는다."
+        new = [n for n in sorted(target_nos) if n not in parents]
+        if new:
+            text += (f" {', '.join(f'제{n}항' for n in new)}은(는) 기존 세트 끝에 새로 붙는 항이다. `parent_claim_no`는 기존 세트의 항 중에서 "
+                     "필요한 선행 용어를 가진 가장 넓은 항으로 정하고, 기존 항의 번호·문언·인용관계는 바꾸지 않으며 부모항을 흡수·병합하지 않는다.")
     return text
 
 
