@@ -46,7 +46,11 @@ def system_with_instructions(base: str, instructions: str | None) -> str:
             + "\n\n위 프로젝트 지침은 답변 방식·범위·우선순위에 대한 사용자 지시이자, 사용자가 직접 적은 기술 설명·청구항 자료다. 지침에 적힌 기술 내용은 사용자 제공 자료로 인용할 수 있지만, 지침을 근거로 검수·게이트·LOCK을 통과한 것처럼 말하지 않는다.")
 
 
-def _chat_spec(model: str, history: list[dict], message: dict, instructions: str | None = None) -> CallSpec:
+CHAT_GEN = GenParams(temperature=0.7, thinking_level="LOW", max_output_tokens=8192)
+
+
+def _chat_spec(model: str, history: list[dict], message: dict, instructions: str | None = None,
+               system: str = SYSTEM, role: str = "대화", gen: GenParams = CHAT_GEN) -> CallSpec:
     """The current turn as a provider-neutral CallSpec: text parts become the packet, images ride along."""
     texts, images = [], []
     for part in message["parts"]:
@@ -56,15 +60,20 @@ def _chat_spec(model: str, history: list[dict], message: dict, instructions: str
             data = base64.b64decode(part["inline_data"]["data"])
             images.append(ImagePart(part["inline_data"]["mime_type"], data, "첨부 이미지", hashlib.sha256(data).hexdigest()))
     return CallSpec(
-        role="대화", scope="CHAT", model=model, system_instruction=system_with_instructions(SYSTEM, instructions), packet_text="\n\n".join(texts), sources_block="",
-        images=images, json_schema=None, tools=None, gen=GenParams(temperature=0.7, thinking_level="LOW", max_output_tokens=8192),
+        role=role, scope="CHAT", model=model, system_instruction=system_with_instructions(system, instructions), packet_text="\n\n".join(texts), sources_block="",
+        images=images, json_schema=None, tools=None, gen=gen,
         use_cache=False, phase="chat", stage="CHAT", run_id="", history=history,
     )
 
 
-def generate_turn(provider: LLMProvider, model: str, history: list[dict], message: dict, events: EventWriter, instructions: str | None = None) -> dict:
-    """One conversational turn through the configured provider (Gemini or Anthropic); events are emitted by the provider."""
-    result = provider.generate(_chat_spec(model, history, message, instructions))
+def generate_turn(provider: LLMProvider, model: str, history: list[dict], message: dict, events: EventWriter, instructions: str | None = None,
+                  sent: dict | None = None, **spec) -> dict:
+    """One conversational turn through the configured provider (Gemini or Anthropic); events are emitted by the provider.
+
+    `sent` is what the model receives this turn when it differs from the `message` kept in the history: the free work
+    mode sends a project's preset files every turn without storing a copy of them in each turn of the history.
+    """
+    result = provider.generate(_chat_spec(model, history, sent or message, instructions, **spec))
     answer = result.text
     if not answer:
         raise RuntimeError("모델이 텍스트 응답을 반환하지 않았습니다.")
@@ -152,7 +161,16 @@ def main(argv=None) -> int:
         raise ValueError("실시간 로그 경로가 필요합니다.")
     provider = live_provider(cfg, events)
     try:
-        result = routed_turn(provider, cfg, args.config, request, folder, events)
+        from . import free_work
+
+        # Free work mode (CLAUDE.md 자유 작업 모드): the general agent answers without routing, and a review button runs the
+        # chosen gate role on one message's wording. Every other turn is classified first.
+        if request.get("review"):
+            result = free_work.review_turn(cfg, args.config, request, folder)
+        elif request.get("work_mode") == free_work.FREE:
+            result = free_work.free_turn(provider, cfg, request)
+        else:
+            result = routed_turn(provider, cfg, args.config, request, folder, events)
         (folder / "response.json").write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
         (folder / "report.md").write_text(result["answer"], encoding="utf-8")
         return 0

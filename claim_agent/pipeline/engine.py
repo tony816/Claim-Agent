@@ -47,6 +47,7 @@ from .claimtext import (
     claim_set_text,
     contains_user_lock,
     exact_sha256,
+    independent_text,
     ordered_claims,
     parent_chain,
     parent_chain_text,
@@ -1364,14 +1365,24 @@ class PipelineEngine(PriorArtSteps):
         ids = Identifiers(state.candidate.candidate_id, "r1", "N/A", input_revision=state.input_revision)
         state.candidate.design_revision = "N/A"
         state.candidate.current = RevisionState(revision="r1", design_revision="N/A", exact_text=claim_text or None, exact_sha256=exact_sha256(claim_text) if claim_text else None)
-        kinds = {"syntax-scope-reviewer": "syntax", "oa-strategy-reviewer": "oa", "claim-success-reviewer": "success"}
+        kinds = {"syntax-scope-reviewer": "syntax", "oa-strategy-reviewer": "oa", "claim-success-reviewer": "success",
+                 "blind-claim-reconstruction-reviewer": "blind"}
         for role in req.reviewers or ["syntax-scope-reviewer"]:
             kind = kinds.get(role)
             if kind is None:
                 raise ProviderError(f"REVIEW_ONLY에서 지원하지 않는 역할: {role}")
             rid = record_id(kind, ids)
-            pk = packets.review_only(state, bundle, ids, rid, role, scope, claim_text, req.request_text)
-            env, ref = self._call(state, role, scope if scope != Scope.DEPENDENT_SINGLE else Scope.INDEPENDENT, Stage.REVIEW_ONLY, kind, pk, ids, rid, expected_exact=claim_text)
+            if kind == "blind":
+                # The independent claim's wording alone, in a fresh no-project context (no materials, request or other
+                # reports). Without a DESIGN_GATE there is nothing to compare it to, so picture does not follow.
+                target = independent_text(claim_text)
+                if not target:
+                    raise ProviderError("블라인드 복원에 넘길 청구항 문언이 없습니다.")
+                bp = BlindPacket(claim_scope="INDEPENDENT", candidate_id=ids.candidate_id, revision="r1", design_revision="N/A", record_id=rid, claim_text=target)
+                env, ref = self._call(state, role, Scope.INDEPENDENT, Stage.REVIEW_ONLY, kind, packets.Packet(bp.render()), ids, rid, blind=True)
+            else:
+                pk = packets.review_only(state, bundle, ids, rid, role, scope, claim_text, req.request_text)
+                env, ref = self._call(state, role, scope if scope != Scope.DEPENDENT_SINGLE else Scope.INDEPENDENT, Stage.REVIEW_ONLY, kind, pk, ids, rid, expected_exact=claim_text)
             state.candidate.current.records[kind] = rid
             state.review_reports[role] = env.report_markdown
         state.stage = Stage.DONE

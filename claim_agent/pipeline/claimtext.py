@@ -277,6 +277,15 @@ def baseline_digest(text: str) -> str:
     return exact_sha256(claim_set_text(parse_claim_set(text.replace("\r\n", "\n"))))
 
 
+def independent_text(text: str) -> str:
+    """The first independent claim of a claim document (header included), or the whole text when it has no headers."""
+    try:
+        claims = parse_claim_set(text)
+    except ClaimParseError:
+        return text.strip()
+    return next((c.text for c in claims if c.is_independent), claims[0].text).strip()
+
+
 def parent_chain_text(chain: list[Claim]) -> str:
     return "\n\n".join(c.text for c in chain)
 

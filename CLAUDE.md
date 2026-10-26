@@ -44,6 +44,16 @@
 - **뒷단(결과 전달):** 파이프라인·REVIEW_ONLY 결과가 나오면 사용자의 이번 메시지에 맞춘 `## 답변`을 첫머리에 쓴다. 요청과 실제 수행이 다르면 그렇게 말한다. 청구항 문언, `최종안` 칸, 게이트 표와 역할 보고서는 코드가 봉인 기록에서 그대로 아래에 붙이며 모더레이터가 다시 쓰지 않는다. 모더레이터 호출이 실패하면 결과를 지금 형식 그대로 낸다.
 - **권한 한계:** 모더레이터는 PASS·LOCK을 판정하지 않고, `최종안`·`확정`이라고 부르지 않으며, 실패하거나 미검증인 게이트를 숨기지 않는다. 기술 사실은 원자료 위치를 달고, 원자료가 답하지 않으면 `근거 미확인`과 발명자 확인 질문으로 남긴다. 앞선 답변·검수 보고서에서 가져온 판단은 그 출처를 밝힌다. 청구항 전문을 새로 쓰지 않으며 표현 후보는 짧은 구절에 `(미검수 후보)`를 붙여서만 보인다. 봉인된 문언과 한 글자라도 다른 `【청구항 N】` 블록은 코드가 `미검수 후보 — 사용 금지`로 표시한다.
 
+### 자유 작업 모드
+
+웹 대화의 작업 방식은 대화마다 `게이트 자동`(기본)과 `자유 작업` 중 하나다. 사용자가 화면에서 `자유 작업`으로 바꾸는 것은 그 대화에서 게이트 생략을 명시적으로 지시한 것으로 본다(미완성 답변 방지 하드 규칙의 예외). 다시 `게이트 자동`으로 바꾸면 그 메시지부터 이 문서의 모든 절차가 그대로 적용된다.
+
+- **1차 작업:** 자유 작업 대화의 메시지는 요청 분류·모더레이터·청구항 역할을 거치지 않고 일반 에이전트(`claim_agent/free_work.py`) 하나가 답한다. 일반 에이전트는 청구항 초안·수정안·의견을 바로 쓸 수 있으나 기술 사실은 사용자 제공 자료에서만 가져오고, 없으면 `근거 미확인`과 발명자 확인 질문으로 남긴다. 코드가 모든 답에 `미검수 초안 — 생략 단계: 전체 게이트(…)`를 붙이며, 그 문언은 `최종안`·`확정`이 아니고 어느 LOCK도 만들지 않는다.
+- **선택 검수:** 사용자는 `【청구항 N】` 문언이 있는 메시지 아래 버튼으로 `syntax-scope-reviewer`, `oa-strategy-reviewer`, `claim-success-reviewer`, `blind-claim-reconstruction-reviewer` 중 하나를 실행한다. 클릭은 그 메시지의 청구항 블록을 그대로 `REVIEW_ONLY`(`r1`, `design_revision: N/A`)의 검토 대상으로 넘긴다. 원자료는 사용자 메시지·첨부·프로젝트 자료뿐이며 일반 에이전트의 답은 원자료가 아니다. 설계 계약·상위 기록이 없어 할 수 없는 시험은 `UNVERIFIED`로 남고, 결과는 DRAFT·FINAL LOCK의 PASS 근거가 아니다.
+- **블라인드 단독:** 선택 검수의 블라인드 복원은 독립항 문언만 받는 새 context의 snapshot이며 역피처 검수가 아니다. DESIGN_GATE가 없으므로 picture 비교를 하지 않고 답에 그렇게 표시한다.
+- **검수 결과 반영:** 검수 보고서는 대화 기록에 남아 일반 에이전트가 다음 턴에 참고하지만, 고친 문언도 다시 검수하기 전에는 미검수다.
+- **LOCK이 필요하면:** 대화를 `게이트 자동`으로 되돌려 작성·수정을 요청한다. 자유 작업에서 나온 답과 검수 보고서는 `## 앞선 답변`·참고 자료일 뿐 원자료나 PASS 근거가 아니며, 요청은 평소대로 전체 게이트를 탄다.
+
 `AUTHORING_DRAFT`와 `FINALIZATION`의 각 청구대상 또는 대안 가지에는 안정적인 `candidate_id`를 하나 부여하고, 문언 버전은 별도 `revision`(`r1`, `r2` …)으로 관리한다. 설계 계약에는 `design_revision`(`d1`, `d2` …)을 부여한다. drafter가 목표 revision용으로 만든 의미 초안은 `meaning_draft_id`와 `revision_status: PRE_STYLE — NOT_GATE_ELIGIBLE`로 식별하며, 별도 `claim-style-adjuster`가 `style_record_id`, `TERM_EXPRESSION_GATE: PASS` 및 `CLAIM_STYLE_GATE: PASS`를 봉인한 때에만 success 이후 단계에 사용할 exact revision이 된다. 한 번 봉인된 문언이 공백·문장부호를 포함해 한 글자라도 바뀌면 같은 candidate_id의 새 revision이며 이전 style record·성공조건·TERM_EXPRESSION_GATE·syntax·OA·역구성 판정은 무효다. 주골격·계층·협동관계·최소충분 한정·기술 개념·USER_LOCK의 범위나 문언 또는 근거 원자료가 바뀌면 design_revision도 올리고 architect 단계부터 다시 시작한다. 최종 표면 용어·띄어쓰기·형상 술어만 범위 불변으로 바뀌면 같은 design_revision에서 `claim-style-adjuster`의 `STYLE_ONLY_REVISION` 경로로 새 claim revision을 만들 수 있다. 절 결속이나 기술관계 문언을 바꾸면 drafter의 새 PRE_STYLE revision부터 수행한다. 이미 있던 DRAFT·FINAL lock과 그 문언에 의존해 만든 종속항 산출물도 함께 무효화한다.
 
 종속항 세트에는 루트 식별자와 별도로 안정적인 `dependent_set_id`, 기술기여·후보 집합·인과사슬·부모항 전략 버전인 `dependent_design_revision`(`dd1`, `dd2` …), 정확한 종속항 세트 문언 버전인 `dependent_revision`(`dr1`, `dr2` …)을 부여한다. drafter의 종속항 의미 초안은 `dependent_meaning_draft_id`와 `dependent_revision_status: PRE_STYLE — NOT_GATE_ELIGIBLE`로 식별하며, style adjuster가 `dependent_style_record_id`와 두 스타일·용어 게이트를 봉인해야 exact dependent_revision이 된다. 봉인된 종속항 문언이 공백·문장부호를 포함해 한 글자라도 바뀌면 새 dependent_revision이며 이전 dependent style record·종속항 TERM_EXPRESSION_GATE·success·syntax·OA·종속항별 blind snapshot·picture 비교 판정은 무효다. 후보 집합, 과제–특징–작동원리–효과, 의미 한정 패키지, 부모항 전략, 형상·공간 객체 계약, 근거 원자료 또는 선행기술 집합이 바뀌면 dependent_design_revision도 올리고 `dependent-claim-strategy-architect`부터 다시 시작한다. 루트 candidate의 revision·design_revision 또는 DRAFT·FINAL lock이 바뀌면 해당 dependent_set의 설계·문언·검수·LOCK 전체를 무효화한다.
@@ -98,7 +108,7 @@
 ### 미완성 답변 방지 하드 규칙
 
 - 청구항 문언을 새로 쓰거나 고치는 요청(작성·수정·진행·확정, 회의식 문언 점검 포함)은 `AUTHORING_DRAFT` 또는 `FINALIZATION`의 전체 게이트로 진행하고 `REVIEW_ONLY`로 낮추지 않는다. 비용을 줄일 때는 범위(대상 항·후보 수)와 입력 분량을 줄이며 게이트를 빼지 않는다. 다만 문언을 받으려는 것이 아니라 가능성·이유·선택지를 묻는 질문은 `CONSULT`로 답하고, 사용자가 후보를 고르거나 반영을 지시한 메시지부터 전체 게이트로 진행한다. `CONSULT` 답의 표현 후보는 문언 산출물이 아니므로 이 규칙을 우회하는 데 쓰지 않는다.
-- 사용자가 채팅에서 명시적으로 `경량`·`검수 생략`을 지시한 경우에만 단계를 생략할 수 있다. 그때 문언에는 `미검수 초안 — 생략 단계: <목록>`을 붙이고 `최종안`·`확정`으로 부르지 않는다. 인계 문서·메모리·과거 세션의 작업 방식은 이 지시를 대신하지 않는다.
+- 사용자가 채팅에서 명시적으로 `경량`·`검수 생략`을 지시하거나 대화를 `자유 작업` 모드로 바꾼 경우에만 단계를 생략할 수 있다. 그때 문언에는 `미검수 초안 — 생략 단계: <목록>`을 붙이고 `최종안`·`확정`으로 부르지 않는다. 인계 문서·메모리·과거 세션의 작업 방식은 이 지시를 대신하지 않는다.
 - 역할 에이전트가 보고 없이 끝나거나(턴 한도·API 오류·중단) `GATE_NOT_RUN` 또는 `UNVERIFIED — INPUT_MISSING`을 내면 그 단계는 실행되지 않은 것이다. 같은 에이전트를 이어 깨우거나 빠진 입력을 채워 다시 호출하고, 같은 단계에서 3회 연속 실패하면 `누락 — <단계>`로 보고하고 멈춘다. 실행되지 않은 단계를 PASS나 결과로 취급하지 않는다.
 - 진행 중 사용자에게 문언을 인용할 때는 봉인 상태를 함께 적는다: `(PRE_STYLE·미검수)`, `(검수 중 — 다음 단계: <단계>)`. LOCK 전의 문언을 결과처럼 보이게 하지 않는다.
 - `최종안` 칸에는 DRAFT 또는 FINAL LOCK이 기록된 문언만 쓴다. LOCK이 없으면 `없음 — <단계> 미완료` 또는 `없음 — <게이트> 실패`로 쓰고, 해당 문언은 `판단 대기 revision` 또는 `실패 revision(사용 금지)`으로 상태와 함께만 보인다.

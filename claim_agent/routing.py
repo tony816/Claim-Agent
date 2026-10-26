@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .claim_scope import constrain_target
 from .provider.base import CallSpec, GenParams, LLMProvider
 
-Reviewer = Literal["syntax-scope-reviewer", "oa-strategy-reviewer", "claim-success-reviewer"]
+Reviewer = Literal["syntax-scope-reviewer", "oa-strategy-reviewer", "claim-success-reviewer", "blind-claim-reconstruction-reviewer"]
 RevisionKind = Literal["NONE", "STYLE_ONLY", "MEANING", "DESIGN"]
 AuthoringScope = Literal["NEW_INDEPENDENT", "NEW_DEPENDENT_SET", "EXISTING_SET_EDIT"]
 
@@ -78,7 +78,8 @@ ui_hints에 작성 대상이 골라져 있어도 의견만 질문하면 REVIEW_O
   '적절한지 검토해줘'): REVIEW_ONLY. 수정 문구까지 요구하면 AUTHORING_DRAFT. 작성하지 말고 검토만 하라고 하면 REVIEW_ONLY.
   이미 나온 검토·작성 결과를 두고 이유·선택지·가능성을 되묻는 후속 질문은 CONSULT다.
   문언·귀속·측정 기준·범위 비교는 syntax-scope-reviewer, 특허성·OA·법적 의견은 oa-strategy-reviewer,
-  성공조건 감사는 claim-success-reviewer. 복합 요청이면 해당 역할들을 선택한다.
+  성공조건 감사는 claim-success-reviewer, 문언만 읽은 비특허 기술 독자가 무엇을 복원하는지(블라인드 복원)는
+  blind-claim-reconstruction-reviewer. 복합 요청이면 해당 역할들을 선택한다.
   일반적인 특허 질문도 OA 역할에 연결하되 개별 청구항·자료 부재를 숨기지 않는다.
 - '변경하라는 지시가 있는데 기능 구현이 안 되면 어떤 방법을 택해야 할지', '어느 접근이 나은지',
   '삭제해도 기능이 유지되는지'처럼 제시된 청구항 문언의 기능·협동관계를 새로 검수해야 답할 수 있는 변경 방향의 타당성 질문은

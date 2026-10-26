@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from .claim_scope import resolve_claim_target
 from .config import load_config
+from .free_work import FREE, FREE_ROLE, GATED, REVIEW_ROLES, review_request_text, review_target
 from .live_events import EventReader
 from .live_log import LiveLogFormatter
 from .sources.extract import DOC_EXT, ExtractionError, extract_text
@@ -186,17 +187,31 @@ class Workspace:
             del self.sessions[sid]
             shutil.rmtree(folder, ignore_errors=True)
 
+    def set_work_mode(self, sid: str, mode) -> dict:
+        """게이트 자동 (every message classified, claim wording through the full gates) or 자유 작업 (CLAUDE.md 자유 작업 모드)."""
+        with self.lock:
+            self.directory(sid)
+            if mode not in (FREE, GATED):
+                raise ValueError("작업 방식은 게이트 자동 또는 자유 작업 중 하나입니다.")
+            if self.jobs.get(sid) and not self.jobs[sid]["done"]:
+                raise ValueError("응답이 끝난 뒤 작업 방식을 바꾸세요.")
+            session = self.sessions[sid]
+            session["work_mode"] = mode
+            self.persist(session)
+            return dict(id=sid, work_mode=mode)
+
     def running_count(self) -> int:
         with self.lock:
             return sum(1 for job in self.jobs.values() if not job["done"])
 
-    def create(self, project_id: str | None = None) -> dict:
+    def create(self, project_id: str | None = None, work_mode: str | None = None) -> dict:
         """A conversation, optionally bound to a project whose instructions and source files preset every turn."""
         with self.lock:
             if project_id:
                 self.project_dir(project_id)
             sid = uuid.uuid4().hex
-            session = dict(id=sid, title="새 대화", messages=[], files=[], run_id=None, updated=time.time(), project_id=project_id or None)
+            session = dict(id=sid, title="새 대화", messages=[], files=[], run_id=None, updated=time.time(), project_id=project_id or None,
+                           work_mode=FREE if work_mode == FREE else GATED)
             self.sessions[sid] = session
             self.persist(session)
             if project_id:
@@ -442,8 +457,10 @@ class Workspace:
             text = str(data.get("text", "")).strip()
             if not text or len(text) > 200000:
                 raise ValueError("메시지를 입력하세요. 최대 20만 글자까지 보낼 수 있습니다.")
-            status = self.run_status(session.get("run_id"))
             selected = data.get("files", [])
+            if session.get("work_mode") == FREE:
+                return self.start_free(sid, text, selected)
+            status = self.run_status(session.get("run_id"))
             halt = status and status["halt"]
             kind = chat_resume_kind(text, halt, bool(selected))
             if kind and (kind != "none" or not self.moderated):
@@ -460,12 +477,9 @@ class Workspace:
             # 작성 대상: 독립항만 / 특정 항 1개 / 종속항 범위 — validated here, then a hint for the router and a
             # deterministic narrowing in conversation_pipeline (the request text still has precedence).
             dependent, target, target_mode = resolve_claim_target(data)
-            rid = "web-" + uuid.uuid4().hex
-            job_dir = self.root / ".tui" / "requests" / rid
             model = self.cfg.default_model
             # Every web request is classified from its text; the composer has no chat/authoring switch. The claim
             # picker is a hint, never a bypass around interpretation of the user's current question.
-            job_dir.mkdir(parents=True)
             history = (read_state(folder / "history.json") or {}).get("history", [])
             prior_users = [m for m in session["messages"] if m["role"] == "user"]
             material = "\n\n".join(m["text"] for m in prior_users)
@@ -475,31 +489,89 @@ class Workspace:
             preset = self.project_inputs(session)
             session_files = [str(validate_attachment(folder / "uploads" / fid / known[fid]["name"]).path) for fid in dict.fromkeys([*earlier_files, *selected])]
             all_files = list(dict.fromkeys([*preset["files"], *session_files]))
-            req = job_dir / "chat.json"
-            save_json(req, dict(text=text, material=material, reference=context,
-                                files=all_files, attachments=preset["attachments"], history=history, model=model, run_id=session["run_id"],
-                                instructions=preset["instructions"], user_lock=preset["user_lock"], project=preset["project"],
-                                ui_hints=dict(dependent=dependent, target=target or "", target_mode=target_mode,
-                                              prior_search=bool(data.get("prior_search")),
-                                              **({"halted": {k: halt.get(k) for k in ("stage", "kind", "role", "message")}} if halt else {}))))
-            command = [sys.executable, "-u", "-m", "claim_agent.chat", "--project-root", str(self.root), "--request", str(req)]
-            if self.config:
-                command += ["--config", str(self.config)]
-            mid = uuid.uuid4().hex
-            session["messages"].extend([
-                dict(id=uuid.uuid4().hex, role="user", text=text, files=[known[f] for f in dict.fromkeys(selected)], mode="CHAT",
-                     claim_target=dict(mode=target_mode, dependent=dependent, target=target)),
-                dict(id=mid, role="assistant", text="", status="running", mode="CHAT", log_id=rid),
-            ])
-            session["title"] = session["messages"][0]["text"][:36]
-            session["updated"] = time.time()
-            self.persist(session)
-            job = dict(done=False, stopped=False, process=None, log="", log_base=0, mid=mid, folder=job_dir,
-                       mode="CHAT", run_id=None, previous_report=0, text=text, files=list(dict.fromkeys(selected)))
-            self.jobs[sid] = job
-            thread = threading.Thread(target=self.execute, args=(sid, job, command), daemon=True)
-            job["thread"] = thread
-            thread.start()
+            request = dict(text=text, material=material, reference=context,
+                           files=all_files, attachments=preset["attachments"], history=history, model=model, run_id=session["run_id"],
+                           instructions=preset["instructions"], user_lock=preset["user_lock"], project=preset["project"],
+                           ui_hints=dict(dependent=dependent, target=target or "", target_mode=target_mode,
+                                         prior_search=bool(data.get("prior_search")),
+                                         **({"halted": {k: halt.get(k) for k in ("stage", "kind", "role", "message")}} if halt else {})))
+            self.spawn_chat(sid, request, dict(text=text, files=[known[f] for f in dict.fromkeys(selected)],
+                                               claim_target=dict(mode=target_mode, dependent=dependent, target=target)),
+                            "CHAT", files=list(dict.fromkeys(selected)))
+
+    def start_free(self, sid: str, text: str, selected) -> None:
+        """자유 작업: the general agent answers without the router or gates; its claim wording stays unreviewed.
+
+        Only this turn's attachments travel with the message (earlier ones are already in the history); the project's
+        preset files are sent every turn beside it without being copied into the history.
+        """
+        folder = self.directory(sid)
+        session = self.sessions[sid]
+        self.require_connection()
+        known = {item["id"]: item for item in session["files"]}
+        if not isinstance(selected, list) or any(not isinstance(x, str) or x not in known for x in selected):
+            raise ValueError("이 대화에 첨부된 파일만 사용할 수 있습니다.")
+        selected = list(dict.fromkeys(selected))
+        preset = self.project_inputs(session)
+        request = dict(text=text, files=[str(validate_attachment(folder / "uploads" / fid / known[fid]["name"]).path) for fid in selected],
+                       project_attachments=preset["attachments"], history=(read_state(folder / "history.json") or {}).get("history", []),
+                       model=self.cfg.default_model, instructions=preset["instructions"], work_mode=FREE)
+        self.spawn_chat(sid, request, dict(text=text, files=[known[f] for f in selected]), "FREE", files=selected)
+
+    def review(self, sid: str, data: dict) -> None:
+        """자유 작업: run one clicked gate role on the claim wording of one message (REVIEW_ONLY — no LOCK, no PASS evidence)."""
+        with self.lock:
+            folder = self.directory(sid)
+            session = self.sessions[sid]
+            if self.jobs.get(sid) and not self.jobs[sid]["done"]:
+                raise ValueError("현재 응답을 완료하거나 중지한 뒤 검수하세요.")
+            if session.get("work_mode") != FREE:
+                raise ValueError("선택 검수는 자유 작업 모드에서 실행합니다. 작업 방식을 자유 작업으로 바꾸세요.")
+            role = data.get("role")
+            if role not in REVIEW_ROLES:
+                raise ValueError("지원하지 않는 검수 역할입니다.")
+            source = next((m for m in session["messages"] if m["id"] == data.get("message")), None)
+            if not source or source.get("status") == "running" or source.get("mode") == "REVIEW":
+                raise ValueError("검수할 메시지를 찾을 수 없습니다.")
+            target = review_target(source["text"])
+            if not target:
+                raise ValueError("이 메시지에는 검수할 청구항(【청구항 N】으로 시작하는 문언)이 없습니다.")
+            self.require_connection()
+            # The conversation's own uploads are in the history already; the project's files travel as material.
+            preset = self.project_inputs(session)
+            request = dict(text=review_request_text([role]), files=preset["files"], attachments=preset["attachments"],
+                           history=(read_state(folder / "history.json") or {}).get("history", []), model=self.cfg.default_model,
+                           instructions=preset["instructions"], user_lock=preset["user_lock"], project=preset["project"],
+                           review=dict(roles=[role], claim_text=target, message_id=source["id"]))
+            detail = dict(role=role, source=source["id"])
+            self.spawn_chat(sid, request, dict(text=f"[선택 검수 · {REVIEW_ROLES[role]}]\n\n{target}", files=[], review=detail), "REVIEW",
+                            answer=dict(execution_mode="REVIEW_ONLY", review=detail))
+
+    def spawn_chat(self, sid: str, request: dict, user: dict, mode: str, files: list[str] | None = None, answer: dict | None = None) -> None:
+        """Write one chat.json, add the user turn and a running answer, and run claim_agent.chat on it (caller holds the lock)."""
+        session = self.sessions[sid]
+        rid = "web-" + uuid.uuid4().hex
+        job_dir = self.root / ".tui" / "requests" / rid
+        job_dir.mkdir(parents=True)
+        req = job_dir / "chat.json"
+        save_json(req, request)
+        command = [sys.executable, "-u", "-m", "claim_agent.chat", "--project-root", str(self.root), "--request", str(req)]
+        if self.config:
+            command += ["--config", str(self.config)]
+        mid = uuid.uuid4().hex
+        session["messages"].extend([
+            dict(id=uuid.uuid4().hex, role="user", mode=mode, **user),
+            dict(id=mid, role="assistant", text="", status="running", mode=mode, log_id=rid, **(answer or {})),
+        ])
+        session["title"] = session["messages"][0]["text"][:36]
+        session["updated"] = time.time()
+        self.persist(session)
+        job = dict(done=False, stopped=False, process=None, log="", log_base=0, mid=mid, folder=job_dir,
+                   mode="CHAT", run_id=None, previous_report=0, text=request["text"], files=files or [])
+        self.jobs[sid] = job
+        thread = threading.Thread(target=self.execute, args=(sid, job, command), daemon=True)
+        job["thread"] = thread
+        thread.start()
 
     def diff(self, run_id: str, scope: str = "INDEPENDENT") -> str:
         from .runtime import build_runtime
@@ -693,8 +765,9 @@ class Workspace:
                 message["route_reason"] = self.redact(event.get("reason", ""))
                 job["log"] += f"\n[자동 분류: {event['mode']}] {event.get('reason', '')}\n"
                 continue
-            # Live text: the plain chat answer and the moderator's CONSULT answer (not its routing JSON or delivery draft).
-            if event.get("kind") == "delta" and job["mode"] == "CHAT" and (event.get("role") == "대화" or event.get("stage") == "CONSULT"):
+            # Live text: the plain chat answer, the free work agent's answer and the moderator's CONSULT answer (not its
+            # routing JSON or delivery draft).
+            if event.get("kind") == "delta" and job["mode"] == "CHAT" and (event.get("role") in ("대화", FREE_ROLE) or event.get("stage") == "CONSULT"):
                 message["text"] += self.redact(event.get("text", ""))
             job["log"] += formatter.feed(event)
         self.trim_log(job)
@@ -894,7 +967,7 @@ class Handler(BaseHTTPRequestHandler):
                     sessions = sorted(workspace.sessions.values(), key=lambda x: x["updated"], reverse=True)
                     projects = sorted(workspace.projects.values(), key=lambda x: x["updated"], reverse=True)
                     self.json(dict(model=workspace.cfg.default_model, code_version=self.server.code_version, busy=workspace.running_count(),
-                                   sessions=[dict(id=s["id"], title=s["title"], project_id=s.get("project_id")) for s in sessions],
+                                   sessions=[dict(id=s["id"], title=s["title"], project_id=s.get("project_id"), work_mode=s.get("work_mode") or GATED) for s in sessions],
                                    projects=[dict(id=p["id"], name=p["name"], files=len(p["files"]),
                                                   sessions=sum(1 for s in sessions if s.get("project_id") == p["id"])) for p in projects]))
             elif url.path == "/api/improve":
@@ -996,7 +1069,12 @@ class Handler(BaseHTTPRequestHandler):
                 project_id = data.get("project_id")
                 if project_id is not None and not isinstance(project_id, str):
                     raise ValueError("프로젝트를 찾을 수 없습니다.")
-                self.json(workspace.create(project_id or None))
+                self.json(workspace.create(project_id or None, data.get("work_mode")))
+            elif url.path == "/api/work-mode":
+                self.json(workspace.set_work_mode(str(data.get("id", "")), data.get("mode")))
+            elif url.path == "/api/review":
+                workspace.review(str(data.get("id", "")), data)
+                self.json({"ok": True})
             elif url.path == "/api/improve/mine":
                 self.json(workspace.improve_mine())
             elif url.path == "/api/improve/decide":
