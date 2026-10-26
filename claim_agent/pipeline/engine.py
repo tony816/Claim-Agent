@@ -60,6 +60,7 @@ from .claimtext import (
     renumber_line,
     renumber_text,
     unfinished,
+    unusable_parents,
     user_lock_kept,
     validate_parent_refs,
 )
@@ -237,8 +238,13 @@ class PipelineEngine(PriorArtSteps):
         present = sorted(n for n in targets if n in {no or place for place, (no, _) in enumerate(slots, 1)})
         ask = (f"요청한 {', '.join(f'제{n}항' for n in present)}은 세트에 이미 있는 번호입니다. 기존 항을 고쳐 쓰려면 '수정', 그 번호에 새 항을 "
                "만들어 끼우고 기존 항을 뒤로 밀려면 '새로'라고 답하거나, 그 말을 넣어 같은 요청을 다시 보내 주세요.") if intent == "UNCLEAR" and present else None
+        # New claims only after the end of the set (or no number yet): a claim the user left cut off or with a blank
+        # citation cannot be their parent, so it stays out of the chain, as written, instead of stopping the edit
+        # (사용자 결정 2026-10-26). Blank headers that cannot be numbered by place still stop it.
+        end = max((no or place for place, (no, _) in enumerate(slots, 1)), default=0)
+        append = all(n > end for n in targets)
         blanks = numbering_blanks(filled)
-        if blanks:
+        if blanks and (not append or any(no is None for no, _ in slots)):
             # Parsed as is, a blank citation reads as an independent claim, and blank headers out of place fold claims together.
             loose = [f"{place}번째 항: 종결부 없이 '…{' '.join(body.split())[-12:]}'로 끝남" for place, (_, body) in enumerate(slots, 1)
                      if place not in targets and unfinished(body)]
@@ -263,9 +269,14 @@ class PipelineEngine(PriorArtSteps):
                                                   "그 범위 인용을 고치거나, 새 항을 세트 끝에 붙여 달라고 요청해 주세요.", [str(exc)])
         by_no = {c.claim_no: c for c in claims}
         last = max(by_no, default=0)
+        excluded = unusable_parents(claims) if append else {}
+        kept = [f"제{n}항: {why} — 새 항의 부모항으로 쓰지 않고 원문 그대로 둠" for n, why in sorted(excluded.items())]
+        if append and len(excluded) == len(claims):
+            halt("BASELINE_SET_UNFINISHED", f"편집할 기존 청구항 세트({origin})에 새 항이 인용할 수 있는 끝맺어진 항이 없습니다. "
+                                            f"{origin}에서 고친 뒤 같은 요청을 다시 보내 주세요.", kept)
         if not targets:
             halt("APPEND_TARGET_NEEDED", f"편집할 기존 청구항 세트({origin})는 제{last}항에서 끝납니다. 새 종속항을 붙일 번호를 제{last + 1}항부터 정해 답해 주세요 "
-                                         f"(예: '제{last + 1}항', '제{last + 1}~{last + 3}항').", kind="USER_DECISION")
+                                         f"(예: '제{last + 1}항', '제{last + 1}~{last + 3}항').", kept, kind="USER_DECISION")
         beyond = {n for n in targets if n > last}
         # New claims: inserted ones (their numbers were left free) and ones right after the end of the set.
         new = (targets - set(by_no) - beyond if moved else set()) | appended_nos(claims, beyond)
@@ -281,7 +292,7 @@ class PipelineEngine(PriorArtSteps):
             return
         # A new claim's parent is chosen by the dependent design, so every claim before it stays available as its chain.
         cited = set().union(*(ancestor_nos(claims, n) for n in targets - new)) | ({n for n in by_no if n < max(new)} if new else set())
-        chain = sorted(cited - targets)
+        chain = sorted(cited - targets - set(excluded))
         loose = [f"제{n}항: 종결부 없이 '…{' '.join(by_no[n].body.split())[-12:]}'로 끝남" for n in chain if unfinished(by_no[n].body)]
         if loose:
             halt("BASELINE_SET_UNFINISHED", f"{named}의 부모항이 끝맺어지지 않았습니다. 부모항은 이 편집에서 고치지 않으므로 {origin}에서 고친 뒤 "
@@ -295,7 +306,7 @@ class PipelineEngine(PriorArtSteps):
             record_id=rid, source_path=req.claim_file or "", sha256=digest,
             claims=[BaselineClaim(claim_no=c.claim_no, parent_nos=c.parent_nos, text=c.text) for c in claims],
             edit_targets=sorted(targets), chain_nos=chain, chain_text=claim_set_text([by_no[n] for n in chain]),
-            user_lock_released=released, renumbered=moved,
+            user_lock_released=released, renumbered=moved, excluded=excluded,
         )
         record, md = build_baseline_record(state)
         self.store.write_record(state.run_id, rid, {**record, "report_markdown": md}, md)
@@ -304,7 +315,8 @@ class PipelineEngine(PriorArtSteps):
         state.notes.append(f"기존 청구항 세트 편집: {named}만 작성 — 부모항 체인 "
                            f"{', '.join(f'제{n}항' for n in chain)}은 읽기 전용(BASELINE_SET {rid}, 미검증)"
                            + (f"; USER_LOCK 중 {', '.join(f'제{n}항' for n in released)}은 이번 요청이 편집 대상으로 지정해 잠금 해제" if released else "")
-                           + (f"; {named}을 새 항으로 끼우며 기존 항 번호·인용을 옮김({renumber_line(moved)})" if moved else ""))
+                           + (f"; {named}을 새 항으로 끼우며 기존 항 번호·인용을 옮김({renumber_line(moved)})" if moved else "")
+                           + (f"; 부모항으로 쓰지 않고 원문 그대로 둔 항: {', '.join(f'제{n}항({why})' for n, why in sorted(excluded.items()))}" if excluded else ""))
 
     def scope_guard(self, state: RunState, bundle: MaterialBundle) -> None:
         """Refuse a dependent-claim request that has no independent claim to hang it on — before any model call.
@@ -576,6 +588,11 @@ class PipelineEngine(PriorArtSteps):
         # In an edit of an existing set, the targets keep the citations they have there (no absorbed parent chain).
         base_parents = {b.claim_no: b.parent_nos for b in state.baseline_set.claims} if state.baseline_set else {}
         moved: list[str] = []
+        outside: list[str] = []         # a new claim citing a claim outside the chain (e.g. one left cut off) or a later one
+
+        def allowed(n: int) -> set[int]:
+            return set(state.baseline_set.chain_nos if state.baseline_set else ()) | {t for t in requested or () if t < n}
+
         if requested and env.status in (Status.PASS, Status.PASS_RANGE):
             actual = None
             if stage == Stage.DEP_ARCHITECT:
@@ -586,6 +603,9 @@ class PipelineEngine(PriorArtSteps):
                     scope_problem = "종속항 설계 번호가 중복되었습니다."
                 moved = [f"{x.dc_id} 제{x.planned_claim_no}항의 부모 제{x.parent_claim_no}항 (기존 제{', '.join(map(str, base_parents[x.planned_claim_no]))}항)"
                          for x in tsc if x.planned_claim_no in base_parents and x.parent_claim_no is not None and x.parent_claim_no not in base_parents[x.planned_claim_no]]
+                outside = [f"{x.dc_id} 제{x.planned_claim_no}항의 부모 제{x.parent_claim_no}항" for x in tsc
+                           if state.baseline_set and x.planned_claim_no is not None and x.planned_claim_no not in base_parents
+                           and x.parent_claim_no is not None and x.parent_claim_no not in allowed(x.planned_claim_no)]
             elif stage in (Stage.DEP_DRAFT, Stage.DEP_STYLE):
                 actual = {x.claim_no for x in env.claims}
                 if len(actual) != len(env.claims):
@@ -598,10 +618,15 @@ class PipelineEngine(PriorArtSteps):
                     scope_problem = "종속항 구조화 목록과 exact 문언의 항 번호가 다릅니다."
                 moved = [f"제{x.claim_no}항의 인용 {('제' + ', '.join(map(str, x.parent_nos)) + '항') if x.parent_nos else '없음(독립항)'} (기존 제{', '.join(map(str, base_parents[x.claim_no]))}항)"
                          for x in parsed if x.claim_no in base_parents and x.parent_nos != base_parents[x.claim_no]]
+                outside = [f"제{x.claim_no}항의 인용 제{', '.join(map(str, x.parent_nos))}항" for x in parsed
+                           if state.baseline_set and x.claim_no not in base_parents and not set(x.parent_nos) <= allowed(x.claim_no)]
             if actual is not None and actual != requested:
                 scope_problem = f"요청한 종속항 {sorted(requested)}와 산출 항 번호 {sorted(str(x) for x in actual)}가 다릅니다. 임의 범위 확대/누락을 허용하지 않습니다."
             elif moved and not scope_problem:
                 scope_problem = "기존 세트 편집에서 편집 대상 항의 인용관계를 바꾸거나 부모항을 흡수해 독립항으로 만들 수 없습니다: " + "; ".join(moved)
+            elif outside and not scope_problem:
+                chain = ", ".join(f"제{n}항" for n in state.baseline_set.chain_nos) if state.baseline_set else ""
+                scope_problem = f"기존 세트 편집의 새 항은 부모항 체인({chain})이나 그보다 앞의 새 항만 인용할 수 있습니다: " + "; ".join(outside)
         issued = contract.passes(env, state.request_mode) if role in REVIEWER_ROLES or role == "blind-claim-reconstruction-reviewer" else env.status in (Status.PASS, Status.PASS_RANGE)
         evidence_problem = None
         unconfirmed = env.unconfirmed_evidence()

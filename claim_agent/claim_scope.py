@@ -153,7 +153,8 @@ def find_existing_set(targets: set[int], sources: list[tuple[str, str]]) -> tupl
         text = fill_blank_headers(original)
         if numbering_blanks(text):
             slots = claim_slots(text)
-            if len(slots) > 1 and all(1 < n <= len(slots) for n in targets):
+            beyond = {n for n in targets if n > len(slots)}
+            if len(slots) > 1 and all(n > 1 for n in targets) and beyond == set(range(len(slots) + 1, len(slots) + 1 + len(beyond))):
                 return source_id, original
             continue
         try:

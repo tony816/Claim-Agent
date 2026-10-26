@@ -258,6 +258,10 @@ def _number_contract(state: RunState, target_nos: set[int] | None) -> str:
         if new:
             text += (f" {', '.join(f'제{n}항' for n in new)}은(는) 기존 세트 끝에 새로 붙는 항이다. `parent_claim_no`는 기존 세트의 항 중에서 "
                      "필요한 선행 용어를 가진 가장 넓은 항으로 정하고, 기존 항의 번호·문언·인용관계는 바꾸지 않으며 부모항을 흡수·병합하지 않는다.")
+            if state.baseline_set.excluded:
+                text += (" 부모항은 부모항 체인 전문에 있는 항(" + ", ".join(f"제{n}항" for n in state.baseline_set.chain_nos) + ")이나 그보다 앞의 새 항 "
+                         "중에서만 고른다. " + ", ".join(f"제{n}항({why})" for n, why in sorted(state.baseline_set.excluded.items()))
+                         + "은(는) 사용자가 아직 마무리하지 않은 항이라 부모항으로 쓰지 않으며, USER_LOCK에 있어도 그 선행 용어를 근거로 삼지 않는다.")
         inserted = [n for n in sorted(target_nos) if n not in parents and n < last]
         if inserted:
             text += (f" {', '.join(f'제{n}항' for n in inserted)}은(는) 사용자가 새로 만들라고 한 항으로, 기존 항을 뒤로 밀고 그 번호에 끼운다. "

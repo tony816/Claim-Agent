@@ -20,7 +20,7 @@ from claim_agent.pipeline.engine import Decision
 from claim_agent.provider.base import ProviderError
 from claim_agent.provider.scripted import ScriptedProvider
 from claim_agent.routing import RouteDecision
-from claim_agent.store.report import edited_set_text
+from claim_agent.store.report import edited_set_text, render_chat_report
 from claim_agent.store.telemetry import read_telemetry
 
 from . import scripted_roles as R
@@ -456,16 +456,45 @@ def _append_route(blocks):
                          authoring_scope="EXISTING_SET_EDIT")
 
 
-def test_dependents_asked_for_without_a_number_on_a_set_with_blanks_stop_on_the_blanks(rt, request_indep, tmp_path):
+NEW_7 = "【청구항 7】\n제5항에 있어서,\n상기 복수의 돌출부는 상기 바디의 일측을 따라 서로 이격되어 배치되는 핵산 증폭 장치."
+
+
+def test_new_claims_on_a_set_with_blanks_skip_the_unfinished_claims_as_parents(rt, request_indep, tmp_path, monkeypatch):
+    """User decision 2026-10-26 (run web-f09a88a6): new claims after the end of the set go on; a claim cut off, with a blank
+    citation, or citing such a claim is left out of their chain and kept as written, instead of stopping the edit."""
+    monkeypatch.setattr(R, "DEP_CLAIMS", [(7, 5, "DC-01", NEW_7)])
+    monkeypatch.setattr(R, "DEP_SET_TEXT", NEW_7)
     request, blocks, paths, folder = _conversation(tmp_path, request_indep, "open-blank", text="히트리드 모듈에 대한 종속항들 작성해줘",
                                                    instructions="", user_lock=LID_LOCK)
     route = _append_route(blocks)
-    provider = ScriptedProvider({})
-    result = run_pipeline(rt, provider, request, route, blocks, paths, folder)
-    state = rt.store.load_state(result["run_id"])
+    provider = ScriptedProvider(edit_script())
+    first = run_pipeline(rt, provider, request, route, blocks, paths, folder)
+    state = rt.store.load_state(first["run_id"])
     assert route.authoring_scope == "EXISTING_SET_EDIT" and route.edit_targets == [] and provider.calls == []
-    assert state.halt.reason_code == "BASELINE_SET_UNNUMBERED" and "세트 끝에 붙일 새 종속항" in state.halt.message
-    assert [i["text"][:6] for i in state.halt.open_issues] == ["제6항(상기", "3번째 항:"]
+    assert state.halt.reason_code == "APPEND_TARGET_NEEDED" and "제6항에서 끝납니다" in state.halt.message
+    assert [i["text"][:4] for i in state.halt.open_issues] == ["제3항:", "제4항:", "제6항:"]
+    chat = render_chat_report(state)
+    assert "기존 세트 편집" in chat and "독립항 LOCK 없음" not in chat and "독립항 문언 없음" not in chat and "미실행: ARCHITECT" not in chat
+    state = rt.engine(provider).resume(state.run_id, Decision(text="7항으로 해줘"))
+    assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
+    base = state.baseline_set
+    assert base.edit_targets == [7] and base.chain_nos == [1, 2, 5] and sorted(base.excluded) == [3, 4, 6]
+    design = next(c for c in provider.calls if c.role == "dependent-claim-strategy-architect")
+    assert "제1항, 제2항, 제5항" in design.packet_text and "제3항(종결부 없이 끝남)" in design.packet_text
+    full = edited_set_text(state)
+    assert full.endswith(NEW_7) and "【청구항 6】\n제항에 있어서" in full and "을 포함하고,\n\n【청구항 4】" in full
+
+
+def test_a_new_claim_citing_a_claim_left_out_of_the_chain_is_refused(rt, request_indep, tmp_path, monkeypatch):
+    monkeypatch.setattr(R, "DEP_CLAIMS", [(7, 4, "DC-01", NEW_7.replace("제5항", "제4항"))])
+    monkeypatch.setattr(R, "DEP_SET_TEXT", NEW_7.replace("제5항", "제4항"))
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "cites-out", text="히트리드 모듈에 대한 종속항을 7항으로 추가해줘",
+                                                   instructions="", user_lock=LID_LOCK)
+    provider = ScriptedProvider(edit_script(**{"dependent-claim-strategy-architect": [R.dep_architect()] * 2}))
+    result = run_pipeline(rt, provider, request, _route(blocks, target="7"), blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert [c.role for c in provider.calls] == ["dependent-claim-strategy-architect"] * 2
+    assert "REQUEST_SCOPE_MISMATCH" in state.halt.message and "DC-01 제7항의 부모 제4항" in state.halt.message
 
 
 def test_dependents_asked_for_without_a_number_ask_for_it_and_the_answer_appends_them(rt, request_indep, tmp_path, monkeypatch):

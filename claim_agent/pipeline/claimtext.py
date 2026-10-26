@@ -402,6 +402,21 @@ def unfinished(body: str) -> bool:
     return body.rstrip().endswith((",", ";"))
 
 
+def unusable_parents(claims: list[Claim]) -> dict[int, str]:
+    """Claims a new claim must not cite, by number with why: a blank citation (제항), a body cut off mid-sentence, or a
+    citation, direct or not, of such a claim. An edit keeps them in the set as the user wrote them."""
+    out: dict[int, str] = {}
+    for c in sorted(claims, key=lambda c: c.claim_no):
+        broken = [p for p in c.parent_nos if p in out]
+        if _blank_citation(c.body):
+            out[c.claim_no] = "인용항 번호(제항)가 비어 있음"
+        elif unfinished(c.body):
+            out[c.claim_no] = "종결부 없이 끝남"
+        elif broken:
+            out[c.claim_no] = f"부모항으로 쓸 수 없는 제{broken[0]}항을 인용함"
+    return out
+
+
 def parent_chain_text(chain: list[Claim]) -> str:
     return "\n\n".join(c.text for c in chain)
 

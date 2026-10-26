@@ -83,16 +83,22 @@ def _gate_table(state: RunState) -> str:
     return "\n".join(rows)
 
 
+def _set_edit(state: RunState) -> bool:
+    """An edit of the user's set, also when it stopped before the set was sealed (blank numbers, numbers to ask for)."""
+    return bool(state.baseline_set) or state.request.get("authoring_scope") == "EXISTING_SET_EDIT"
+
+
 def _pending_list(state: RunState) -> list[str]:
     if state.request_mode.value == "REVIEW_ONLY":
         expected = state.request.get("reviewers") or ["syntax-scope-reviewer"]
         seen = {r.role for r in state.records.values() if not r.stale and not r.superseded}
     else:
         # An edit of an existing set has no independent stages: its root is the user's baseline chain.
-        expected = [] if state.baseline_set else ["ARCHITECT", "DRAFT", "STYLE", "SUCCESS", "SYNTAX", "OA", "BLIND", "PICTURE"]
+        edit = _set_edit(state)
+        expected = [] if edit else ["ARCHITECT", "DRAFT", "STYLE", "SUCCESS", "SYNTAX", "OA", "BLIND", "PICTURE"]
         if state.request.get("dependent"):
             # An edit's combined review records success, syntax and OA under DEP_SUCCESS.
-            expected += ["DEP_ARCHITECT", "DEP_DRAFT", "DEP_STYLE", "DEP_SUCCESS"] + ([] if state.baseline_set else ["DEP_SYNTAX", "DEP_OA"]) + ["DEP_RECON"]
+            expected += ["DEP_ARCHITECT", "DEP_DRAFT", "DEP_STYLE", "DEP_SUCCESS"] + ([] if edit else ["DEP_SYNTAX", "DEP_OA"]) + ["DEP_RECON"]
         seen = {r.stage for r in state.records.values() if not r.stale and not r.superseded}
     return [stage for stage in expected if stage not in seen]
 
@@ -151,7 +157,7 @@ def _clip(text: str, limit: int) -> str:
 
 def _lock_phrase(state: RunState) -> str:
     c, dep = state.candidate, state.dependent
-    if state.baseline_set:
+    if _set_edit(state):
         out = "기존 세트 편집(부모항 체인 원문 유지·미검증)"
     else:
         out = "독립항 " + ("FINAL_CLAIM_LOCK" if c.final_claim_lock else "DRAFT_CLAIM_LOCK(잠정안)" if c.draft_claim_lock else "LOCK 없음")
@@ -263,7 +269,8 @@ def unlocked_label(state: RunState) -> str:
 
 def _edit_section(state: RunState) -> list[str]:
     base, dep = state.baseline_set, state.dependent
-    assert base is not None
+    if base is None:            # stopped before the set was sealed: nothing was written
+        return [no_lock_line(state), "", "기존 청구항 세트를 봉인하기 전에 멈췄습니다. 새로 쓴 항은 없고, 세트는 제공된 원문 그대로입니다.", ""]
     nos = ", ".join(f"제{n}항" for n in base.edit_targets)
     lock = dep.draft_set_lock if dep else None
     text = dep.current.exact_text if dep and dep.current and dep.current.exact_text else None
@@ -367,7 +374,7 @@ def render_chat_report(state: RunState) -> str:
             out += [f"### {role}", "", report, ""]
         if not state.review_reports:
             out += ["검토 의견 없음 (검토 역할이 보고서를 남기기 전에 중지)", ""]
-    elif state.baseline_set:
+    elif _set_edit(state):
         out += ["## 최종안", ""] + _edit_section(state)
     else:
         root_text = cur.exact_text if cur and cur.exact_text else (cur.meaning_draft_text if cur else None)
@@ -420,7 +427,7 @@ def render_report(state: RunState, claims_only: bool = False) -> str:
         if not state.review_reports:
             out.append("검토 보고서가 아직 생성되지 않았습니다.")
         out.append("")
-    elif state.baseline_set:
+    elif _set_edit(state):
         out.extend(_edit_section(state))
     else:
         out.extend(_root_section(state, root_text))
@@ -428,7 +435,7 @@ def render_report(state: RunState, claims_only: bool = False) -> str:
         out.extend(["## 중지 단계의 검토 내용", "",
                     "아래는 해당 역할의 원 보고서입니다. 제시된 방향·예시 문언은 후속 검수를 통과한 확정안이 아닙니다.", "",
                     state.halt.report_markdown, ""])
-    if dep and not state.baseline_set:
+    if dep and not _set_edit(state):
         out.extend(_dependent_section(state))
     out.extend(feedback_lines(state))
     out.append("## 핵심 판단")

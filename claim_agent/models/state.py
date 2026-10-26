@@ -158,10 +158,12 @@ class BaselineSet(BaseModel):
     sha256: str                     # claimtext.baseline_digest of the parsed set
     claims: list[BaselineClaim]
     edit_targets: list[int]
-    chain_nos: list[int]            # every claim the targets cite, directly or not (targets excluded), ascending; the whole set when a target is appended
+    chain_nos: list[int]            # every claim the targets cite, directly or not (targets excluded), ascending; the whole set but `excluded` when a target is appended
     chain_text: str
     user_lock_released: list[int] = Field(default_factory=list)   # USER_LOCK claims the request names for editing; the rest stay locked
     renumbered: dict[int, int] = Field(default_factory=dict)      # old → new number of the set's claims moved back for new ones (NEW)
+    # Appended claims only: the set's claims left out of the chain, kept as written, with why (blank citation, cut off, citing one)
+    excluded: dict[int, str] = Field(default_factory=dict)
 
 
 class Halt(BaseModel):
