@@ -51,6 +51,7 @@ class Gates(BaseModel):
     CLAIM_STYLE_GATE: GateValue | None = None
     NON_PATENT_TECHNICAL_READER_GATE: GateValue | None = None
     GEOMETRIC_OBJECT_GATE: GateValue | None = None
+    FUNCTION_DEDUCTION_GATE: GateValue | None = None   # 성공조건 조건 2 구성–기능 연역시험
     OA_DRAFT_GATE: GateValue | None = None
     OA_FINAL_GATE: GateValue | None = None
     DEPENDENT_DESIGN_GATE: GateValue | None = None
@@ -59,6 +60,7 @@ class Gates(BaseModel):
     INVENTIVE_STEP: GateValue | None = None
     PRE_STYLE_NON_PATENT_TECHNICAL_READER_CHECK: GateValue | None = None
     PRE_STYLE_GEOMETRIC_OBJECT_CHECK: GateValue | None = None
+    PRE_STYLE_FUNCTION_DEDUCTION_CHECK: GateValue | None = None
     PREEXAM_NOVELTY_GATE: GateValue | None = None   # the pre-examiner's suggestion; the engine decides (설계 5.3)
 
     def get(self, name: str) -> GateValue | None:

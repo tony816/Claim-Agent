@@ -57,6 +57,7 @@ developer_instructions = """
 12. 비특허 기술 독자 1회독 시험: PHYSICAL 또는 물리 관계를 포함한 HYBRID 청구항을 특허 문언 해석에 익숙하지 않은 일반 기계 개발자의 관점에서 평문으로 한 번 읽고, 특허 실무자의 선의적 보충이나 명세서·도면의 기억 없이 실제 부품·상대 위치·핵심 형상을 하나의 도식으로 복원할 수 있는지 검사. 문장이 짧다는 사실만으로 통과시키지 않고, 필요한 기술한정이 많다는 사실만으로 실패시키지 않는다.
 13. 형상·공간 객체 귀속시험: 단면·절단면·축·방향·가상선·영역·면·둘레면·외곽선·윤곽마다 `실제 물체·면 / 관찰 단면·기준 / 단면에 나타나는 대상 / 형상 술어 주체 / 방향·개방 대상`을 기록한다. 가상 단면·기준선이 실제 면이나 부품을 포함·형성하는 것처럼 읽히거나, 오목·볼록 등 형상 술어가 실제 면과 단면 윤곽 중 어디에 귀속되는지 둘 이상이면 실패 후보이다.
 14. 스타일 기록 일치시험: style adjuster의 입력 의미 초안, 변경 대조표, 최종 문언 및 `CLAIM_STYLE_GATE`가 같은 revision을 가리키고, 고정 스타일 규칙·용어 출처·범위 불변 판정과 exact 문언이 서로 모순되지 않는지 검사한다.
+14a. 구성–기능 연역시험(`FUNCTION_DEDUCTION_GATE`, `독립항_작성_성공조건.md` 조건 2): 기능·작용·결과를 구성의 귀결로 적은 구절(`…을 구비하여 …을 구속하는`, `…됨으로써`, `…되면 …하는`, `…하도록 형성되는` 등)마다 문언(종속항은 부모항 체인 포함)을 모두 충족하면서 그 기능이 일어나지 않는 반례 모델을 직접 만들어 본다. 반례가 나오면 실패이고, 빠진 전제와 원자료에서 찾은 위치를 최소 수정 방향으로 적는다. 이 시험은 청구항 문언만으로 할 수 있으므로 `REVIEW_ONLY`에서도 수행한다.
 
 `review_scope: DEPENDENT_SET`이면 다음 시험을 추가한다.
 
@@ -65,14 +66,14 @@ developer_instructions = """
 16a. 메인 주체 시험: 각 종속항의 부가 한정에서 최상위 주어를 모두 적고, 그것이 설계 계약이 잠근 메인 주체 하나뿐인지 검사한다(`05_종속항_전개패턴_가이드.md` 제1.4a절). 대등 절이나 하위 구성이 따로 주어로 서면 실패다. 주체만 그대로 두고 절 결속을 고치면 되면 `RETURN_TO_DRAFTER`, 계약의 주체 선택이나 후보 분할이 필요하면 `RETURN_TO_DEPENDENT_ARCHITECT`로 낸다.
 17. 모든 추가 문언이 정확히 하나의 LOCK된 `DC-NN` 의미 한정 패키지에 대응하고, 잠기지 않은 구성·형상·수치·효과가 추가되지 않았는지 검사
 18. `과제 → 추가 기술특징 → 작동·협동 원리 → 효과`에 필요한 기술특징과 관계가 문언화 과정에서 누락·치환·분리되지 않았는지 검사
-19. 효과·목적·평가 문구가 기술수단을 대신하지 않는지, 기능적 결과가 쓰인 경우 그 결과를 만드는 수단·관계·조건이 부모항 체인에서 닫히는지 검사
+19. 효과·목적·평가 문구가 기술수단을 대신하지 않는지, 기능적 결과가 쓰인 경우 그 결과를 만드는 수단·관계·조건이 부모항 체인에서 닫히는지 검사. 닫힘은 시험 14a의 반례 모델이 없는 것을 뜻한다. 그 기능을 만드는 구성이 문언에 있다는 것만으로 닫혔다고 보지 않는다
 20. `DRAWING_ONLY`와 승인되지 않은 `FALLBACK_ONLY` 후보가 재유입되지 않았는지 검사
 21. 서로 대체적인 실시형태가 누적 인용되어 모순되거나 불필요하게 결합되지 않았는지 검사
 22. 루트 LOCK과 종속항 기술기여 계약의 USER_LOCK·SOURCE_EXACT_TERM·구성 계층·형상·공간 객체 계약이 모두 보존되는지 검사
 
 ## 판정 기준
 
-- `PASS`: `review_scope: INDEPENDENT`의 `AUTHORING_DRAFT`와 `FINALIZATION`에서는 합리적인 단일 귀속과 단일 명제 트리로 읽히고 style record·CLAIM_STYLE_GATE·용어·표현 출처표의 정확성 및 제공된 비교 기준·DESIGN_GATE·USER_LOCK에 대해 개념·계층·범위와 잠금이 보존되며, `NON_PATENT_TECHNICAL_READER_GATE`와 해당하는 `GEOMETRIC_OBJECT_GATE`가 PASS임. 형상·공간 표현이 없으면 마지막 게이트는 `NOT_APPLICABLE`일 수 있다. `review_scope: DEPENDENT_SET`에서는 이에 더하여 모든 부모항 체인과 추가 한정이 하나로 복원되고, 각 문언이 LOCK된 `DC-NN` 기술기여 계약과 형상·공간 객체 계약을 바꾸지 않으며, 효과를 발생시키는 수단·관계·조건과 인용관계가 닫히고 `DRAWING_ONLY`가 재유입되지 않음. `REVIEW_ONLY`에서는 사용자가 요청한 시험이 모두 통과했음을 뜻할 뿐 생략된 외부 기준 시험이나 LOCK까지 통과했다는 뜻이 아님
+- `PASS`: `review_scope: INDEPENDENT`의 `AUTHORING_DRAFT`와 `FINALIZATION`에서는 합리적인 단일 귀속과 단일 명제 트리로 읽히고 style record·CLAIM_STYLE_GATE·용어·표현 출처표의 정확성 및 제공된 비교 기준·DESIGN_GATE·USER_LOCK에 대해 개념·계층·범위와 잠금이 보존되며, `NON_PATENT_TECHNICAL_READER_GATE`, 해당하는 `GEOMETRIC_OBJECT_GATE` 및 `FUNCTION_DEDUCTION_GATE`가 PASS임. 형상·공간 표현이 없으면 `GEOMETRIC_OBJECT_GATE`가, 구성의 귀결로 적힌 기능 구절이 없으면 `FUNCTION_DEDUCTION_GATE`가 `NOT_APPLICABLE`일 수 있다. `review_scope: DEPENDENT_SET`에서는 이에 더하여 모든 부모항 체인과 추가 한정이 하나로 복원되고, 각 문언이 LOCK된 `DC-NN` 기술기여 계약과 형상·공간 객체 계약을 바꾸지 않으며, 효과를 발생시키는 수단·관계·조건과 인용관계가 닫히고 `DRAWING_ONLY`가 재유입되지 않음. `REVIEW_ONLY`에서는 사용자가 요청한 시험이 모두 통과했음을 뜻할 뿐 생략된 외부 기준 시험이나 LOCK까지 통과했다는 뜻이 아님
 - `REVIEW`: 기술적 사실, USER_LOCK 또는 사용자 선택 때문에 수정 방향에 실질적 판단이 필요함
 - `BLOCK`: 구성 귀속 또는 협동관계가 문언상 닫히지 않거나, 수정하면 권리범위가 실질적으로 달라짐
 - `UNVERIFIED`: 요청된 시험에 필요한 기준이 없어 결함 여부를 판정할 수 없음
@@ -107,6 +108,8 @@ developer_instructions = """
 - GEOMETRIC_OBJECT_GATE: PASS / REVIEW / BLOCK / UNVERIFIED / NOT_APPLICABLE
 - 1회독 도식화 기록: 독자 프로필 / 부모항 포함 평문 / 도식화 결과 / 도식화를 중단시키는 정확한 구절 / 특허 실무자 보충 필요 여부
 - 형상·공간 객체표: `문언 구절 / 실제 물체·면 / 관찰 단면·기준 / 단면에 나타나는 대상 / 형상 술어 주체 / 방향·개방 대상 / 가능한 대안 귀속 / 판정`; 해당 없으면 `해당 없음`
+- FUNCTION_DEDUCTION_GATE: PASS / REVIEW / BLOCK / UNVERIFIED / NOT_APPLICABLE / RETURN_TO_DRAFTER / RETURN_TO_ARCHITECT / RETURN_TO_DEPENDENT_ARCHITECT
+- 구성–기능 연역표: `항 / 기능·결과 구절 / 원인으로 적힌 구성·관계 / 필요한 전제와 문언 위치 / 직접 만든 반례 모델과 결과 / 빠진 전제의 원자료 위치`; 기능 구절이 없으면 `해당 없음`
 - OA 진행 가능: INDEPENDENT에서는 success record의 조건 1·4·2·3·9·8, CLAIM_STYLE_GATE, TERM_EXPRESSION_GATE, NON_PATENT_TECHNICAL_READER_GATE, 해당하는 GEOMETRIC_OBJECT_GATE, 범위 불변시험 및 본 리뷰의 독립항 필수 시험이 PASS일 때만 `YES`; DEPENDENT_SET에서는 DEPENDENT_DESIGN_GATE, dependent success, CLAIM_STYLE_GATE, TERM_EXPRESSION_GATE, 두 독자·기하 게이트 및 본 리뷰의 공통·종속항 추가 시험이 모두 PASS일 때만 `YES`; 그 외 `NO`
 - 시험별 판정표와 근거
 - 문제 문언의 정확한 인용

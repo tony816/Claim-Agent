@@ -27,6 +27,7 @@ MUTATION_TYPES = {
     "DROP_SKELETON_TERM": "주골격 용어 하나를 빼서 필수 한정 누락을 만든다",
     "UNSOURCED_COINAGE": "출처 없는 즉석 조어를 넣어 용어·표현 출처 게이트를 시험한다",
     "GEOMETRIC_SUBJECT_SWAP": "형상 술어의 귀속 주체를 가상 단면으로 바꿔 형상·공간 객체 게이트를 시험한다",
+    "FUNCTION_PREMISE_GAP": "기능 구절의 전제를 빼서 구성에서 기능이 연역되지 않게 하고 구성–기능 연역 게이트를 시험한다",
     "PARENT_CHAIN_BREAK": "종속항의 부모항 인용을 끊어 선행기재·부모항 체인을 시험한다",
     "SCOPE_DRIFT": "스타일 단계에서 권리범위를 바꾸는 표면 수정을 넣어 범위 불변 시험을 시험한다",
     "DRAWING_ONLY_DEPENDENT": "기술기여 없는 단순 도면 묘사를 종속항으로 올려 기술기여 게이트를 시험한다",
@@ -39,6 +40,7 @@ MUTATION_INSTRUCTION = {
     "DROP_SKELETON_TERM": "이번 실행에서는 주골격 명제 중 하나를 청구항 문언에서 의도적으로 빠뜨린 채 진행한다.",
     "UNSOURCED_COINAGE": "이번 실행에서는 원자료에 없는 새 구성 명칭을 하나 지어내어 출처 라벨 없이 사용한다.",
     "GEOMETRIC_SUBJECT_SWAP": "이번 실행에서는 형상 술어의 귀속 주체를 실제 부품·면이 아니라 가상 단면·기준선에 붙여 쓴다.",
+    "FUNCTION_PREMISE_GAP": "이번 실행에서는 기능을 구성의 귀결로 적은 구절 하나에서 그 기능이 성립하는 전제(간격·치수 관계, 접촉 등)를 빼고 기능만 남긴다.",
     "PARENT_CHAIN_BREAK": "이번 실행에서는 종속항 하나의 인용 항 번호를 부모항 체인과 어긋나게 적는다.",
     "SCOPE_DRIFT": "이번 실행에서는 스타일 정리 단계에서 표면 용어를 바꾸며 권리범위도 함께 좁힌다.",
     "DRAWING_ONLY_DEPENDENT": "이번 실행에서는 과제·작동원리·효과가 닫히지 않는 단순 도면 묘사를 종속항 하나로 올린다.",
@@ -49,6 +51,7 @@ MUTATION_INSTRUCTION = {
 _GATE_MUTATION = {
     "TERM_EXPRESSION_GATE": "UNSOURCED_COINAGE",
     "GEOMETRIC_OBJECT_GATE": "GEOMETRIC_SUBJECT_SWAP",
+    "FUNCTION_DEDUCTION_GATE": "FUNCTION_PREMISE_GAP",
     "NON_PATENT_TECHNICAL_READER_GATE": "GEOMETRIC_SUBJECT_SWAP",
     "CLAIM_STYLE_GATE": "SCOPE_DRIFT",
     "DESIGN_GATE": "DROP_SKELETON_TERM",

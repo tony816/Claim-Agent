@@ -1,14 +1,14 @@
 {
-  "key": "247a6c2e4694bbd55040073b2f74c98fdaf04e9b5b737a5747fdb1e871454a48",
+  "key": "4b15797bf081b069e5651341d7fe8c5d85976321bac1809464fea17c422343a1",
   "meta": {
     "role": "blind-claim-reconstruction-reviewer",
     "scope": "DEPENDENT_SINGLE",
-    "model": "gemini-3.8-flash",
+    "model": "opus",
     "phase": "main",
     "stage": "DEP_RECON",
     "record_id": "dbs-clip-holder-dep-dr1-4-01",
     "target_claim_id": "4",
-    "system_sha": "b144a70f9b60e68bb2d4af747ee34afe24b39212fdbc5b288d4c79a9dfca0880",
+    "system_sha": "a451b8115cf637d9c4c2d6cd48988a123992f75b600b26e24df102553d97a932",
     "sources_sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "packet_sha": "5dd809469516067526d0c9f646f36a10857740714bf60059c5ee2da1af4b6644",
     "gen": {
@@ -67,7 +67,7 @@
     "cache_name": null,
     "function_calls": [],
     "finish_reason": "STOP",
-    "model": "gemini-3.8-flash",
+    "model": "opus",
     "provider": "scripted"
   }
 }

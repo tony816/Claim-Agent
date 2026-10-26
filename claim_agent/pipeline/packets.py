@@ -111,6 +111,13 @@ def _output_contract(extra: str = "") -> str:
     )
 
 
+# 성공조건 조건 2 구성–기능 연역시험: the drafter's pre-style check and the gate style, success and syntax must report.
+_DEDUCTION = ("`gates.{gate}`에는 성공조건 조건 2의 구성–기능 연역시험 결과를 적는다. 기능·결과를 구성의 귀결로 적은 구절마다 문언을 모두 충족하면서 "
+              "그 기능이 일어나지 않는 반례 모델을 만들어 보고, 나오면 PASS로 하지 않는다. 그런 구절이 없으면 NOT_APPLICABLE이다. ")
+_DRAFT_DEDUCTION = _DEDUCTION.format(gate="PRE_STYLE_FUNCTION_DEDUCTION_CHECK")
+_GATE_DEDUCTION = _DEDUCTION.format(gate="FUNCTION_DEDUCTION_GATE")
+
+
 # --------------------------------------------------------------------------- independent
 #
 # Packet layout (stable prefix first): `USER_LOCK → 원자료 → run-invariant upstream reports` come before the
@@ -141,7 +148,7 @@ def drafter_independent(state: RunState, store, bundle: MaterialBundle, ids: Ide
     if prior_text:
         txt += _section("직전 확정 revision 청구항 전문", prior_text)
         txt += _section("이번 의미 변경 목표", change_goal or "")
-    txt += _output_contract("`exact_claim_text`에 PRE_STYLE 의미 초안 전문을, `gates.DRAFTER_GATE`와 두 PRE_STYLE 검사를 적고, `handoff_ready`는 `claim-style-adjuster 인계 가능` 값이다.")
+    txt += _output_contract("`exact_claim_text`에 PRE_STYLE 의미 초안 전문을, `gates.DRAFTER_GATE`와 세 PRE_STYLE 검사(독자·기하·연역)를 적고, `handoff_ready`는 `claim-style-adjuster 인계 가능` 값이다. " + _DRAFT_DEDUCTION)
     return Packet(txt, imgs)
 
 
@@ -171,7 +178,7 @@ def style_independent(
             txt += _section("직전 확정 revision 청구항 전문", prior_text)
             txt += _section("이번 의미 수정 목표", feedback or "")
     txt += _section("조건부 보조 소스", "`search_style_corpus`/`open_routing_index` 도구가 제공된 경우에만 07 §3 조건에서 사용하고, 사용하지 않았으면 `조건부 보조 소스: NOT_ACTIVATED`로 기록한다.")
-    txt += _output_contract("`exact_claim_text`에 스타일 적용 후 최종 청구항 전문을 넣고, `finalized_status`, `TERM_EXPRESSION_GATE`, `CLAIM_STYLE_GATE`, `NON_PATENT_TECHNICAL_READER_GATE`, `GEOMETRIC_OBJECT_GATE`를 채운다.")
+    txt += _output_contract("`exact_claim_text`에 스타일 적용 후 최종 청구항 전문을 넣고, `finalized_status`, `TERM_EXPRESSION_GATE`, `CLAIM_STYLE_GATE`, `NON_PATENT_TECHNICAL_READER_GATE`, `GEOMETRIC_OBJECT_GATE`, `FUNCTION_DEDUCTION_GATE`를 채운다. " + _GATE_DEDUCTION)
     return Packet(txt, imgs)
 
 
@@ -186,7 +193,7 @@ def success_independent(state: RunState, store, bundle: MaterialBundle, ids: Ide
     txt += _report(state, store, style_record_id, "style record 전문 (변경 대조표·용어·표현 출처표·두 후처리 게이트·독자·기하 게이트)")
     if corpus_fragments:
         txt += _section("style record가 사용한 코퍼스 정확 조각과 라우팅 인덱스", corpus_fragments)
-    txt += _output_contract("`handoff_ready`는 `syntax 진행 가능` 값이다. `exact_claim_text`에는 검수 대상 전문을 그대로 echo한다.")
+    txt += _output_contract("`handoff_ready`는 `syntax 진행 가능` 값이다. `exact_claim_text`에는 검수 대상 전문을 그대로 echo한다. " + _GATE_DEDUCTION)
     return Packet(txt, imgs)
 
 
@@ -200,7 +207,7 @@ def syntax_independent(state: RunState, store, bundle: MaterialBundle, ids: Iden
     txt += _report(state, store, style_record_id, "style record 전문 (CLAIM_STYLE_GATE: PASS)")
     txt += _report(state, store, success_record_id, "claim-success-reviewer success record 전문 (상태: PASS)")
     txt += _section(f"범위 불변 비교 기준 전문 ({mode.value})", baseline_text or "style record의 PRE_STYLE 의미 초안 참조")
-    txt += _output_contract("`status`는 종합 판정, `handoff_ready`는 `OA 진행 가능` 값이다.")
+    txt += _output_contract("`status`는 종합 판정, `handoff_ready`는 `OA 진행 가능` 값이다. " + _GATE_DEDUCTION)
     return Packet(txt, imgs)
 
 
@@ -330,7 +337,7 @@ def drafter_dependent(state: RunState, store, bundle: MaterialBundle, ids: Ident
     if prior_set_text:
         txt += _section("직전 확정 dependent_revision 세트 전문", prior_set_text)
         txt += _section("이번 의미 변경 목표", change_goal or "")
-    txt += _output_contract("`claims[]`에 각 종속항의 claim_no·parent_claim_no·dc_id·text(【청구항 N】 헤더 포함 전문)를, `exact_claim_text`에 세트 전문을 넣는다." + _edit_contract(state))
+    txt += _output_contract("`claims[]`에 각 종속항의 claim_no·parent_claim_no·dc_id·text(【청구항 N】 헤더 포함 전문)를, `exact_claim_text`에 세트 전문을 넣는다. " + _DRAFT_DEDUCTION + _edit_contract(state))
     return Packet(txt, imgs)
 
 
@@ -351,7 +358,7 @@ def style_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identif
         if mode == StyleChangeMode.DRAFTER_REVISION and prior_set_text:
             txt += _section("직전 확정 dependent_revision 세트 전문", prior_set_text)
             txt += _section("이번 의미 수정 목표", feedback or "")
-    txt += _output_contract("`claims[]`에 최종 종속항 세트(항별 전문)를, `exact_claim_text`에 세트 전문을, `per_claim_gates[]`에 목표항별 독자·기하 판정을 넣는다." + _edit_contract(state))
+    txt += _output_contract("`claims[]`에 최종 종속항 세트(항별 전문)를, `exact_claim_text`에 세트 전문을, `per_claim_gates[]`에 목표항별 독자·기하 판정을 넣는다. " + _GATE_DEDUCTION + _edit_contract(state))
     return Packet(txt, imgs)
 
 
@@ -365,7 +372,7 @@ def success_dependent(state: RunState, store, bundle: MaterialBundle, ids: Ident
     txt += _report(state, store, dep_style_record_id, "dependent style record 전문")
     if corpus_fragments:
         txt += _section("style record가 사용한 코퍼스 정확 조각과 라우팅 인덱스", corpus_fragments)
-    txt += _output_contract("`handoff_ready`는 `syntax 진행 가능` 값이다. `per_claim_gates[]`에 목표항별 판정을 적는다.")
+    txt += _output_contract("`handoff_ready`는 `syntax 진행 가능` 값이다. `per_claim_gates[]`에 목표항별 판정을 적는다. " + _GATE_DEDUCTION)
     return Packet(txt, imgs)
 
 
@@ -378,7 +385,7 @@ def syntax_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identi
     txt += _report(state, store, dep_style_record_id, "dependent style record 전문")
     txt += _report(state, store, dep_success_record_id, "dependent success record 전문")
     txt += _section(f"범위 불변 비교 기준 ({mode.value})", baseline_text or "dependent style record의 PRE_STYLE 세트 참조")
-    txt += _output_contract("`status`는 종합 판정, `handoff_ready`는 `OA 진행 가능` 값이다.")
+    txt += _output_contract("`status`는 종합 판정, `handoff_ready`는 `OA 진행 가능` 값이다. " + _GATE_DEDUCTION)
     return Packet(txt, imgs)
 
 
@@ -458,6 +465,7 @@ def review_dependent_combined(state: RunState, store, bundle: MaterialBundle, id
                     "upstream 미통과 사유로 UNVERIFIED를 적는다.")
     txt += _output_contract(
         "`gates`에 CLAIM_STYLE_GATE·TERM_EXPRESSION_GATE(성공조건 재검사), NON_PATENT_TECHNICAL_READER_GATE·GEOMETRIC_OBJECT_GATE(통사), "
+        "FUNCTION_DEDUCTION_GATE(성공조건 조건 2 구성–기능 연역시험; 성공조건·통사 두 절 판정 중 낮은 값), "
         "DEPENDENT_OA_DRAFT_GATE·DEPENDENT_OA_FINAL_GATE(OA, 분리)를 모두 채운다. 정식 명세서가 없으면 DEPENDENT_OA_FINAL_GATE는 UNVERIFIED이고 "
         "`gate_reasons`에 SPEC_NOT_PROVIDED를 적는다. `status`는 세 절 중 가장 낮은 판정, `handoff_ready`는 세 절이 모두 다음 단계로 진행 가능할 때만 true다. "
         "`checks[].name`에는 `success:`·`syntax:`·`oa:` 접두어를 붙이고, `per_claim_gates[]`에 목표항별 독자·기하 판정을, `exact_claim_text`에는 검수 대상 전문을 그대로 echo한다."

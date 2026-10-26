@@ -86,7 +86,8 @@ def architect(locked: bool = True) -> Callable[[CallSpec], dict]:
 
 def drafter(scope: str = "INDEPENDENT", return_to: str | None = None) -> Callable[[CallSpec], dict]:
     def f(spec: CallSpec) -> dict:
-        gates = {"DRAFTER_GATE": "PASS", "PRE_STYLE_NON_PATENT_TECHNICAL_READER_CHECK": "PASS", "PRE_STYLE_GEOMETRIC_OBJECT_CHECK": "PASS"}
+        gates = {"DRAFTER_GATE": "PASS", "PRE_STYLE_NON_PATENT_TECHNICAL_READER_CHECK": "PASS", "PRE_STYLE_GEOMETRIC_OBJECT_CHECK": "PASS",
+                 "PRE_STYLE_FUNCTION_DEDUCTION_CHECK": "PASS"}
         if return_to:
             gates["DRAFTER_GATE"] = return_to
             return _base(spec, "BLOCK", gates, next_step=return_to, handoff_ready=False, open_issues=[{"kind": "BLOCK", "code": "DESIGN", "text": "계층 재확정 필요"}])
@@ -99,7 +100,8 @@ def drafter(scope: str = "INDEPENDENT", return_to: str | None = None) -> Callabl
 
 def style(scope: str = "INDEPENDENT", return_to: str | None = None, text: str | None = None) -> Callable[[CallSpec], dict]:
     def f(spec: CallSpec) -> dict:
-        gates = {"TERM_EXPRESSION_GATE": "PASS", "CLAIM_STYLE_GATE": "PASS", "NON_PATENT_TECHNICAL_READER_GATE": "PASS", "GEOMETRIC_OBJECT_GATE": "PASS"}
+        gates = {"TERM_EXPRESSION_GATE": "PASS", "CLAIM_STYLE_GATE": "PASS", "NON_PATENT_TECHNICAL_READER_GATE": "PASS", "GEOMETRIC_OBJECT_GATE": "PASS",
+                 "FUNCTION_DEDUCTION_GATE": "PASS"}
         if return_to:
             gates["CLAIM_STYLE_GATE"] = return_to
             return _base(spec, "BLOCK", gates, next_step=return_to, handoff_ready=False, finalized_status="NOT_FINALIZED",
@@ -112,9 +114,10 @@ def style(scope: str = "INDEPENDENT", return_to: str | None = None, text: str | 
     return f
 
 
-def success(return_to: str | None = None) -> Callable[[CallSpec], dict]:
+def success(return_to: str | None = None, deduction: str = "PASS") -> Callable[[CallSpec], dict]:
     def f(spec: CallSpec) -> dict:
-        gates = {"CLAIM_STYLE_GATE": "PASS", "TERM_EXPRESSION_GATE": "PASS", "NON_PATENT_TECHNICAL_READER_GATE": "PASS", "GEOMETRIC_OBJECT_GATE": "PASS"}
+        gates = {"CLAIM_STYLE_GATE": "PASS", "TERM_EXPRESSION_GATE": "PASS", "NON_PATENT_TECHNICAL_READER_GATE": "PASS", "GEOMETRIC_OBJECT_GATE": "PASS",
+                 "FUNCTION_DEDUCTION_GATE": deduction}
         if return_to:
             return _base(spec, "BLOCK", gates, ["- syntax 진행 가능: NO"], next_step=return_to, handoff_ready=False, open_issues=[{"kind": "BLOCK", "code": "COND9", "text": "조건 9 분배 불명확", "return_to": return_to}])
         return _base(spec, "PASS", gates, ["- syntax 진행 가능: YES", "- pipeline_eligible: YES"])
@@ -123,7 +126,8 @@ def success(return_to: str | None = None) -> Callable[[CallSpec], dict]:
 
 def syntax() -> Callable[[CallSpec], dict]:
     def f(spec: CallSpec) -> dict:
-        return _base(spec, "PASS", {"NON_PATENT_TECHNICAL_READER_GATE": "PASS", "GEOMETRIC_OBJECT_GATE": "PASS"}, ["- 종합 판정: PASS", "- OA 진행 가능: YES"])
+        return _base(spec, "PASS", {"NON_PATENT_TECHNICAL_READER_GATE": "PASS", "GEOMETRIC_OBJECT_GATE": "PASS", "FUNCTION_DEDUCTION_GATE": "PASS"},
+                     ["- 종합 판정: PASS", "- OA 진행 가능: YES"])
     return f
 
 

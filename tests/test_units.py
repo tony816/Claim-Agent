@@ -100,6 +100,29 @@ def test_decide_routes_returns_and_caps_loops():
     assert decide(env, c, RequestMode.AUTHORING_DRAFT, {"DRAFTER": 2}, {"DRAFTER": 2}).halt_kind == "LOOP_LIMIT"
 
 
+def test_function_deduction_gate_gates_drafter_style_success_and_syntax():
+    """성공조건 조건 2: a function the written structure does not entail must stop each role that reports the gate."""
+    for role, scope, make in (
+        ("claim-drafter", Scope.INDEPENDENT, R.drafter()),
+        ("claim-style-adjuster", Scope.DEPENDENT_SET, R.style("DEPENDENT_SET")),
+        ("claim-success-reviewer", Scope.DEPENDENT_SET, R.success()),
+        ("syntax-scope-reviewer", Scope.INDEPENDENT, R.syntax()),
+    ):
+        c = contract_for(role, scope)
+        raw = make(_spec(role, scope.value))
+        name = "PRE_STYLE_FUNCTION_DEDUCTION_CHECK" if role == "claim-drafter" else "FUNCTION_DEDUCTION_GATE"
+        env = {v: RoleEnvelope.model_validate({**raw, "gates": {**raw["gates"], name: v}}) for v in ("PASS", "NOT_APPLICABLE", "REVIEW")}
+        assert c.passes(env["PASS"], RequestMode.AUTHORING_DRAFT), role
+        assert c.passes(env["NOT_APPLICABLE"], RequestMode.AUTHORING_DRAFT), role     # no function clause to deduce
+        assert decide(env["REVIEW"], c, RequestMode.AUTHORING_DRAFT, {}, {}).halt_kind == "REVIEW", role
+        missing = RoleEnvelope.model_validate({**raw, "gates": {k: v for k, v in raw["gates"].items() if k != name}})
+        assert decide(missing, c, RequestMode.AUTHORING_DRAFT, {}, {}).halt_kind == "ENVELOPE_INVALID", role
+    # A gate that names the stage to fix routes there even when the role left next_step at PROCEED.
+    env = RoleEnvelope.model_validate(R.success(deduction="RETURN_TO_ARCHITECT")(_spec("claim-success-reviewer")))
+    tr = decide(env, contract_for("claim-success-reviewer", Scope.INDEPENDENT), RequestMode.AUTHORING_DRAFT, {}, {"ARCHITECT": 1})
+    assert tr.kind == "RETURN" and tr.return_to.value == "RETURN_TO_ARCHITECT"
+
+
 def test_cross_check_detects_report_mismatch_and_foreign_sources():
     env = RoleEnvelope.model_validate(R.style()(_spec("claim-style-adjuster")))
     env.report_markdown = env.report_markdown.replace("CLAIM_STYLE_GATE: PASS", "CLAIM_STYLE_GATE: REVIEW")
