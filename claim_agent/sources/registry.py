@@ -24,6 +24,11 @@ SOURCE_FILES: dict[str, str] = {
     "CORPUS": "청구항_문체학습용_분야별검색최적화본.md",
 }
 
+# Stable keys -> project-root paths outside sources/: skills the designing roles carry by default.
+PROJECT_FILES: dict[str, str] = {
+    "DIG": ".claude/skills/inventive-feature-dig/SKILL.md",
+}
+
 ADAPTER_VERSION = 2
 
 
@@ -46,8 +51,8 @@ class SourceSet:
         root = project_root or sources_dir.parent
         files: dict[str, SourceFile] = {}
         missing = []
-        for key, name in SOURCE_FILES.items():
-            p = sources_dir / name
+        paths = [(k, sources_dir / n, n) for k, n in SOURCE_FILES.items()] + [(k, root / r, r) for k, r in PROJECT_FILES.items()]
+        for key, p, name in paths:
             if not p.exists():
                 missing.append(name)
                 continue

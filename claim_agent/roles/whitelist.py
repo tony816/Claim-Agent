@@ -13,7 +13,9 @@ SOURCE_WHITELIST: dict[tuple[str, Scope], list[str]] = {
     # S11 (판례 청구항 주의 시트) and S13 (판례 권리행사 작성 기준) are wording sheets for the generating roles; the success
     # reviewer gets them only to audit that they were not used as a technical basis. Style and syntax never receive them;
     # OA gets the per-claim enforcement check in its packet instead of S13 (graph.caselaw_review).
-    ("claim-architect", Scope.INDEPENDENT): ["README", "SUCCESS", "S07", "S11", "S13"],
+    # DIG (inventive-feature-dig skill) is the designers' method for finding this invention's interlock in a common part;
+    # it is never invention material.
+    ("claim-architect", Scope.INDEPENDENT): ["README", "SUCCESS", "S07", "S11", "S13", "DIG"],
     ("claim-drafter", Scope.INDEPENDENT): ["SUCCESS", "S11", "S13"],
     ("claim-drafter", Scope.DEPENDENT_SET): ["SUCCESS", "S08", "S05", "S11", "S13"],
     ("claim-style-adjuster", Scope.INDEPENDENT): ["README", "S07", "S04"],
@@ -27,7 +29,7 @@ SOURCE_WHITELIST: dict[tuple[str, Scope], list[str]] = {
     ("oa-strategy-reviewer", Scope.DEPENDENT_SET): ["S06", "S08", "S12"],
     # S10 (심사 이력 경험 기준) only feeds the dependent ranking signal and the JUDGE design-change risk (설계 14.1);
     # no role that designs, drafts or styles the independent claim ever receives it.
-    ("dependent-claim-strategy-architect", Scope.DEPENDENT_SET): ["README", "SUCCESS", "S05", "S07", "S08", "S10", "S12", "S13"],
+    ("dependent-claim-strategy-architect", Scope.DEPENDENT_SET): ["README", "SUCCESS", "S05", "S07", "S08", "S10", "S12", "S13", "DIG"],
     ("picture-claim-reconstruction-reviewer", Scope.INDEPENDENT): [],
     ("picture-claim-reconstruction-reviewer", Scope.DEPENDENT_SINGLE): [],
     ("blind-claim-reconstruction-reviewer", Scope.INDEPENDENT): [],

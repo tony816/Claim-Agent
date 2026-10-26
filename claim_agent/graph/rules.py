@@ -32,13 +32,13 @@ MIN_FILE_SAVING = 0.10   # a file whose pack would save less than this is sent w
 # A role's own working standard is never sliced: its checklist items carry the substance without naming any gate
 # (06's CLAR/NOV/INV items, 04's style rules). Packing applies only to the files a role consults secondarily.
 PRIMARY: dict[str, set[str]] = {
-    "claim-architect": {"SUCCESS", "S11", "S13"},
+    "claim-architect": {"SUCCESS", "S11", "S13", "DIG"},
     "claim-drafter": {"SUCCESS", "S08", "S05", "S11", "S13"},
     "claim-style-adjuster": {"S07", "S04"},
     "claim-success-reviewer": {"README", "SUCCESS", "S07", "S04", "S08", "S05"},
     "syntax-scope-reviewer": {"S04"},
     "oa-strategy-reviewer": {"S06", "S12"},
-    "dependent-claim-strategy-architect": {"S08", "S05", "S12", "S13"},
+    "dependent-claim-strategy-architect": {"S08", "S05", "S12", "S13", "DIG"},
     "prior-art-pre-examiner": {"S09", "S12"},
 }
 _HEADING = re.compile(r"^(#{1,4})\s+(.*\S)\s*$")

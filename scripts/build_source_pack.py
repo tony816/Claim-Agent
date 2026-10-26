@@ -26,12 +26,13 @@ S04, S05, S06, S07, S08 = ("04_청구항_스타일가이드.md", "05_종속항_�
                            "07_용어표현_출처게이트.md", "08_종속항_기술기여_게이트.md")
 S09, S10, S11, S12, S13 = ("09_사전심사_기준.md", "10_심사이력_경험기준.md", "11_판례_청구항_주의시트.md",
                            "12_판례_특허성_유형기준.md", "13_판례_권리행사_작성기준.md")
+S_DIG = ".claude/skills/inventive-feature-dig/SKILL.md"   # project-root path: the designers' default skill
 
 # Policy documents each role must read: (always, DEPENDENT_SET only). Conditional reads
 # (example routing index, style corpus) stay with the role and are not packed.
 ROLE_SOURCES: dict[str, tuple[list[str], list[str]]] = {
-    "claim-architect": ([S_README, S_SUCCESS, S11, S13], []),
-    "dependent-claim-strategy-architect": ([S_README, S_SUCCESS, S08, S05, S07, S10, S12, S13], []),
+    "claim-architect": ([S_README, S_SUCCESS, S11, S13, S_DIG], []),
+    "dependent-claim-strategy-architect": ([S_README, S_SUCCESS, S08, S05, S07, S10, S12, S13, S_DIG], []),
     "claim-drafter": ([S_SUCCESS, S11, S13], [S08, S05]),
     "claim-style-adjuster": ([S_README, S07, S04], []),
     "claim-success-reviewer": ([S_README, S_SUCCESS, S07, S04, S11, S13], [S08, S05]),
@@ -59,7 +60,7 @@ def pack_files(role: str, scope: str, extras: list[Path]) -> list[Path]:
         raise SystemExit(f"unknown role: {role}")
     always, dependent = ROLE_SOURCES[role]
     names = always + (dependent if scope == "DEPENDENT_SET" else [])
-    return [SOURCES / n for n in names] + extras
+    return [ROOT / n if n == S_DIG else SOURCES / n for n in names] + extras
 
 
 def blocks(files: list[Path]) -> list[tuple[str, str, str]]:
