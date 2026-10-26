@@ -6,9 +6,15 @@ from claim_agent.routing import classify_request
 from tests import scripted_roles as R
 
 
-@pytest.mark.parametrize("target,expected", [("2", {2}), ("2~4,6", {2,3,4,6}), ("청구항 2–3", {2,3}), ("기술기여가 확인된 후보", None)])
+@pytest.mark.parametrize("target,expected", [("2", {2}), ("2~4,6", {2,3,4,6}), ("청구항 2–3", {2,3}), ("기술기여가 확인된 후보", None),
+                                             ("세트 끝(10항~)에 이어지는 히트리드 모듈 관련 신규 종속항 — 기술기여가 확인된 후보", None)])
 def test_parse_target(target, expected):
     assert parse_target(target) == expected
+
+
+def test_parse_target_refuses_digits_that_form_no_list():
+    with pytest.raises(ValueError, match="2~4,6 형식"):
+        parse_target("2~4;6")
 
 
 def test_current_question_overrides_stale_full_set_option(project_root):

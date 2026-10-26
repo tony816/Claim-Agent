@@ -5,13 +5,17 @@ import re
 
 
 def parse_target(value: str | None) -> set[int] | None:
-    """Parse numeric lists/ranges only; descriptive candidate strategies stay open."""
+    """Parse numeric lists/ranges only; descriptive candidate strategies stay open.
+
+    A description may still carry a number ('세트 끝(10항~)에 이어지는 … 후보', run web-b013b034): any word left after the
+    claim words are stripped makes it a description. Only bare digits and separators that form no list are refused.
+    """
     if not value:
         return None
     text = re.sub(r"청구항|종속항|claims?|제|항", "", value, flags=re.I)
     text = re.sub(r"\s+", "", text)
     if not re.fullmatch(r"\d+(?:[~–—-]\d+)?(?:[,·ㆍ、]\d+(?:[~–—-]\d+)?)*", text):
-        if re.search(r"\d", text):
+        if re.search(r"\d", text) and not re.search(r"[가-힣A-Za-z]", text):
             raise ValueError("종속항 범위는 번호 또는 2~4,6 형식으로 지정해 주세요.")
         return None
     numbers = set()
@@ -139,6 +143,9 @@ def find_existing_set(targets: set[int], sources: list[tuple[str, str]]) -> tupl
     Blank headers (【청구항 】) are numbered by place, as the user counts them. A set still left with blank numbers
     (제항 citations) is matched by place too; the engine then stops on the blanks before any call instead of the request
     falling through to a new independent claim.
+
+    No targets means new claims after the end of the set whose numbers the user has not named yet; the set must then
+    already hold a dependent claim, since claims added to a lone claim 1 are an ordinary new dependent set.
     """
     from .pipeline.claimtext import ClaimParseError, appended_nos, claim_slots, fill_blank_headers, numbering_blanks, parse_claim_set
 
@@ -155,6 +162,8 @@ def find_existing_set(targets: set[int], sources: list[tuple[str, str]]) -> tupl
             continue
         by_no = {c.claim_no: c for c in claims}
         new = appended_nos(claims, targets)
+        if not targets and not any(not c.is_independent for c in claims):
+            continue
         if any(c.is_independent for c in claims) and all(n in new or (n in by_no and not by_no[n].is_independent) for n in targets):
             return source_id, original
     return None

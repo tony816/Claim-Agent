@@ -794,6 +794,8 @@ class Workspace:
                 message["route_reason"] = self.redact(event.get("reason", ""))
                 job["log"] += f"\n[자동 분류: {event['mode']}] {event.get('reason', '')}\n"
                 continue
+            if event.get("kind") == "error":
+                job["error"] = self.redact(event.get("text", ""))      # the chat bubble says why, not only "no answer"
             # Live text: the plain chat answer, the free work agent's answer and the moderator's CONSULT answer (not its
             # routing JSON or delivery draft).
             if event.get("kind") == "delta" and job["mode"] == "CHAT" and (event.get("role") in ("대화", FREE_ROLE) or event.get("stage") == "CONSULT"):
@@ -840,7 +842,8 @@ class Workspace:
                 elif job["mode"] == "CHAT":
                     result = read_state(job["folder"] / "response.json")
                     if process.returncode != 0 or not result:
-                        raise ValueError("응답을 받지 못했습니다. 작업 로그에서 오류를 확인하고 다시 보내세요.")
+                        reason = f"\n\n오류: {job['error']}" if job.get("error") else ""
+                        raise ValueError(f"응답을 받지 못했습니다. 작업 로그에서 오류를 확인하고 다시 보내세요.{reason}")
                     message["text"] = self.redact(result["answer"])
                     if result.get("finish_reason") == "MAX_TOKENS":
                         message["text"] += "\n\n[응답 길이 제한에 도달했습니다. 이어서 설명해 달라고 요청하세요.]"

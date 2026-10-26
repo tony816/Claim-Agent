@@ -101,16 +101,23 @@ def resolve_edit_scope(route: RouteDecision, request: dict, blocks: list[dict], 
     project instructions or the project USER_LOCK — holds every named claim as a dependent claim. The work then stays
     inside that set: no new independent claim, no renumbering. A previous run's own dependent set keeps the ordinary
     follow-up path, because those claims are this harness's output, not a set the user supplied.
+
+    Dependent claims asked for with no number ('히트리드 모듈에 대한 종속항들 작성해줘', run web-b013b034) that the router
+    puts on such a set go after its end too, with edit_targets empty: the engine stops on the set's blanks, or asks for
+    the numbers, before any call, instead of a new dependent set renumbering over the user's claims.
     """
     from .pipeline.claimtext import ClaimParseError, baseline_digest, exact_sha256
 
+    hint = route.authoring_scope
     targets = parse_target(route.dependent_target) if route.dependent else None
     route.authoring_scope, route.edit_targets = ("NEW_DEPENDENT_SET" if route.dependent else "NEW_INDEPENDENT"), []
-    if route.mode != "AUTHORING_DRAFT" or not targets:
+    append = route.dependent and not targets and hint == "EXISTING_SET_EDIT"
+    if route.mode != "AUTHORING_DRAFT" or not (targets or append):
         return None
     own = previous.dependent.current if previous and previous.dependent and not previous.baseline_set else None
-    if own and targets <= {c["claim_no"] for c in own.claims}:
+    if own and (not targets or targets <= {c["claim_no"] for c in own.claims}):
         return None
+    targets = targets or set()
     # User blocks include the project instructions (intake turns them into a material block), so a set kept there is found.
     ordered = sorted(reversed(blocks), key=lambda b: b["id"] != route.claim_source_id)   # the router's pick first, then newest
     sources = [(b["id"], b["text"]) for b in ordered if b["origin"] == "user"]

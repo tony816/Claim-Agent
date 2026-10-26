@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from typing import Any
 
-from ..claim_scope import claim_intent, parse_target
+from ..claim_scope import claim_intent, explicit_mentions, format_target, parse_target
 from ..config import AppConfig
 from ..graph.pipeline import GraphHooks
 from ..models.contracts import COMBINED_REVIEW, combined_contract, contract_for, main_tree_gate_gaps
@@ -207,6 +207,9 @@ class PipelineEngine(PriorArtSteps):
         Named claims that already exist are rewritten in place (edit_intent EDIT), or new claims are written at those
         numbers with the set's own claims moved back and their citations following (NEW, 사용자 결정 2026-10-26). When
         the user's words say neither, the run asks first; the answer comes back as the resumed run's feedback.
+
+        Claims added after the end of the set with no number named (edit_targets empty) stop on the set's blanks like
+        any edit, then ask for the numbers from the one after the set's last claim; the answer names them the same way.
         """
         def halt(code: str, message: str, issues: list[str] | None = None, kind: str = "BLOCK") -> None:
             raise PipelineHalt(Halt(stage=Stage.DEP_ARCHITECT.value, role="engine", kind=kind, reason_code=code, message=message,
@@ -219,7 +222,11 @@ class PipelineEngine(PriorArtSteps):
         lock = (req.user_lock or "").replace("\r\n", "\n").strip()
         origin = "프로젝트 USER_LOCK 확정 문언" if lock and text.replace("\r\n", "\n").strip() == lock else "제공된 청구항 세트"
         targets = parse_target(req.dependent_target) or set()
-        named = ", ".join(f"제{n}항" for n in sorted(targets))
+        if not targets:
+            targets = explicit_mentions(str((state.feedback or {}).get("text") or "")) or set()
+            if targets:
+                state.request = {**state.request, "dependent_target": format_target(targets)}
+        named = ", ".join(f"제{n}항" for n in sorted(targets)) or "세트 끝에 붙일 새 종속항"
         intent = req.edit_intent
         if intent == "UNCLEAR":
             intent = claim_intent(str((state.feedback or {}).get("text") or "")) or "UNCLEAR"
@@ -256,6 +263,9 @@ class PipelineEngine(PriorArtSteps):
                                                   "그 범위 인용을 고치거나, 새 항을 세트 끝에 붙여 달라고 요청해 주세요.", [str(exc)])
         by_no = {c.claim_no: c for c in claims}
         last = max(by_no, default=0)
+        if not targets:
+            halt("APPEND_TARGET_NEEDED", f"편집할 기존 청구항 세트({origin})는 제{last}항에서 끝납니다. 새 종속항을 붙일 번호를 제{last + 1}항부터 정해 답해 주세요 "
+                                         f"(예: '제{last + 1}항', '제{last + 1}~{last + 3}항').", kind="USER_DECISION")
         beyond = {n for n in targets if n > last}
         # New claims: inserted ones (their numbers were left free) and ones right after the end of the set.
         new = (targets - set(by_no) - beyond if moved else set()) | appended_nos(claims, beyond)

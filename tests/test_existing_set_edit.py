@@ -446,6 +446,52 @@ def test_inserting_claims_moves_the_set_back_and_its_citations_follow():
     assert fill_blank_headers(shuffled) == shuffled                           # numbers out of place: not guessed
 
 
+# Run web-b013b034: the router kept '히트리드 모듈에 대한 종속항들 작성해줘' on the USER_LOCK set with a description for a
+# target ('세트 끝(10항~)에 …'). Its '10' made the target parser raise, and the web showed only "응답을 받지 못했습니다".
+OPEN_APPEND = "세트 끝(10항~)에 이어지는 히트리드 모듈 관련 신규 종속항 — 기술기여가 확인된 후보"
+
+
+def _append_route(blocks):
+    return RouteDecision(mode="AUTHORING_DRAFT", reason="세트 끝에 종속항 추가", dependent=True, dependent_target=OPEN_APPEND,
+                         authoring_scope="EXISTING_SET_EDIT")
+
+
+def test_dependents_asked_for_without_a_number_on_a_set_with_blanks_stop_on_the_blanks(rt, request_indep, tmp_path):
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "open-blank", text="히트리드 모듈에 대한 종속항들 작성해줘",
+                                                   instructions="", user_lock=LID_LOCK)
+    route = _append_route(blocks)
+    provider = ScriptedProvider({})
+    result = run_pipeline(rt, provider, request, route, blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert route.authoring_scope == "EXISTING_SET_EDIT" and route.edit_targets == [] and provider.calls == []
+    assert state.halt.reason_code == "BASELINE_SET_UNNUMBERED" and "세트 끝에 붙일 새 종속항" in state.halt.message
+    assert [i["text"][:6] for i in state.halt.open_issues] == ["제6항(상기", "3번째 항:"]
+
+
+def test_dependents_asked_for_without_a_number_ask_for_it_and_the_answer_appends_them(rt, request_indep, tmp_path, monkeypatch):
+    monkeypatch.setattr(R, "DEP_CLAIMS", [(10, 9, "DC-01", NEW_10)])
+    monkeypatch.setattr(R, "DEP_SET_TEXT", NEW_10)
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "open-ask", text="구속부에 대한 종속항들 작성해줘",
+                                                   instructions="", user_lock=BASELINE)
+    provider = ScriptedProvider(edit_script())
+    first = run_pipeline(rt, provider, request, _append_route(blocks), blocks, paths, folder)
+    state = rt.store.load_state(first["run_id"])
+    assert provider.calls == [] and state.halt.kind == "USER_DECISION" and state.halt.reason_code == "APPEND_TARGET_NEEDED"
+    assert "제9항에서 끝납니다" in state.halt.message and "제10항부터" in state.halt.message
+    state = rt.engine(provider).resume(state.run_id, Decision(text="10항으로 해줘"))
+    assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
+    assert state.request["dependent_target"] == "10" and state.baseline_set.edit_targets == [10]
+    full = edited_set_text(state)
+    assert full.count("【청구항") == 10 and full.endswith(NEW_10)
+
+
+def test_an_open_append_needs_a_set_that_already_holds_a_dependent_claim():
+    from claim_agent.claim_scope import find_existing_set
+
+    assert find_existing_set(set(), [("a", BASELINE)]) == ("a", BASELINE)
+    assert find_existing_set(set(), [("a", parse_claim_set(BASELINE)[0].text)]) is None     # claim 1 alone: a new dependent set
+
+
 def test_a_fixed_user_lock_sent_again_starts_a_new_run_on_the_fixed_set(rt, request_indep, tmp_path, edit_roles):
     blank = BASELINE.replace("【청구항 9】\n제8항", "【청구항 9】\n제항")
     request, blocks, paths, folder = _conversation(tmp_path, request_indep, "before-fix", instructions="", user_lock=blank)
