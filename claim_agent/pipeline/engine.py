@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from ..claim_scope import parse_target
@@ -47,7 +47,7 @@ from .claimtext import (
     claim_set_text,
     contains_user_lock,
     exact_sha256,
-    independent_text,
+    numbered_claims,
     ordered_claims,
     parent_chain,
     parent_chain_text,
@@ -1371,20 +1371,76 @@ class PipelineEngine(PriorArtSteps):
             kind = kinds.get(role)
             if kind is None:
                 raise ProviderError(f"REVIEW_ONLY에서 지원하지 않는 역할: {role}")
-            rid = record_id(kind, ids)
             if kind == "blind":
-                # The independent claim's wording alone, in a fresh no-project context (no materials, request or other
-                # reports). Without a DESIGN_GATE there is nothing to compare it to, so picture does not follow.
-                target = independent_text(claim_text)
-                if not target:
-                    raise ProviderError("블라인드 복원에 넘길 청구항 문언이 없습니다.")
-                bp = BlindPacket(claim_scope="INDEPENDENT", candidate_id=ids.candidate_id, revision="r1", design_revision="N/A", record_id=rid, claim_text=target)
-                env, ref = self._call(state, role, Scope.INDEPENDENT, Stage.REVIEW_ONLY, kind, packets.Packet(bp.render()), ids, rid, blind=True)
-            else:
-                pk = packets.review_only(state, bundle, ids, rid, role, scope, claim_text, req.request_text)
-                env, ref = self._call(state, role, scope if scope != Scope.DEPENDENT_SINGLE else Scope.INDEPENDENT, Stage.REVIEW_ONLY, kind, pk, ids, rid, expected_exact=claim_text)
+                state.review_reports[role] = self._review_blind(state, req, claim_text, ids)
+                continue
+            rid = record_id(kind, ids)
+            pk = packets.review_only(state, bundle, ids, rid, role, scope, claim_text, req.request_text)
+            env, ref = self._call(state, role, scope if scope != Scope.DEPENDENT_SINGLE else Scope.INDEPENDENT, Stage.REVIEW_ONLY, kind, pk, ids, rid, expected_exact=claim_text)
             state.candidate.current.records[kind] = rid
             state.review_reports[role] = env.report_markdown
         state.stage = Stage.DONE
         state.outcome = "REVIEW_ONLY_DONE"
         state.notes.append("REVIEW_ONLY 결과는 DRAFT·FINAL LOCK의 PASS 근거가 아니다")
+
+    def _review_blind(self, state: RunState, req: RunRequest, claim_text: str, ids: Identifiers) -> str:
+        """REVIEW_ONLY blind: one snapshot per reviewed claim, each in a fresh no-project context (no materials, request
+        or other reports) — an independent claim by itself, a dependent claim after its exact parent chain.
+
+        A cited claim is looked up in the reviewed wording, then `parent_claims` (the conversation's drafts), then
+        USER_LOCK. A claim whose chain cannot be built is reported, not guessed. Without a DESIGN_GATE there is nothing to
+        compare a snapshot to, so picture does not follow.
+        """
+        role = "blind-claim-reconstruction-reviewer"
+        targets = list(numbered_claims(claim_text).values())
+        known: dict[int, Any] = {}
+        for text in (claim_text, req.parent_claims, req.user_lock):
+            for no, claim in numbered_claims(text or "").items():
+                known.setdefault(no, claim)
+        # A draft claim citing itself or a later number has no chain (and would loop), so it is left out of the lookup.
+        claims = sorted((c for c in known.values() if all(p < c.claim_no for p in c.parent_nos)), key=lambda c: c.claim_no)
+        jobs: list[tuple[str, Scope, str, BlindPacket, Identifiers]] = []     # (label, scope, record kind, packet, ids)
+        skipped: list[str] = []
+        if not targets:
+            if not claim_text.strip():
+                raise ProviderError("블라인드 복원에 넘길 청구항 문언이 없습니다.")
+            # Wording without a claim header reads as one independent claim.
+            jobs.append(("", Scope.INDEPENDENT, "blind", BlindPacket(claim_scope="INDEPENDENT", candidate_id=ids.candidate_id, revision="r1", design_revision="N/A",
+                                                                     record_id=record_id("blind", ids), claim_text=claim_text.strip()), ids))
+        for claim in targets:
+            label = f"제{claim.claim_no}항"
+            if claim.is_independent:
+                rid = record_id("blind", ids, sum(1 for j in jobs if j[2] == "blind") + 1)
+                jobs.append((label, Scope.INDEPENDENT, "blind", BlindPacket(claim_scope="INDEPENDENT", candidate_id=ids.candidate_id, revision="r1",
+                                                                            design_revision="N/A", record_id=rid, claim_text=claim.text), ids))
+                continue
+            if any(p >= claim.claim_no for p in claim.parent_nos):
+                skipped.append(f"#### {label}\n\n블라인드 복원을 하지 않았습니다: 자기 자신 또는 뒤 번호의 항을 인용해 부모항 체인을 만들 수 없습니다.")
+                continue
+            try:
+                chains = parent_chain(claims, claim.claim_no, expand_multi=True)
+            except ClaimParseError as exc:
+                skipped.append(f"#### {label}\n\n블라인드 복원을 하지 않았습니다: {exc}. 부모항 문언을 대화에 붙여 넣거나 프로젝트 지침에 두면 체인을 만들 수 있습니다.")
+                continue
+            for k, chain in enumerate(chains):
+                tid = str(claim.claim_no) if len(chains) == 1 else f"{claim.claim_no}-alt{k + 1}"
+                dids = replace(ids, dependent_set_id=f"{ids.candidate_id}-review", dependent_design_revision="N/A", dependent_revision="r1", target_claim_id=tid)
+                cited = "→".join(str(c.claim_no) for c in chain)
+                jobs.append((f"{label} (부모항 체인 제{cited}항)", Scope.DEPENDENT_SINGLE, "dependent_blind", BlindPacket(
+                    claim_scope="DEPENDENT_SINGLE", candidate_id=ids.candidate_id, revision="r1", design_revision="N/A", record_id=record_id("dependent_blind", dids),
+                    dependent_set_id=dids.dependent_set_id, dependent_design_revision="N/A", dependent_revision="r1", target_claim_id=tid,
+                    parent_chain_text=parent_chain_text(chain), target_claim_text=claim.text), dids))
+
+        def one(job: tuple[str, Scope, str, BlindPacket, Identifiers]) -> str:
+            label, scope, kind, bp, jids = job
+            env, _ = self._call(state, role, scope, Stage.REVIEW_ONLY, kind, packets.Packet(bp.render()), jids, bp.record_id, blind=True)
+            return (f"#### {label}\n\n" if label and len(targets) > 1 else "") + env.report_markdown
+
+        for label, _, kind, bp, _ in jobs:
+            state.candidate.current.records[f"{kind} {label}".strip()] = bp.record_id
+        if self.cfg.pipeline.max_concurrency > 1 and len(jobs) > 1:
+            with ThreadPoolExecutor(max_workers=self.cfg.pipeline.max_concurrency) as ex:
+                reports = list(ex.map(one, jobs))
+        else:
+            reports = [one(j) for j in jobs]
+        return "\n\n".join(reports + skipped)

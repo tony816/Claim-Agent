@@ -163,10 +163,10 @@ def main(argv=None) -> int:
     try:
         from . import free_work
 
-        # Free work mode (CLAUDE.md 자유 작업 모드): the general agent answers without routing, and a review button runs the
-        # chosen gate role on one message's wording. Every other turn is classified first.
+        # Free work mode (CLAUDE.md 자유 작업 모드): the general agent answers without routing, and the tool panel runs the
+        # chosen gate roles on one message's wording before the agent fixes it. Every other turn is classified first.
         if request.get("review"):
-            result = free_work.review_turn(cfg, args.config, request, folder)
+            result = free_work.review_turn(provider, cfg, args.config, request, folder)
         elif request.get("work_mode") == free_work.FREE:
             result = free_work.free_turn(provider, cfg, request)
         else:

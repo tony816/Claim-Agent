@@ -135,20 +135,18 @@ async function switchProvider(body){
 $("provider-kind").onchange=()=>switchProvider({provider:$("provider-kind").value});
 $("provider-model").onchange=()=>switchProvider({provider:providerInfo.provider,model:$("provider-model").value});
 const routeNames = {CHAT:"일반 대화",META:"설정·진행 확인",AUTHORING_DRAFT:"청구항 작성·수정",FINALIZATION:"출원용 최종 검증",REVIEW_ONLY:"특허 의견·제한 검수"};
-// ---- 자유 작업 모드: 일반 에이전트와 1차 작업하고, 메시지의 청구항에 고른 게이트 역할만 버튼으로 실행한다(REVIEW_ONLY, LOCK 없음).
-const REVIEW_ROLES=[["syntax-scope-reviewer","통사·범위","귀속·결속·복수 분배·범위 불변을 검수합니다"],["oa-strategy-reviewer","OA","명확성·기능적 표현·뒷받침 등 OA 위험을 검수합니다"],["claim-success-reviewer","성공조건","독립항 성공조건과 원자료 근거를 감사합니다"],["blind-claim-reconstruction-reviewer","블라인드 복원","발명을 모르는 기술자가 독립항 문언만 읽고 무엇을 그리는지 봉인합니다 (기준 비교는 하지 않음)"]];
+// ---- 자유 작업 모드: 일반 에이전트와 1차 작업하고, 고른 메시지의 청구항에 고른 게이트 역할만 실행한다(REVIEW_ONLY, LOCK 없음).
+// 작업 도구 패널의 검수 도구·피드백 멘트는 누르면 고르기만 하고, 입력창의 Enter가 덧붙인 말과 함께 실행한다.
+const REVIEW_ROLES=[["syntax-scope-reviewer","통사·범위","귀속·결속·복수 분배·범위 불변을 봅니다"],["oa-strategy-reviewer","OA","명확성·기능적 표현·뒷받침 등 OA 위험을 봅니다"],["claim-success-reviewer","성공조건","독립항 성공조건과 원자료 근거를 감사합니다"],["blind-claim-reconstruction-reviewer","블라인드 복원","발명을 모르는 기술자가 독립항 문언만 읽고 무엇을 그리는지 봅니다 (기준 비교 없음)"]];
 const REVIEW_LABEL=Object.fromEntries(REVIEW_ROLES.map(([id,label])=>[id,label]));
 const CLAIM_HEAD=/^[ \t]*(?:\*\*)?(?:【\s*청구항\s*\d+\s*】|\[\s*청구항\s*\d+\s*\])/m;
+const tools={open:false,roles:new Set(),target:"",options:null,phrases:[],editing:false};   // target "" = 가장 최근 청구항을 따라감
 function freeMode(){return state.data?.work_mode==="free";}
 async function setWorkMode(mode){
   if(!state.id||state.busy||state.data?.running||state.data?.work_mode===mode)return;
-  try{await api("/api/work-mode",{id:state.id,mode});try{localStorage.setItem("claim-work-mode",mode);}catch(e){}await refresh();await list();}catch(e){error(e.message);}
+  try{await api("/api/work-mode",{id:state.id,mode});try{localStorage.setItem("claim-work-mode",mode);}catch(e){}tools.roles.clear();await refresh();await list();}catch(e){error(e.message);}
 }
 for(const button of document.querySelectorAll("#work-mode button"))button.onclick=()=>setWorkMode(button.dataset.mode);
-async function runReview(message,role){
-  if(state.busy||state.data?.running)return;state.busy=true;controls();error("");
-  try{await api("/api/review",{id:state.id,message,role});await refresh();restartPoll();$("conversation").scrollTop=$("conversation").scrollHeight;}catch(e){error(e.message);}finally{state.busy=false;controls();}
-}
 function renderWorkMode(){
   const free=freeMode(),locked=!!state.data?.running||state.busy;
   for(const button of document.querySelectorAll("#work-mode button")){const on=button.dataset.mode===(free?"free":"gated");button.classList.toggle("is-on",on);button.setAttribute("aria-pressed",String(on));button.disabled=locked;}
@@ -178,7 +176,7 @@ function markdown(node,text){
   }
 }
 function resize(){const p=$("prompt");p.style.height="auto";p.style.height=Math.min(p.scrollHeight,180)+"px";}
-function controls(){const running=!!state.data?.running,free=freeMode();providerLock();renderWorkMode();$("send").hidden=running;$("stop").hidden=!running;$("send").disabled=state.busy||state.uploading>0||!$("prompt").value.trim()||(!free&&!claimTarget().ok);$("attach").disabled=state.uploading>0;$("prompt").placeholder=free?"자유롭게 요청하세요 · 답변은 미검수 초안이며, 청구항 아래 버튼으로 필요한 검수만 실행합니다":state.data?.run_id?"질문하거나 수정하고 싶은 내용을 알려주세요":"무엇이든 물어보세요 · 청구항 작성은 발명을 설명하거나 자료를 첨부해 주세요";for(const button of document.querySelectorAll(".review-bar button"))button.disabled=running||state.busy;}
+function controls(){const running=!!state.data?.running,free=freeMode(),pick=reviewPick();providerLock();renderWorkMode();$("send").hidden=running;$("stop").hidden=!running;$("send").disabled=state.busy||state.uploading>0||(!$("prompt").value.trim()&&!pick)||(!free&&!claimTarget().ok);$("attach").disabled=state.uploading>0;$("prompt").placeholder=pick?"검수자에게 덧붙일 말이 있으면 적고 Enter · 없으면 그냥 Enter":free?"자유롭게 요청하세요 · 답변은 미검수 초안이며, 작업 도구에서 필요한 검수만 골라 실행합니다":state.data?.run_id?"질문하거나 수정하고 싶은 내용을 알려주세요":"무엇이든 물어보세요 · 청구항 작성은 발명을 설명하거나 자료를 첨부해 주세요";for(const button of document.querySelectorAll("#review-buttons button"))button.disabled=!free||running||state.busy||!reviewTarget();renderChip();}
 // ---- 작성 대상: 미지정 / 독립항만 / 특정 항 1개 / 종속항 범위. 서버의 resolve_claim_target와 같은 정규형(2~4,6)을 미리 보여 준다.
 const target={segments:[{from:2,to:8}]};
 function formatTarget(numbers){const a=[...numbers].sort((x,y)=>x-y);if(!a.length)return "";const parts=[];let start=a[0],prev=a[0];for(const n of a.slice(1).concat([null])){if(n!==null&&n===prev+1){prev=n;continue;}parts.push(start===prev?String(start):start+"~"+prev);if(n!==null)start=prev=n;}return parts.join(",");}
@@ -224,32 +222,23 @@ function render(data){
       }
       article.append(body);
       if(m.files?.length){const files=el("div","message-files");for(const f of m.files)files.append(el("span","file-tag","▤ "+f.name));article.append(files);}
-      let apply=null;
       if(m.role==="assistant"){
         const actions=el("div","message-actions"),copy=el("button","","복사"),revise=el("button","","수정 요청");
         copy.onclick=async()=>{try{await navigator.clipboard.writeText(view.text);copy.textContent="복사됨";setTimeout(()=>copy.textContent="복사",1300);}catch(e){error("텍스트를 선택한 뒤 Ctrl+C로 복사하세요.");}};
-        revise.onclick=()=>{$("prompt").focus();controls();};actions.append(copy,revise);
-        if(m.mode==="REVIEW"){apply=el("button","","지적 반영 요청");apply.type="button";apply.title="이 검수 지적을 반영해 고쳐 달라는 요청을 입력창에 채웁니다(보내기 전에 고칠 수 있음)";apply.onclick=()=>{$("prompt").value="위 검수 지적을 반영해서 청구항을 고쳐 줘.";resize();controls();$("prompt").focus();};actions.append(apply);}
-        article.append(actions);
+        revise.onclick=()=>{$("prompt").focus();controls();};actions.append(copy,revise);article.append(actions);
       }
-      // 자유 작업: 이 메시지의 【청구항 N】 문언에 고른 게이트 역할 하나만 실행한다.
-      const reviewBar=el("div","review-bar");reviewBar.hidden=true;reviewBar.append(el("span","review-title","검수 실행"));
-      for(const [role,label,title] of REVIEW_ROLES){const b=el("button","",label);b.type="button";b.title=title;b.onclick=()=>runReview(m.id,role);reviewBar.append(b);}
-      article.append(reviewBar);
-      $("messages").append(article);view={article,body,logs,pre,summary,routeLabel,full,fullBody,reviewBar,apply,text:null,status:null};state.nodes.set(m.id,view);
+      $("messages").append(article);view={article,body,logs,pre,summary,routeLabel,full,fullBody,text:null,status:null};state.nodes.set(m.id,view);
     }
     if(view.full)view.full.hidden=!(m.pipeline_run_id&&m.status&&m.status!=="running");
-    view.reviewBar.hidden=!(freeMode()&&m.status!=="running"&&m.mode!=="REVIEW"&&CLAIM_HEAD.test(m.text||""));
-    if(view.apply)view.apply.hidden=!(freeMode()&&m.status&&m.status!=="running"&&m.status!=="error");
-    if(view.routeLabel){view.routeLabel.textContent=m.mode==="FREE"?"자유 작업 · 미검수 초안":m.mode==="REVIEW"?"선택 검수 · "+(REVIEW_LABEL[m.review?.role]||"")+" · LOCK 없음":m.execution_mode?"자동 분류 · "+(routeNames[m.execution_mode]||m.execution_mode):"";view.routeLabel.title=m.route_reason||"";}
-    if(view.text!==m.text||view.status!==m.status){if(m.role==="user")view.body.textContent=m.text;else if(m.text)markdown(view.body,m.text);else view.body.replaceChildren(el("span","pending",m.mode==="FREE"?"답변을 준비하고 있어요…":m.mode==="REVIEW"?"검수 역할을 실행하고 있어요…":"요청을 분류하고 답변을 준비하고 있어요…"));view.text=m.text;}
+    if(view.routeLabel){view.routeLabel.textContent=m.mode==="FREE"?"자유 작업 · 미검수 초안":m.mode==="REVIEW"?(m.review?.revise?"검수 반영 · "+reviewLabels(m.review)+" · 미검수 초안":m.review?.asked?"검수 + 요청 · "+reviewLabels(m.review)+" · LOCK 없음":"선택 검수 · "+reviewLabels(m.review)+" · LOCK 없음"):m.execution_mode?"자동 분류 · "+(routeNames[m.execution_mode]||m.execution_mode):"";view.routeLabel.title=m.route_reason||"";}
+    if(view.text!==m.text||view.status!==m.status){if(m.role==="user")view.body.textContent=m.text;else if(m.text)markdown(view.body,m.text);else view.body.replaceChildren(el("span","pending",m.mode==="FREE"?"답변을 준비하고 있어요…":m.mode==="REVIEW"?(m.review?.asked?"검수한 뒤 입력한 요청대로 처리하고 있어요…":"검수 역할을 실행하고 있어요…"):"요청을 분류하고 답변을 준비하고 있어요…"));view.text=m.text;}
     if(view.logs){
       if(m.status==="running"){view.pre.textContent=state.log.text||"연결 중…";view.summary.textContent="작업 중 · 실시간 로그";if(view.status!=="running")view.logs.open=true;}
       else {view.summary.textContent=(m.status==="error"?"오류 확인 · ":m.status==="review"?"검토 필요 · ":"")+"작업 로그 펼치기";if(view.status==="running"){view.logs.open=false;view.pre.textContent="";}}
     }
     view.status=m.status;
   }
-  renderRun(data);controls();if(follow)box.scrollTop=box.scrollHeight;
+  renderRun(data);renderTools();controls();if(follow)box.scrollTop=box.scrollHeight;
 }
 // 실시간 로그는 커서 이후의 새 부분만 받아 이어 붙인다(매 폴링마다 30만 자 전문을 다시 받지 않는다).
 async function fetchSession(id, incremental){
@@ -277,12 +266,12 @@ async function list(){
   $("new-chat").textContent=state.project&&names.has(state.project)?"＋ 새 대화 · "+names.get(state.project):"＋ 새 대화";
   return data.sessions;
 }
-function showChat(){state.view="chat";$("project-panel").hidden=true;$("improve-panel").hidden=true;$("conversation").hidden=false;document.querySelector("main footer").hidden=false;}
+function showChat(){state.view="chat";$("project-panel").hidden=true;$("improve-panel").hidden=true;$("conversation").hidden=false;document.querySelector("main footer").hidden=false;renderTools();}
 async function open(id){
   if(state.busy||state.uploading)return;
   if(state.id)drafts.set(state.id,{text:$("prompt").value,files:state.pending});
   const version=++state.generation;state.log={cursor:null, text:""};const data=await fetchSession(id,false);if(version!==state.generation)return;
-  if(state.id!==id)resetTarget();
+  if(state.id!==id){resetTarget();tools.roles.clear();tools.target="";tools.options=null;}
   state.id=id;state.nodes.clear();$("messages").replaceChildren();state.pending=drafts.get(id)?.files||[];
   $("prompt").value=drafts.get(id)?.text||localStorage.getItem("draft-"+id)||"";
   state.project=data.project?data.project.id:null;if(state.project)localStorage.setItem("claim-project",state.project);else localStorage.removeItem("claim-project");
@@ -308,12 +297,15 @@ async function upload(files){
   try{for(const file of files){if(file.size>20*1024*1024)throw new Error(file.name+": 파일당 20MB까지 첨부할 수 있습니다.");const item=await api(`/api/upload?id=${id}&name=${encodeURIComponent(file.name||"붙여넣은 이미지.png")}`,file,true);if(state.id===id){state.pending.push(item);pending();}}}catch(e){error(e.message);}finally{state.uploading--;controls();}
 }
 async function send(event){
-  event.preventDefault();if(state.composing||state.busy||state.uploading||state.data?.running||!$("prompt").value.trim())return;
+  // 작업 도구에서 검수 역할을 골라 두었으면 Enter가 그 검수를 실행하고, 입력한 말은 검수자에게 추가 요청으로 간다(비어 있어도 실행).
+  const pick=reviewPick();
+  event.preventDefault();if(state.composing||state.busy||state.uploading||state.data?.running||(!pick&&!$("prompt").value.trim()))return;
+  if(pick&&state.pending.length){error("검수 실행에는 첨부 파일을 함께 보낼 수 없습니다. 첨부를 빼거나 고른 검수를 취소하세요.");return;}
   const free=freeMode(),t=claimTarget();if(!free&&!t.ok){error(t.error);return;}
   state.busy=true;controls();error("");const id=state.id,text=$("prompt").value;
   // 자유 작업에는 작성 대상·선행기술 검색 옵션이 없다(일반 에이전트가 요청 문장대로 답한다).
-  const body=free?{id,text,files:state.pending.map(f=>f.id)}:{id,text,files:state.pending.map(f=>f.id),target_mode:t.target_mode,target_claim:t.target_claim,target_segments:t.target_segments,dependent:t.dependent,target:t.target,prior_search:$("prior-search").checked};
-  try{await api("/api/send",body);$("prompt").value="";localStorage.removeItem("draft-"+id);state.pending=[];drafts.delete(id);pending();resize();await refresh();restartPoll();await list();$("conversation").scrollTop=$("conversation").scrollHeight;}
+  const [path,body]=pick?["/api/review",{id,message:pick.m.id,roles:[...tools.roles],text}]:["/api/send",free?{id,text,files:state.pending.map(f=>f.id)}:{id,text,files:state.pending.map(f=>f.id),target_mode:t.target_mode,target_claim:t.target_claim,target_segments:t.target_segments,dependent:t.dependent,target:t.target,prior_search:$("prior-search").checked}];
+  try{await api(path,body);if(pick)tools.roles.clear();$("prompt").value="";localStorage.removeItem("draft-"+id);state.pending=[];drafts.delete(id);pending();resize();await refresh();restartPoll();await list();$("conversation").scrollTop=$("conversation").scrollHeight;}
   catch(e){error(e.message);}finally{state.busy=false;controls();$("prompt").focus();}
 }
 $("composer").onsubmit=send;
@@ -367,7 +359,7 @@ async function openProject(id){
   const p=await api("/api/project?id="+encodeURIComponent(id));
   state.project=id;state.view="project";localStorage.setItem("claim-project",id);
   $("conversation").hidden=true;document.querySelector("main footer").hidden=true;$("improve-panel").hidden=true;$("project-panel").hidden=false;$("project-saved").textContent="";
-  document.body.classList.remove("sidebar-open");error("");renderProject(p);await list();
+  document.body.classList.remove("sidebar-open");error("");renderTools();renderProject(p);await list();
 }
 async function createProject(){if(state.busy||state.uploading)return;const p=await api("/api/project/new",{name:"새 프로젝트"});await openProject(p.id);$("project-name").select();}
 async function projectUpload(files){
@@ -568,7 +560,7 @@ function renderImprove(data){
 async function loadImprove(){const data=await api("/api/improve");renderImprove(data);return data;}
 async function openImprove(){
   if(state.busy||state.uploading)return;
-  state.view="improve";
+  state.view="improve";renderTools();
   $("conversation").hidden=true;document.querySelector("main footer").hidden=true;$("project-panel").hidden=true;$("improve-panel").hidden=false;
   document.body.classList.remove("sidebar-open");error("");
   try{await loadImprove();}catch(e){error(e.message);}
@@ -587,3 +579,81 @@ for(const tab of document.querySelectorAll(".improve-tab"))tab.onclick=()=>{
   for(const other of document.querySelectorAll(".improve-tab"))other.classList.toggle("is-on",other===tab);
   for(const name of ["lessons","cases","audit"])$("improve-"+name).hidden=name!==tab.dataset.tab;
 };
+// ---- 작업 도구 패널 (오른쪽): 검수 도구 + 피드백 멘트. 누르면 고르기만 하고, 실행은 입력창의 Enter다.
+function reviewLabels(review){return ((review?.roles)||[review?.role]).map(r=>REVIEW_LABEL[r]).filter(Boolean).join(" · ");}
+// 검수 대상 후보: 【청구항 N】 문언이 있는 메시지, 최근 것부터. 검수 반영으로 고친 답은 넣고, 문언을 인용만 한 예전 검수 보고서는 뺀다.
+function reviewCandidates(){
+  const fixed=m=>m.role==="assistant"&&m.review?.revise;
+  const out=[];(state.data?.messages||[]).forEach((m,i)=>{if(m.status!=="running"&&(m.mode!=="REVIEW"||fixed(m))&&CLAIM_HEAD.test(m.text||""))out.push({m,n:i+1});});
+  return out.reverse();
+}
+function reviewTarget(){if(!freeMode())return null;const c=reviewCandidates();return tools.target?c.find(x=>x.m.id===tools.target)||null:c[0]||null;}
+function reviewPick(){return tools.roles.size?reviewTarget():null;}
+// 서버의 review_target와 같은 규칙: 첫 머리줄부터 마지막 청구항 끝(제목·※·구분선·코드 울타리 앞)까지.
+function claimBlock(text){
+  const t=(text||"").replace(/\r\n/g,"\n").replace(/\*\*(【\s*청구항\s*\d+\s*】|\[\s*청구항\s*\d+\s*\])\*\*/g,"$1");
+  const heads=[...t.matchAll(/^[ \t]*(?:【\s*청구항\s*\d+\s*】|\[\s*청구항\s*\d+\s*\])/gm)];if(!heads.length)return "";
+  const last=heads.at(-1),from=last.index+last[0].length,end=t.slice(from).search(/\n[ \t]*(?:#|※|---|\*\*\*|```)|\n[ \t]*\n[ \t]*\n/);
+  return t.slice(heads[0].index,end<0?t.length:from+end).trim();
+}
+function candidateLabel({m,n}){const first=(claimBlock(m.text).split("\n").find(l=>l.trim()&&!CLAIM_HEAD.test(l))||"").trim();return (m.role==="user"?"내 메시지":"에이전트 답변")+" #"+n+" · "+(first.length>24?first.slice(0,24)+"…":first);}
+function renderTools(){
+  const visible=tools.open&&state.view==="chat",free=freeMode(),cands=free?reviewCandidates():[];
+  $("tool-panel").hidden=!visible;document.body.classList.toggle("tools-open",visible);$("tool-toggle").setAttribute("aria-expanded",String(visible));$("tool-toggle").classList.toggle("is-on",visible);
+  if(tools.target&&!cands.some(x=>x.m.id===tools.target))tools.target="";
+  const select=$("review-target"),key=cands.map(x=>x.m.id+":"+x.n).join(",");
+  if(key!==tools.options){tools.options=key;select.replaceChildren();const auto=el("option","",cands.length?"가장 최근 청구항 — "+candidateLabel(cands[0]):"청구항이 있는 메시지 없음");auto.value="";select.append(auto);for(const c of cands){const o=el("option","",candidateLabel(c));o.value=c.m.id;select.append(o);}}
+  select.value=tools.target;select.disabled=!cands.length;
+  const target=reviewTarget();if(!target)tools.roles.clear();
+  const preview=$("review-preview");preview.hidden=!target;if(target){const block=claimBlock(target.m.text);preview.textContent=block.length>320?block.slice(0,320)+"…":block;}
+  $("review-note").textContent=!free?"검수 도구는 자유 작업 모드에서 씁니다. 위쪽에서 자유 작업으로 바꾸세요.":!target?"아직 【청구항 N】 문언이 있는 메시지가 없습니다. 초안을 받거나 청구항을 붙여 넣으면 고를 수 있습니다.":"고른 메시지의 청구항 블록에 고른 검수를 실행합니다. 입력창이 비어 있으면 검수 결과만, 요청을 적으면 그 방향으로 검수한 뒤 요청대로 처리합니다. 여러 개를 함께 고를 수 있고, 결과는 LOCK 근거가 아닙니다.";
+  for(const button of $("review-buttons").children){const on=tools.roles.has(button.dataset.role);button.classList.toggle("is-on",on);button.setAttribute("aria-pressed",String(on));}
+  for(const [id,view] of state.nodes)view.article.classList.toggle("review-target",visible&&!!target&&id===target.m.id);
+  const chip=$("tool-chip");chip.replaceChildren();chip.hidden=!(target&&tools.roles.size);
+  if(!chip.hidden){
+    const cancel=el("button","","×");cancel.type="button";cancel.title="고른 검수 취소";cancel.setAttribute("aria-label","고른 검수 취소");cancel.onclick=()=>{tools.roles.clear();renderTools();controls();$("prompt").focus();};
+    chip.append(el("span","tool-chip-label",""),el("span","",reviewLabels({roles:REVIEW_ROLES.map(([r])=>r).filter(r=>tools.roles.has(r))})+" → "+candidateLabel(target)),cancel,el("span","tool-chip-hint",""));
+  }
+  renderChip();
+}
+// 입력창이 비어 있으면 검수만, 적혀 있으면 그 요청 방향으로 검수한 뒤 요청대로 처리(고쳐 달라면 고치고, 아니면 검수 결과로 답함).
+function renderChip(){
+  const chip=$("tool-chip");if(chip.hidden||!chip.firstChild)return;const asked=!!$("prompt").value.trim();
+  chip.querySelector(".tool-chip-label").textContent=asked?"검수 + 내 요청":"검수만";
+  chip.querySelector(".tool-chip-hint").textContent=asked?"Enter → 입력한 요청 방향으로 검수한 뒤 요청대로 처리합니다 (고쳐 달라면 고친 청구항, 아니면 검수 결과로 답)":"Enter → 검수 결과만 받습니다 · 요청을 적으면 그 방향으로 검수하고 요청대로 처리합니다 (예: \"명확성 위주로 봐 줘\", \"지적대로 고쳐 줘\")";
+}
+function setTools(open){tools.open=open;try{localStorage.setItem("claim-tools",open?"1":"0");}catch(e){}renderTools();}
+for(const [role,label,title] of REVIEW_ROLES){
+  const button=el("button","review-tool");button.type="button";button.dataset.role=role;button.setAttribute("aria-pressed","false");button.setAttribute("aria-label",label+" — "+title);button.append(el("strong","",label),el("span","",title));
+  button.onclick=()=>{if(tools.roles.has(role))tools.roles.delete(role);else tools.roles.add(role);renderTools();controls();$("prompt").focus();};
+  $("review-buttons").append(button);
+}
+$("review-target").onchange=()=>{tools.target=$("review-target").value;renderTools();controls();const t=reviewTarget();if(t)state.nodes.get(t.m.id)?.article.scrollIntoView({block:"center",behavior:"smooth"});};
+$("tool-toggle").onclick=()=>setTools(!tools.open);$("tool-close").onclick=()=>setTools(false);
+// 피드백 멘트: 누르면 입력창 커서 자리에 넣는다(보내지 않음). 목록은 이 컴퓨터에 저장되고, 저장된 목록이 없으면 기본 목록이다.
+function insertPhrase(text){
+  const p=$("prompt"),start=p.selectionStart??p.value.length,end=p.selectionEnd??p.value.length,before=p.value.slice(0,start),after=p.value.slice(end);
+  const lead=before&&!/\s$/.test(before)?"\n":"",tail=after&&!/^\s/.test(after)?"\n":"";
+  p.value=before+lead+text+tail+after;const caret=(before+lead+text).length;p.focus();p.setSelectionRange(caret,caret);
+  resize();controls();if(state.id)localStorage.setItem("draft-"+state.id,p.value);
+}
+function renderPhrases(){
+  const box=$("phrase-list"),groups=new Map();box.replaceChildren();
+  for(const p of tools.phrases){if(!groups.has(p.group))groups.set(p.group,[]);groups.get(p.group).push(p);}
+  for(const [group,items] of groups){
+    box.append(el("p","phrase-group",group));
+    for(const p of items){const row=el("div","phrase-row"),button=el("button","phrase",p.text);button.type="button";button.title="입력창에 넣기 (보내지 않음)";button.onclick=()=>insertPhrase(p.text);row.append(button);
+      if(tools.editing){const del=el("button","phrase-delete","×");del.type="button";del.setAttribute("aria-label","멘트 삭제: "+p.text);del.onclick=()=>savePhrases(tools.phrases.filter(x=>x.id!==p.id));row.append(del);}
+      box.append(row);}
+  }
+  if(!tools.phrases.length)box.append(el("p","tool-note","저장된 멘트가 없습니다. 편집에서 추가하세요."));
+  const list=$("phrase-groups");list.replaceChildren();for(const g of groups.keys()){const o=el("option");o.value=g;list.append(o);}
+  $("phrase-form").hidden=!tools.editing;$("phrase-edit").textContent=tools.editing?"완료":"편집";$("phrase-edit").setAttribute("aria-pressed",String(tools.editing));
+}
+async function loadPhrases(){try{tools.phrases=(await api("/api/phrases")).phrases;renderPhrases();}catch(e){error(e.message);}}
+async function savePhrases(list){try{tools.phrases=(await api("/api/phrases",{phrases:list})).phrases;renderPhrases();return true;}catch(e){error(e.message);return false;}}
+$("phrase-edit").onclick=()=>{tools.editing=!tools.editing;renderPhrases();if(tools.editing)$("phrase-text").focus();};
+$("phrase-form").onsubmit=async event=>{event.preventDefault();const text=$("phrase-text").value.trim();if(!text)return;if(await savePhrases([...tools.phrases,{group:$("phrase-group").value.trim(),text}]))$("phrase-text").value="";};
+$("phrase-reset").onclick=async()=>{if(!confirm("피드백 멘트를 기본 목록으로 되돌릴까요? 추가하거나 지운 내용은 사라집니다."))return;try{tools.phrases=(await api("/api/phrases/reset",{})).phrases;renderPhrases();}catch(e){error(e.message);}};
+try{const saved=localStorage.getItem("claim-tools");tools.open=saved===null?window.innerWidth>=1200:saved==="1";}catch(e){tools.open=window.innerWidth>=1200;}
+renderTools();loadPhrases();

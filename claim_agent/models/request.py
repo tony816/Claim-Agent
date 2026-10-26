@@ -36,6 +36,9 @@ class RunRequest(BaseModel):
     claim_file: str | None = None          # REVIEW_ONLY / FINALIZATION input claims
     reviewers: list[str] = Field(default_factory=list)   # REVIEW_ONLY
     review_scope: str = "INDEPENDENT"
+    # REVIEW_ONLY blind: claims the reviewed dependent claims may cite (the free work conversation's drafts), searched
+    # after the reviewed wording and before USER_LOCK for each exact parent chain. Never material for other roles.
+    parent_claims: str | None = None
     # EXISTING_SET_EDIT rewrites only the dependent claims in dependent_target inside the numbered set in claim_file;
     # the rest of that set is a read-only baseline. NEW_INDEPENDENT / NEW_DEPENDENT_SET (or None) keep the authoring paths.
     authoring_scope: str | None = None

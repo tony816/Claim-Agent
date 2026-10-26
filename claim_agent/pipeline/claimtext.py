@@ -277,13 +277,23 @@ def baseline_digest(text: str) -> str:
     return exact_sha256(claim_set_text(parse_claim_set(text.replace("\r\n", "\n"))))
 
 
-def independent_text(text: str) -> str:
-    """The first independent claim of a claim document (header included), or the whole text when it has no headers."""
+_UNNUMBERED_HEAD = re.compile(r"【\s*청구항\s*】")
+
+
+def numbered_claims(text: str) -> dict[int, Claim]:
+    """The numbered claims of a document by number, in order; the first one of a number wins.
+
+    A draft may also hold claims not numbered yet (【청구항 】, 제항에 있어서): each ends the claim before it and is left out.
+    """
     try:
-        claims = parse_claim_set(text)
+        claims = parse_claim_set(_UNNUMBERED_HEAD.sub("【청구항 0】", text))
     except ClaimParseError:
-        return text.strip()
-    return next((c.text for c in claims if c.is_independent), claims[0].text).strip()
+        return {}
+    out: dict[int, Claim] = {}
+    for claim in claims:
+        if claim.claim_no:
+            out.setdefault(claim.claim_no, claim)
+    return out
 
 
 def parent_chain_text(chain: list[Claim]) -> str:
