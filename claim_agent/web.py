@@ -519,9 +519,11 @@ class Workspace:
         self.spawn_chat(sid, request, dict(text=text, files=[known[f] for f in selected]), "FREE", files=selected)
 
     def review(self, sid: str, data: dict) -> None:
-        """자유 작업: run the chosen gate roles on the claim wording of one message (REVIEW_ONLY — no LOCK, no PASS evidence).
+        """자유 작업: run the chosen gate roles on the claim wording of one message (REVIEW_ONLY — no LOCK, no PASS evidence),
+        then let the general agent fix that wording from the reviews and the feedback.
 
-        `text` is what the user typed beside the chosen tools; it reaches the reviewers as an added request.
+        `text` is the feedback the user typed beside the chosen tools; the reviewers and the fix both get it. A fixed
+        answer can be the next target; an older review answer, which only quotes the wording it read, cannot.
         """
         with self.lock:
             folder = self.directory(sid)
@@ -538,7 +540,8 @@ class Workspace:
             if len(note) > 200000:
                 raise ValueError("메시지는 최대 20만 글자까지 보낼 수 있습니다.")
             source = next((m for m in session["messages"] if m["id"] == data.get("message")), None)
-            if not source or source.get("status") == "running" or source.get("mode") == "REVIEW":
+            fixed = source and source.get("role") == "assistant" and (source.get("review") or {}).get("revise")
+            if not source or source.get("status") == "running" or (source.get("mode") == "REVIEW" and not fixed):
                 raise ValueError("검수할 메시지를 찾을 수 없습니다.")
             target = review_target(source["text"])
             if not target:
@@ -550,7 +553,7 @@ class Workspace:
                            history=(read_state(folder / "history.json") or {}).get("history", []), model=self.cfg.default_model,
                            instructions=preset["instructions"], user_lock=preset["user_lock"], project=preset["project"],
                            review=dict(roles=roles, claim_text=target, message_id=source["id"], note=note))
-            detail = dict(roles=roles, source=source["id"])
+            detail = dict(roles=roles, source=source["id"], revise=True)
             self.spawn_chat(sid, request, dict(text=review_asked_text(roles, note, target), files=[], review=detail), "REVIEW",
                             answer=dict(execution_mode="REVIEW_ONLY", review=detail))
 

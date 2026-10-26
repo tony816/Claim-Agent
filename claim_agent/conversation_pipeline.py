@@ -251,6 +251,7 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
         dependent_target=route.dependent_target if route.mode != "REVIEW_ONLY" else None,
         dependent_set_id=previous.request.get("dependent_set_id") if previous else None,
         reviewers=list(dict.fromkeys(route.reviewers)), review_scope=route.review_scope,
+        parent_claims=(request.get("review") or {}).get("parent_claims") or None,
         claim_file=baseline[0] if baseline else (source["path"] if source else None),
         authoring_scope=route.authoring_scope if authoring else None, **paths,
         # 선행기술 검색 체크(웹 작성 창·MCP claim_send): WIPS 검색 + Jev 선별 + 사전 심사, 나머지 값은 claim-agent.yaml prior_search

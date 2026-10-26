@@ -230,8 +230,8 @@ function render(data){
       $("messages").append(article);view={article,body,logs,pre,summary,routeLabel,full,fullBody,text:null,status:null};state.nodes.set(m.id,view);
     }
     if(view.full)view.full.hidden=!(m.pipeline_run_id&&m.status&&m.status!=="running");
-    if(view.routeLabel){view.routeLabel.textContent=m.mode==="FREE"?"자유 작업 · 미검수 초안":m.mode==="REVIEW"?"선택 검수 · "+reviewLabels(m.review)+" · LOCK 없음":m.execution_mode?"자동 분류 · "+(routeNames[m.execution_mode]||m.execution_mode):"";view.routeLabel.title=m.route_reason||"";}
-    if(view.text!==m.text||view.status!==m.status){if(m.role==="user")view.body.textContent=m.text;else if(m.text)markdown(view.body,m.text);else view.body.replaceChildren(el("span","pending",m.mode==="FREE"?"답변을 준비하고 있어요…":m.mode==="REVIEW"?"검수 역할을 실행하고 있어요…":"요청을 분류하고 답변을 준비하고 있어요…"));view.text=m.text;}
+    if(view.routeLabel){view.routeLabel.textContent=m.mode==="FREE"?"자유 작업 · 미검수 초안":m.mode==="REVIEW"?(m.review?.revise?"검수 반영 · "+reviewLabels(m.review)+" · 미검수 초안":"선택 검수 · "+reviewLabels(m.review)+" · LOCK 없음"):m.execution_mode?"자동 분류 · "+(routeNames[m.execution_mode]||m.execution_mode):"";view.routeLabel.title=m.route_reason||"";}
+    if(view.text!==m.text||view.status!==m.status){if(m.role==="user")view.body.textContent=m.text;else if(m.text)markdown(view.body,m.text);else view.body.replaceChildren(el("span","pending",m.mode==="FREE"?"답변을 준비하고 있어요…":m.mode==="REVIEW"?"검수하고, 그 결과와 피드백으로 고치고 있어요…":"요청을 분류하고 답변을 준비하고 있어요…"));view.text=m.text;}
     if(view.logs){
       if(m.status==="running"){view.pre.textContent=state.log.text||"연결 중…";view.summary.textContent="작업 중 · 실시간 로그";if(view.status!=="running")view.logs.open=true;}
       else {view.summary.textContent=(m.status==="error"?"오류 확인 · ":m.status==="review"?"검토 필요 · ":"")+"작업 로그 펼치기";if(view.status==="running"){view.logs.open=false;view.pre.textContent="";}}
@@ -581,9 +581,10 @@ for(const tab of document.querySelectorAll(".improve-tab"))tab.onclick=()=>{
 };
 // ---- 작업 도구 패널 (오른쪽): 검수 도구 + 피드백 멘트. 누르면 고르기만 하고, 실행은 입력창의 Enter다.
 function reviewLabels(review){return ((review?.roles)||[review?.role]).map(r=>REVIEW_LABEL[r]).filter(Boolean).join(" · ");}
-// 검수 대상 후보: 【청구항 N】 문언이 있는 메시지(검수 결과 제외), 최근 것부터.
+// 검수 대상 후보: 【청구항 N】 문언이 있는 메시지, 최근 것부터. 검수 반영으로 고친 답은 넣고, 문언을 인용만 한 예전 검수 보고서는 뺀다.
 function reviewCandidates(){
-  const out=[];(state.data?.messages||[]).forEach((m,i)=>{if(m.status!=="running"&&m.mode!=="REVIEW"&&CLAIM_HEAD.test(m.text||""))out.push({m,n:i+1});});
+  const fixed=m=>m.role==="assistant"&&m.review?.revise;
+  const out=[];(state.data?.messages||[]).forEach((m,i)=>{if(m.status!=="running"&&(m.mode!=="REVIEW"||fixed(m))&&CLAIM_HEAD.test(m.text||""))out.push({m,n:i+1});});
   return out.reverse();
 }
 function reviewTarget(){if(!freeMode())return null;const c=reviewCandidates();return tools.target?c.find(x=>x.m.id===tools.target)||null:c[0]||null;}
@@ -605,13 +606,13 @@ function renderTools(){
   select.value=tools.target;select.disabled=!cands.length;
   const target=reviewTarget();if(!target)tools.roles.clear();
   const preview=$("review-preview");preview.hidden=!target;if(target){const block=claimBlock(target.m.text);preview.textContent=block.length>320?block.slice(0,320)+"…":block;}
-  $("review-note").textContent=!free?"검수 도구는 자유 작업 모드에서 씁니다. 위쪽에서 자유 작업으로 바꾸세요.":!target?"아직 【청구항 N】 문언이 있는 메시지가 없습니다. 초안을 받거나 청구항을 붙여 넣으면 고를 수 있습니다.":"고른 메시지의 청구항 블록만 고른 역할에 넘깁니다. 여러 개를 함께 고를 수 있고, 결과는 LOCK 근거가 아닙니다.";
+  $("review-note").textContent=!free?"검수 도구는 자유 작업 모드에서 씁니다. 위쪽에서 자유 작업으로 바꾸세요.":!target?"아직 【청구항 N】 문언이 있는 메시지가 없습니다. 초안을 받거나 청구항을 붙여 넣으면 고를 수 있습니다.":"고른 메시지의 청구항 블록에 고른 검수를 실행하고, 그 결과와 입력창의 피드백을 함께 반영해 고친 청구항으로 답합니다. 여러 개를 함께 고를 수 있고, 고친 문언은 미검수 초안입니다(LOCK 근거 아님).";
   for(const button of $("review-buttons").children){const on=tools.roles.has(button.dataset.role);button.classList.toggle("is-on",on);button.setAttribute("aria-pressed",String(on));}
   for(const [id,view] of state.nodes)view.article.classList.toggle("review-target",visible&&!!target&&id===target.m.id);
   const chip=$("tool-chip");chip.replaceChildren();chip.hidden=!(target&&tools.roles.size);
   if(!chip.hidden){
     const cancel=el("button","","×");cancel.type="button";cancel.title="고른 검수 취소";cancel.setAttribute("aria-label","고른 검수 취소");cancel.onclick=()=>{tools.roles.clear();renderTools();controls();$("prompt").focus();};
-    chip.append(el("span","tool-chip-label","검수 대기"),el("span","",reviewLabels({roles:REVIEW_ROLES.map(([r])=>r).filter(r=>tools.roles.has(r))})+" → "+candidateLabel(target)),cancel,el("span","tool-chip-hint","덧붙일 말이 있으면 적고 Enter · 없으면 그냥 Enter"));
+    chip.append(el("span","tool-chip-label","검수 후 고치기"),el("span","",reviewLabels({roles:REVIEW_ROLES.map(([r])=>r).filter(r=>tools.roles.has(r))})+" → "+candidateLabel(target)),cancel,el("span","tool-chip-hint","피드백이 있으면 적고 Enter · 없으면 그냥 Enter"));
   }
 }
 function setTools(open){tools.open=open;try{localStorage.setItem("claim-tools",open?"1":"0");}catch(e){}renderTools();}

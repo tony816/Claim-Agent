@@ -1,10 +1,11 @@
 """Free work mode (CLAUDE.md 자유 작업 모드): an ungated general agent for first drafts, and gate roles on demand.
 
 A conversation the user switches into this mode sends every message straight to one general agent: no router, no claim
-pipeline. Its answers carry the code's `미검수 초안` label, since no gate ran and nothing is locked. Under an answer that
-holds claim wording the user can click one gate role; the click runs the existing REVIEW_ONLY path on exactly that
-wording (r1, design_revision N/A), so the report is an opinion on the draft and never PASS evidence for a LOCK. The
-review lands in the conversation history, so the next free turn can apply it when the user asks.
+pipeline. Its answers carry the code's `미검수 초안` label, since no gate ran and nothing is locked. From the tool panel
+the user picks gate roles for one message's claim wording and may type feedback beside them. The roles run on exactly
+that wording through the existing REVIEW_ONLY path (r1, design_revision N/A), and the general agent then fixes the
+wording from their reports and the feedback together. The answer is the fixed claims with a line or two on what
+changed; the reports stay in the full report and the history, never PASS evidence for a LOCK.
 """
 from __future__ import annotations
 
@@ -28,9 +29,12 @@ UNREVIEWED_LABEL = ("※ 미검수 초안 — 자유 작업 모드의 일반 에
                     "최종안·확정안이 아닙니다.")
 REVIEW_NOTE = ("※ 선택 검수 — 사용자가 고른 역할만 이 문언에 실행했습니다(REVIEW_ONLY, r1, design_revision N/A). 다른 게이트는 실행하지 않았고 "
                "LOCK이 없으며, 이 결과는 LOCK의 PASS 근거가 아닙니다.")
-BLIND_NOTE = ("※ 블라인드 복원은 역피처 검수의 1단계만입니다. 자유 작업에는 DESIGN_GATE가 없어 기준 비교(picture)는 실행하지 않았습니다. "
-              "독립항 문언만 읽은 복원 결과를 의도한 구조와 직접 대조하세요.")
-BLIND_NOTE_TEXT = "※ 추가 요청은 블라인드 복원에 전달하지 않았습니다(블라인드는 청구항 문언만 받는 새 context)."
+REVISED_LABEL = ("※ 미검수 초안 — 고른 검수({labels})를 이 문언에 실행한 뒤, 일반 에이전트가 그 결과와 피드백을 함께 반영해 고친 문언입니다. "
+                 "고친 문언은 다시 검수하기 전에는 미검수이고 LOCK이 없습니다. 검수 보고서 전문은 '전체 보고서 펼치기'에 있습니다.")
+BLIND_NOTE = ("※ 블라인드 복원은 역피처 검수의 1단계만입니다. 자유 작업에는 DESIGN_GATE가 없어 기준 비교(picture)는 실행하지 않았고, "
+              "종속항은 부모항 체인과 함께 항마다 따로 읽혔습니다.")
+BLIND_NOTE_TEXT = "※ 피드백은 블라인드 복원에 보내지 않고(블라인드는 청구항 문언만 받는 새 context) 고치는 단계에만 반영했습니다."
+HALTED_NOTE = "※ 검수가 끝까지 실행되지 않아, 끝난 검수 결과와 피드백만 반영했습니다. 중지 원인은 작업 로그와 전체 보고서에 있습니다."
 PROJECT_FILES_HEAD ="## 프로젝트 소스 파일 (프로젝트에 미리 등록되어 매 요청에 자동 첨부 — 사용자 제공 원자료)"
 CATEGORY_LABELS = {"invention": "발명 자료", "drawing": "도면", "prior_art": "선행기술", "spec": "정식 명세서"}
 
@@ -39,16 +43,28 @@ FREE_SYSTEM = """너는 Claim-Agent의 자유 작업 에이전트다. 사용자�
 - 기술 사실·구성·수치·재료·효과는 사용자가 준 자료(대화, 첨부, 프로젝트 지침·파일)에서만 가져온다. 자료에 없으면 지어내지 말고
   `근거 미확인`으로 표시한 뒤 발명자에게 확인할 질문으로 남긴다.
 - 청구항은 한 항마다 `【청구항 N】` 머리줄로 시작하고, 종속항은 `제N항에 있어서,`로 인용한다. 머리줄을 굵게 하거나 목록 기호를 붙이지 않는다.
-  설명은 청구항 블록 앞에 쓰고, 청구항 사이와 마지막 청구항 뒤에는 설명을 섞지 않는다. 사용자는 버튼으로 청구항 블록만 검수 역할에 넘긴다.
+  설명은 청구항 블록 앞에 쓰고, 청구항 사이와 마지막 청구항 뒤에는 설명을 섞지 않는다. 사용자는 작업 도구로 청구항 블록만 검수 역할에 넘긴다.
 - 네 답은 검수를 거치지 않은 초안이다. 게이트 통과·PASS·LOCK을 주장하지 않고, 어떤 문언도 `최종안`·`확정`이라고 부르지 않는다.
   신규성·진보성·등록 가능성을 단정하지 않는다.
 - 대화에 앞선 검수 결과(통사·OA·성공조건·블라인드 복원 보고서)가 있으면, 사용자가 반영을 요청할 때 그 지적을 짚어 가며 고친다.
   검수 보고서는 원자료가 아니며, 고친 문언도 다시 검수하기 전에는 미검수다.
 - 한국어로, 동료 변리사와 작업하듯 간결하게 쓴다."""
 
-REVIEW_REQUEST = ("자유 작업 모드에서 사용자가 작업 도구 패널에서 고른 검수({labels})다. '제공된 청구항 전문'은 게이트를 거치지 않은 초안이다. "
-                  "이 역할의 기준으로 결함을 찾고, 결함마다 문제 구절·이유·고칠 방향을 적는다. 수정 문언 전문은 쓰지 않는다. "
-                  "사용자 추가 요청이 있으면 이 역할의 기준 안에서 그 요청에 먼저 답한다.")
+REVIEW_REQUEST = ("자유 작업 모드에서 사용자가 작업 도구 패널에서 고른 검수({labels})다. '제공된 청구항 전문'은 게이트를 거치지 않은 초안이며, "
+                  "이 검수 결과와 사용자 피드백으로 일반 에이전트가 문언을 고친다. 이 역할의 기준으로 결함을 찾고, 결함마다 문제 구절·이유·고칠 방향을 적는다. "
+                  "수정 문언 전문은 쓰지 않는다. 사용자 피드백이 있으면 이 역할의 기준으로 그 지점을 먼저 판단한다.")
+# The general agent's turn after the reviews: the reports are in the history right above this message.
+REVISE_REQUEST = """방금 실행한 검수({labels})의 결과와 사용자 피드백을 함께 반영해 아래 청구항을 고쳐라.
+- 피드백이 무엇을 고치라는 것인지 먼저 정하고, 검수 지적 가운데 같은 곳이거나 자료로 고칠 수 있는 것을 함께 반영한다. 피드백과 검수 지적이 어긋나면 피드백을 따른다.
+- 블라인드 복원 결과가 있으면, 복원이 자료의 구조와 다르게 읽거나 정하지 못한 곳을 문언으로 닫는다.
+- 기술 사실은 자료(대화, 첨부, 프로젝트 지침·파일)에서만 가져온다. 자료로 고칠 수 없거나 아래 청구항 밖(부모항 등)을 고쳐야 하는 지적은 그 부분을 그대로 둔다.
+- 아래 청구항의 항 번호와 인용관계는 그대로 두고, 없는 항을 새로 쓰지 않는다.
+- 답 형식: 첫머리에 `- 바꾼 곳: …` 한두 줄(고치지 못한 지적이 있으면 `- 못 고친 곳: … (이유)` 한 줄), 그다음 고친 청구항 전문만. 검수 보고서를 옮겨 적거나 다른 설명을 붙이지 않는다.
+
+사용자 피드백: {note}
+
+고칠 청구항:
+{target}"""
 
 # A claim block starts at a header line (bold or bracketed spellings included) and the last one ends at the first
 # markdown heading, note, rule or fence after it — the agent is told to keep its explanation above the claims.
@@ -105,12 +121,18 @@ def free_turn(provider: LLMProvider, cfg, request: dict) -> dict:
     return {**result, "answer": answer, "effective_mode": "FREE", "status": "complete"}
 
 
-def review_turn(cfg, config_path, request: dict, folder: Path) -> dict:
-    """Run the clicked gate roles on one message's wording through the REVIEW_ONLY path (no router, no moderator)."""
-    from .chat import _close
+def review_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: Path) -> dict:
+    """Run the chosen gate roles on one message's wording (REVIEW_ONLY, no router, no moderator), then have the general
+    agent fix that wording from their reports and the user's feedback.
+
+    `provider` is the live provider the general agent answers on; the reviewers run on the pipeline's own.
+    """
+    from .chat import _close, generate_turn, user_message
     from .conversation_pipeline import intake, run_pipeline
     from .routing import RouteDecision
     from .runtime import build_runtime, make_provider
+    from .store.report import turn_usage, usage_note
+    from .store.telemetry import add_usage
 
     started = time.time()
     review = request["review"]
@@ -120,6 +142,9 @@ def review_turn(cfg, config_path, request: dict, folder: Path) -> dict:
     target = str(review.get("claim_text") or "").strip()
     if not target:
         raise ValueError("검수할 청구항 문언이 없습니다.")
+    history = request.get("history", [])
+    # The blind reader needs each dependent claim's exact parent chain; the conversation's drafts are where it is.
+    request = {**request, "review": {**review, "parent_claims": parent_claims_text(history)}}
     blocks, paths = intake(request, folder)
     # The click's request text is the program's, not user material; the reviewed wording is the review target only.
     asked = {b["path"] for b in blocks if b.get("is_request")}
@@ -128,31 +153,56 @@ def review_turn(cfg, config_path, request: dict, folder: Path) -> dict:
     path.write_text(target, encoding="utf-8", newline="")
     blocks.append(dict(id="review-target", text=target, origin="assistant_reference", category="claim_file", path=str(path), is_request=False))
     labels = ", ".join(REVIEW_ROLES[role] for role in roles)
-    route = RouteDecision(mode="REVIEW_ONLY", reason="자유 작업 모드 — 사용자가 버튼으로 고른 검수: " + labels,
+    route = RouteDecision(mode="REVIEW_ONLY", reason="자유 작업 모드 — 사용자가 작업 도구에서 고른 검수: " + labels,
                           reviewers=roles, review_scope=review_scope(target), claim_source_id="review-target")
     rt = build_runtime(cfg.project_root, config_path, overrides={cfg.default_model_key: request["model"]})
-    provider = make_provider(rt)
+    pipeline_provider = make_provider(rt)
     try:
-        result = run_pipeline(rt, provider, request, route, blocks, paths, folder, None, turn={"started_at": started})
+        result = run_pipeline(rt, pipeline_provider, request, route, blocks, paths, folder, None, turn={"started_at": started})
     finally:
-        _close(provider)
+        _close(pipeline_provider)
     note = str(review.get("note") or "").strip()
     blind = "blind-claim-reconstruction-reviewer" in roles
-    notes = [REVIEW_NOTE] + ([BLIND_NOTE] if blind else []) + ([BLIND_NOTE_TEXT] if blind and note else [])
-    answer = "\n".join(notes) + "\n\n" + result["answer"]
+    reports = "\n".join([REVIEW_NOTE] + ([BLIND_NOTE] if blind else [])) + "\n\n" + result["answer"]
+    # The history holds what happened, in order: the reviews asked and answered, then the fix asked and answered.
+    reviewed = [{"role": "user", "parts": [{"text": review_asked_text(roles, note, target)}]}, {"role": "model", "parts": [{"text": reports}]}]
+    provider = UsageMeter(provider, cfg.telemetry.pricing)
+    message = user_message(REVISE_REQUEST.format(labels=labels, note=note or "없음 — 검수 지적만 반영한다.", target=target), "", [])
+    preset = request.get("attachments") or []
+    sent = {"role": "user", "parts": [*_preset_parts(preset), *message["parts"]]} if preset else None
+    gen = GenParams(temperature=0.3, thinking_level="MEDIUM", max_output_tokens=cfg.model.max_output_tokens)
+    fixed = generate_turn(provider, request["model"], [*history, *reviewed], message, None, request.get("instructions"),
+                          sent=sent, system=FREE_SYSTEM, role=FREE_ROLE, gen=gen)
+    usage = {k: v for k, v in turn_usage(rt.store.load_state(result["run_id"]))[0].items() if k not in ("started_at", "finished_at")}
+    notes = [REVISED_LABEL.format(labels=labels)] + ([BLIND_NOTE] if blind else []) + ([BLIND_NOTE_TEXT] if blind and note else [])
+    notes += [HALTED_NOTE] if result["status"] != "complete" else []
+    answer = "\n".join(notes) + "\n\n" + fixed["answer"] + "\n\n" + usage_note(add_usage(usage, provider.usage), time.time() - started)
     rt.store.write_chat_report(result["run_id"], answer)
-    asked_text = review_asked_text(roles, note, target)
-    history = [*request.get("history", []), {"role": "user", "parts": [{"text": asked_text}]}, {"role": "model", "parts": [{"text": answer}]}]
-    return {**result, "answer": answer, "history": history, "effective_mode": "REVIEW_ONLY"}
+    return {**result, "answer": answer, "history": fixed["history"], "effective_mode": "REVIEW_ONLY", "finish_reason": fixed["finish_reason"]}
+
+
+def parent_claims_text(history: list[dict]) -> str:
+    """The claims the conversation holds, one per number from the newest message that has it, as one claim set."""
+    from .pipeline.claimtext import numbered_claims
+
+    found: dict[int, str] = {}
+    for turn in reversed(history):
+        for part in turn.get("parts", []):
+            text = part.get("text") or ""
+            if text.startswith(REVIEW_NOTE):
+                continue                   # a review report quotes the wording it read; it is not a draft
+            for no, claim in numbered_claims(review_target(text) or "").items():
+                found.setdefault(no, claim.text)
+    return "\n\n".join(found[no] for no in sorted(found))
 
 
 def review_request_text(roles: list[str], note: str = "") -> str:
-    """The reviewers' request: the program's review instruction, then what the user typed beside the chosen tools."""
+    """The reviewers' request: the program's review instruction, then the feedback the user typed beside the chosen tools."""
     text = REVIEW_REQUEST.format(labels=", ".join(REVIEW_ROLES[role] for role in roles))
-    return text + ("\n\n사용자 추가 요청: " + note if note.strip() else "")
+    return text + ("\n\n사용자 피드백: " + note if note.strip() else "")
 
 
 def review_asked_text(roles: list[str], note: str, target: str) -> str:
     """The user's turn as the conversation shows it and the general agent reads it next."""
-    head = f"[선택 검수 · {', '.join(REVIEW_ROLES[role] for role in roles)}]"
-    return head + (f" {note.strip()}" if note.strip() else " 아래 문언을 검수해 줘.") + "\n\n" + target
+    head = f"[검수 반영 · {', '.join(REVIEW_ROLES[role] for role in roles)}]"
+    return head + (f" {note.strip()}" if note.strip() else " 아래 문언을 검수하고 그 결과로 고쳐 줘.") + "\n\n" + target
