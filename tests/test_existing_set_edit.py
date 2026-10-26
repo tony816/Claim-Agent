@@ -46,7 +46,7 @@ def combined_review():
     """One envelope carrying the success, syntax and OA verdicts of an edit's combined review call."""
     def review(spec):
         gates = {"CLAIM_STYLE_GATE": "PASS", "TERM_EXPRESSION_GATE": "PASS", "NON_PATENT_TECHNICAL_READER_GATE": "PASS", "GEOMETRIC_OBJECT_GATE": "PASS",
-                 "DEPENDENT_OA_DRAFT_GATE": "PASS", "DEPENDENT_OA_FINAL_GATE": "UNVERIFIED"}
+                 "FUNCTION_DEDUCTION_GATE": "PASS", "DEPENDENT_OA_DRAFT_GATE": "PASS", "DEPENDENT_OA_FINAL_GATE": "UNVERIFIED"}
         return R._base(spec, "PASS", gates, ["- syntax 진행 가능: YES", "- DRAFT 진행 가능: 역구성 YES"],
                        gate_reasons=[{"gate": "DEPENDENT_OA_FINAL_GATE", "reason_code": "SPEC_NOT_PROVIDED"}])
     return review

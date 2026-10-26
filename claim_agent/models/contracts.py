@@ -51,6 +51,7 @@ def _drafter(env: RoleEnvelope, mode: RequestMode) -> bool:
         and env.handoff_ready
         and _g(env, "PRE_STYLE_NON_PATENT_TECHNICAL_READER_CHECK", PASSY)
         and _g(env, "PRE_STYLE_GEOMETRIC_OBJECT_CHECK", PASSY_NA)
+        and _g(env, "PRE_STYLE_FUNCTION_DEDUCTION_CHECK", PASSY_NA)
         and bool(env.exact_claim_text or env.claims)
     )
 
@@ -62,13 +63,15 @@ def _style(env: RoleEnvelope, mode: RequestMode) -> bool:
         and _g(env, "CLAIM_STYLE_GATE", PASSY)
         and _g(env, "NON_PATENT_TECHNICAL_READER_GATE", PASSY)
         and _g(env, "GEOMETRIC_OBJECT_GATE", PASSY_NA)
+        and _g(env, "FUNCTION_DEDUCTION_GATE", PASSY_NA)
         and env.finalized_status == FinalizedStatus.FINALIZED_FOR_SUCCESS
         and bool(env.exact_claim_text or env.claims)
     )
 
 
 def _success(env: RoleEnvelope, mode: RequestMode) -> bool:
-    return env.status == Status.PASS and env.handoff_ready
+    # 성공조건 조건 2: a function written as what the structure does must follow from the written structure alone.
+    return env.status == Status.PASS and env.handoff_ready and _g(env, "FUNCTION_DEDUCTION_GATE", PASSY_NA)
 
 
 def _syntax(env: RoleEnvelope, mode: RequestMode) -> bool:
@@ -77,6 +80,7 @@ def _syntax(env: RoleEnvelope, mode: RequestMode) -> bool:
         and env.handoff_ready
         and _g(env, "NON_PATENT_TECHNICAL_READER_GATE", PASSY)
         and _g(env, "GEOMETRIC_OBJECT_GATE", PASSY_NA)
+        and _g(env, "FUNCTION_DEDUCTION_GATE", PASSY_NA)
     )
 
 
@@ -140,7 +144,7 @@ def _dep_architect(env: RoleEnvelope, mode: RequestMode) -> bool:
 
 
 def _dep_success(env: RoleEnvelope, mode: RequestMode) -> bool:
-    return env.status == Status.PASS and env.handoff_ready
+    return env.status == Status.PASS and env.handoff_ready and _g(env, "FUNCTION_DEDUCTION_GATE", PASSY_NA)
 
 
 def _prior_query(env: RoleEnvelope, mode: RequestMode) -> bool:
@@ -167,43 +171,43 @@ CONTRACTS: dict[tuple[str, Scope], GateContract] = {
     ),
     ("claim-drafter", Scope.INDEPENDENT): GateContract(
         "claim-drafter",
-        ["DRAFTER_GATE", "PRE_STYLE_NON_PATENT_TECHNICAL_READER_CHECK", "PRE_STYLE_GEOMETRIC_OBJECT_CHECK"],
+        ["DRAFTER_GATE", "PRE_STYLE_NON_PATENT_TECHNICAL_READER_CHECK", "PRE_STYLE_GEOMETRIC_OBJECT_CHECK", "PRE_STYLE_FUNCTION_DEDUCTION_CHECK"],
         _drafter,
         ["DRAFTER_GATE"],
     ),
     ("claim-drafter", Scope.DEPENDENT_SET): GateContract(
         "claim-drafter",
-        ["DRAFTER_GATE", "PRE_STYLE_NON_PATENT_TECHNICAL_READER_CHECK", "PRE_STYLE_GEOMETRIC_OBJECT_CHECK"],
+        ["DRAFTER_GATE", "PRE_STYLE_NON_PATENT_TECHNICAL_READER_CHECK", "PRE_STYLE_GEOMETRIC_OBJECT_CHECK", "PRE_STYLE_FUNCTION_DEDUCTION_CHECK"],
         _drafter,
         ["DRAFTER_GATE"],
     ),
     ("claim-style-adjuster", Scope.INDEPENDENT): GateContract(
         "claim-style-adjuster",
-        ["TERM_EXPRESSION_GATE", "CLAIM_STYLE_GATE", "NON_PATENT_TECHNICAL_READER_GATE", "GEOMETRIC_OBJECT_GATE"],
+        ["TERM_EXPRESSION_GATE", "CLAIM_STYLE_GATE", "NON_PATENT_TECHNICAL_READER_GATE", "GEOMETRIC_OBJECT_GATE", "FUNCTION_DEDUCTION_GATE"],
         _style,
         ["TERM_EXPRESSION_GATE", "CLAIM_STYLE_GATE"],
     ),
     ("claim-style-adjuster", Scope.DEPENDENT_SET): GateContract(
         "claim-style-adjuster",
-        ["TERM_EXPRESSION_GATE", "CLAIM_STYLE_GATE", "NON_PATENT_TECHNICAL_READER_GATE", "GEOMETRIC_OBJECT_GATE"],
+        ["TERM_EXPRESSION_GATE", "CLAIM_STYLE_GATE", "NON_PATENT_TECHNICAL_READER_GATE", "GEOMETRIC_OBJECT_GATE", "FUNCTION_DEDUCTION_GATE"],
         _style,
         ["TERM_EXPRESSION_GATE", "CLAIM_STYLE_GATE"],
     ),
     ("claim-success-reviewer", Scope.INDEPENDENT): GateContract(
-        "claim-success-reviewer", ["CLAIM_STYLE_GATE", "TERM_EXPRESSION_GATE"], _success, []
+        "claim-success-reviewer", ["CLAIM_STYLE_GATE", "TERM_EXPRESSION_GATE", "FUNCTION_DEDUCTION_GATE"], _success, []
     ),
     ("claim-success-reviewer", Scope.DEPENDENT_SET): GateContract(
-        "claim-success-reviewer", ["CLAIM_STYLE_GATE", "TERM_EXPRESSION_GATE"], _dep_success, []
+        "claim-success-reviewer", ["CLAIM_STYLE_GATE", "TERM_EXPRESSION_GATE", "FUNCTION_DEDUCTION_GATE"], _dep_success, []
     ),
     ("syntax-scope-reviewer", Scope.INDEPENDENT): GateContract(
         "syntax-scope-reviewer",
-        ["NON_PATENT_TECHNICAL_READER_GATE", "GEOMETRIC_OBJECT_GATE"],
+        ["NON_PATENT_TECHNICAL_READER_GATE", "GEOMETRIC_OBJECT_GATE", "FUNCTION_DEDUCTION_GATE"],
         _syntax,
         ["NON_PATENT_TECHNICAL_READER_GATE", "GEOMETRIC_OBJECT_GATE"],
     ),
     ("syntax-scope-reviewer", Scope.DEPENDENT_SET): GateContract(
         "syntax-scope-reviewer",
-        ["NON_PATENT_TECHNICAL_READER_GATE", "GEOMETRIC_OBJECT_GATE"],
+        ["NON_PATENT_TECHNICAL_READER_GATE", "GEOMETRIC_OBJECT_GATE", "FUNCTION_DEDUCTION_GATE"],
         _syntax,
         ["NON_PATENT_TECHNICAL_READER_GATE", "GEOMETRIC_OBJECT_GATE"],
     ),

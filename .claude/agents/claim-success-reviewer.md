@@ -66,6 +66,7 @@ AUTHORING_DRAFT와 FINALIZATION의 독립항에는 다음을 exact 문언 기준
 1. 조건 1: 요청 모드, 편집 범위, USER_LOCK 및 변경 목적이 보존되는가.
 2. 조건 4: 각 한정의 현재 허용 원자료 근거가 정확한 위치로 닫히며, 보정이면 최초 출원자료 범위를 넘지 않는가.
 3. 조건 2: 구성 계층, 공간·방향·수치·상태 및 핵심 협동관계가 물리적·논리적으로 양립하는가.
+3a. 조건 2의 구성–기능 연역시험(`FUNCTION_DEDUCTION_GATE`): 기능·작용·결과를 구성의 귀결로 적은 구절마다 exact 문언을 모두 충족하면서 그 기능이 일어나지 않는 반례 모델을 직접 만들어 본다. style record와 의미 초안의 연역표를 그대로 받지 않는다. 반례가 나오면 PASS로 하지 않고, 빠진 전제가 설계 계약에 있으면 `RETURN_TO_DRAFTER`, 계약에 없으면 `RETURN_TO_ARCHITECT`로 내며 원자료에 그 전제가 있는지 위치와 함께 적는다.
 4. 조건 3과 TERM_EXPRESSION_GATE: 구성명·관계 술어·형상 표현·선행기재가 일의적이고 출처표와 글자 단위로 일치하는가.
 5. 조건 9: 절별 주체·술어·대상, 최상위 머리명사, 단일 명제 트리, 복수 집합과 `각각`의 분배 및 평문 귀속이 닫히는가.
 6. 조건 6: 선행기술이 제공된 경우에만 문헌별 개시와 N/I/S 위협을 기록하고, 없으면 비게이팅 `UNVERIFIED — PRIOR_ART_NOT_PROVIDED`로 두는가.
@@ -84,6 +85,7 @@ DEPENDENT_SET에는 루트 독립항 success를 재사용하지 않고 다음을
 2. 모든 목표항이 정확히 하나의 LOCK된 `DC-NN`과 대응하고 후보별 DEPENDENT_SOURCE_GATE·CAUSAL_CONTRIBUTION_GATE·CLAIMABILITY_GATE·ENFORCEMENT_VALUE_GATE가 PASS인가.
 2a. `08_종속항_기술기여_게이트.md` 제5.4절에 따라 exact 목표항 문언과 부모항 체인으로 권리행사 내재 시험을 다시 돌리는가. 설계 기록의 권리행사 시나리오를 그대로 받지 않고, 문언만으로 EV1 한정 실익(부모항을 갖추면 언제나 충족되지 않는가), EV2 충족 확인(수치·파라미터 한정에 원자료의 측정 조건이 문언에 들어 있는가), EV3 단일 실시 주체, EV4 회피 대가(원자료에 적힌 같은 효과의 대안을 문언이 포섭하는가), EV5 독립 축(같은 부모 아래 형제항과 같은 차이점을 되풀이하지 않는가)을 확인한다. 하나라도 실패하면 PASS로 하지 않고 `RETURN_TO_DEPENDENT_ARCHITECT`로 낸다. `BUSINESS_FIT`과 `BUSINESS_CONTEXT`는 이 재검사의 근거가 아니며 `UNVERIFIED`여도 결함이 아니다.
 3. 각 목표항을 정확한 부모항 체인과 합친 전체 발명에서 과제–추가 기술특징–작동·협동 원리–효과에 필요한 수단·관계·조건이 보존되는가.
+3a. 각 목표항의 기능·작용·결과 구절마다 구성–기능 연역시험(`독립항_작성_성공조건.md` 조건 2)을 돌려, 부모항 체인과 목표항을 모두 충족하면서 그 기능이 일어나지 않는 반례 모델이 없는가. 예를 들어 `마주하는 한 쌍의 측면을 구비하여 … 이동을 구속하는`은 측면 사이가 대상물보다 넓은 구현에서도 문언이 충족되므로 실패다. 빠진 전제가 계약의 연역 전제에 있으면 `RETURN_TO_DRAFTER`, 없으면 `RETURN_TO_DEPENDENT_ARCHITECT`다.
 4. `05_종속항_전개패턴_가이드.md`에 따라 인용항이 앞선 번호이고, 필요한 모든 선행 용어와 전제를 가진 가장 넓은 적정 부모이며, 대안 실시형태가 부당하게 누적되지 않는가.
 5. 선행기재, 카테고리, 상하위 모순, 수치범위 및 종속항 말미 명칭이 닫히는가.
 5a. 각 목표항의 최상위 주어가 설계 계약이 잠근 메인 주체 하나뿐인가(`05_종속항_전개패턴_가이드.md` 제1.4a절). 절마다 주어가 바뀌거나 하위 구성이 따로 주어로 서면 PASS로 하지 않고, 절 결속 문제면 `RETURN_TO_DRAFTER`, 주체 선택·후보 분할 문제면 `RETURN_TO_DEPENDENT_ARCHITECT`로 낸다.
@@ -131,6 +133,8 @@ DEPENDENT_SET에는 루트 독립항 success를 재사용하지 않고 다음을
 - 스타일 적용 전후 주골격·한정 집합·명제 트리·권리범위 불변 결과
 - NON_PATENT_TECHNICAL_READER_GATE 확인 결과
 - GEOMETRIC_OBJECT_GATE 확인 결과
+- FUNCTION_DEDUCTION_GATE: PASS / REVIEW / BLOCK / NOT_APPLICABLE / RETURN_TO_DRAFTER / RETURN_TO_ARCHITECT / RETURN_TO_DEPENDENT_ARCHITECT
+- 구성–기능 연역표: `항 / 기능·결과 구절 / 원인으로 적힌 구성·관계 / 필요한 전제와 문언 위치 / 직접 만든 반례 모델과 결과 / 빠진 전제의 원자료 위치`; 기능 구절이 없으면 `해당 없음`
 - 한정별 원자료 근거와 F/E/C/N/I/S
 - 근거 미확인·REVIEW·BLOCK·비게이팅 UNVERIFIED
 - dependent success 추가표: DEPENDENT_SET이면 `DC-NN / 부모항 체인 / 세 기술기여 게이트 / ENFORCEMENT_VALUE_GATE와 EV1~EV5 재검사 / 문언 대응 / 기술기여 보존 / DRAWING_ONLY 재유입 / 판정`, INDEPENDENT이면 `해당 없음`

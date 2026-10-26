@@ -9,7 +9,7 @@ from .roles.registry import ROLE_NAMES
 from .runtime import Runtime
 
 CONTRACT_TOKENS: dict[str, list[str]] = {
-    "CLAUDE.md": ["PRE_STYLE — NOT_GATE_ELIGIBLE", "style_record_id", "claim-success-reviewer", "CLAIM_STYLE_GATE", "NON_PATENT_TECHNICAL_READER_GATE", "GEOMETRIC_OBJECT_GATE", "DEPENDENT_RECONSTRUCTION_GATE"],
+    "CLAUDE.md": ["PRE_STYLE — NOT_GATE_ELIGIBLE", "style_record_id", "claim-success-reviewer", "CLAIM_STYLE_GATE", "NON_PATENT_TECHNICAL_READER_GATE", "GEOMETRIC_OBJECT_GATE", "FUNCTION_DEDUCTION_GATE", "DEPENDENT_RECONSTRUCTION_GATE"],
     ".claude/agents/claim-success-reviewer.md": ["name: claim-success-reviewer", "success_scope: INDEPENDENT | DEPENDENT_SET", "success_record_id", "dependent_success_record_id", "syntax 진행 가능"],
     ".claude/agents/claim-style-adjuster.md": ["name: claim-style-adjuster", "STYLE_ONLY_REVISION", "CLAIM_STYLE_GATE", "FINALIZED_FOR_SUCCESS", "조건부 보조 소스: NOT_ACTIVATED"],
     ".claude/agents/blind-claim-reconstruction-reviewer.md": ["tools: []", "claim_scope: INDEPENDENT | DEPENDENT_SINGLE", "dependent_blind_snapshot_id", "1회독 도식화 가능성"],

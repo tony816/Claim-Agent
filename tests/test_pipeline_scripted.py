@@ -98,6 +98,22 @@ def test_success_return_to_style_only_revision(rt, request_indep):
     assert len([c for c in engine.provider.calls if c.role == "claim-drafter"]) == 1
 
 
+def test_success_deduction_failure_returns_to_drafter_and_lock_records_gate(rt, request_indep):
+    """A function the written structure does not entail (성공조건 조건 2) sends the claim back to the drafter, not to a LOCK."""
+    script = R.happy_script(dependent=False)
+    script["claim-success-reviewer"] = [R.success(deduction="RETURN_TO_DRAFTER"), R.success()]
+    for role in ("claim-drafter", "claim-style-adjuster", "syntax-scope-reviewer", "oa-strategy-reviewer", "blind-claim-reconstruction-reviewer"):
+        script[role] = script[role] * 2
+    engine = _engine(rt, script)
+    state = engine.run(engine.start(request_indep, "run-test-deduction"))
+    assert state.outcome == "DRAFT_CLAIM_LOCK", state.halt
+    assert state.candidate.revision == "r2" and state.candidate.loop_counts["DRAFTER"] == 1
+    second_draft = [c for c in engine.provider.calls if c.role == "claim-drafter"][1]
+    assert "PRE_STYLE_FUNCTION_DEDUCTION_CHECK" in second_draft.packet_text
+    lock = state.records[state.candidate.draft_claim_lock]
+    assert "function_deduction_gate: PASS" in engine.store.read_record_report(state.run_id, lock.record_id)
+
+
 def test_picture_return_to_architect_bumps_design(rt, request_indep):
     script = R.happy_script(dependent=False)
     script["picture-claim-reconstruction-reviewer"] = [R.picture(return_to="RETURN_TO_ARCHITECT"), R.picture()]

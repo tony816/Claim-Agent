@@ -45,6 +45,7 @@ GATE_OWNER: dict[str, tuple[str, str]] = {
     "TERM_EXPRESSION_GATE": ("claim-style-adjuster", "STYLE"),
     "NON_PATENT_TECHNICAL_READER_GATE": ("claim-style-adjuster", "STYLE"),
     "GEOMETRIC_OBJECT_GATE": ("claim-style-adjuster", "STYLE"),
+    "FUNCTION_DEDUCTION_GATE": ("claim-drafter", "DRAFT"),
     "OA_DRAFT_GATE": ("oa-strategy-reviewer", "OA"),
     "OA_FINAL_GATE": ("oa-strategy-reviewer", "OA"),
     "DEPENDENT_DESIGN_GATE": ("dependent-claim-strategy-architect", "DEP_ARCHITECT"),

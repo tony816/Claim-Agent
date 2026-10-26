@@ -1481,12 +1481,29 @@ class PipelineEngine(PriorArtSteps):
         ids = Identifiers(state.candidate.candidate_id, "r1", "N/A", input_revision=state.input_revision)
         state.candidate.design_revision = "N/A"
         state.candidate.current = RevisionState(revision="r1", design_revision="N/A", exact_text=claim_text or None, exact_sha256=exact_sha256(claim_text) if claim_text else None)
-        kinds = {"syntax-scope-reviewer": "syntax", "oa-strategy-reviewer": "oa", "claim-success-reviewer": "success",
+        kinds = {"claim-style-adjuster": "style", "syntax-scope-reviewer": "syntax", "oa-strategy-reviewer": "oa", "claim-success-reviewer": "success",
                  "blind-claim-reconstruction-reviewer": "blind"}
-        for role in req.reviewers or ["syntax-scope-reviewer"]:
+        roles = req.reviewers or ["syntax-scope-reviewer"]
+        # Style rewrites the wording, so it goes first and the other chosen roles read what it returned (r2), as in the gated order.
+        roles = sorted(roles, key=lambda r: r != "claim-style-adjuster")
+        for role in roles:
             kind = kinds.get(role)
             if kind is None:
                 raise ProviderError(f"REVIEW_ONLY에서 지원하지 않는 역할: {role}")
+            if kind == "style":
+                rid = record_id(kind, ids)
+                pk = packets.review_style(state, bundle, ids, rid, scope if scope != Scope.DEPENDENT_SINGLE else Scope.INDEPENDENT, claim_text, req.request_text)
+                env, _ = self._call(state, role, scope if scope != Scope.DEPENDENT_SINGLE else Scope.INDEPENDENT, Stage.REVIEW_ONLY, kind, pk, ids, rid, use_tools=True)
+                state.candidate.current.records[kind] = rid
+                state.review_reports[role] = env.report_markdown
+                styled = (env.exact_claim_text or "").strip()
+                if styled and styled != claim_text.strip():
+                    state.review_styled_text = styled
+                    claim_text = styled
+                    ids = replace(ids, revision="r2")
+                    state.candidate.current = RevisionState(revision="r2", design_revision="N/A", prior_revision="r1", exact_text=styled,
+                                                            exact_sha256=exact_sha256(styled), records=dict(state.candidate.current.records))
+                continue
             if kind == "blind":
                 state.review_reports[role] = self._review_blind(state, req, claim_text, ids)
                 continue

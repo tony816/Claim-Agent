@@ -210,6 +210,7 @@ class RunState(BaseModel):
     updated_at: float = Field(default_factory=time.time)
     notes: list[str] = Field(default_factory=list)
     review_reports: dict[str, str] = Field(default_factory=dict)
+    review_styled_text: str | None = None     # REVIEW_ONLY style: the restyled wording the other chosen roles read (미검수 초안)
     usage: dict[str, float] = Field(default_factory=dict)   # calls, prompt_tokens, cached_tokens, output_tokens, thoughts_tokens, latency_ms, cost_usd, cache_hits, unpriced_calls
     stage_usage: dict[str, dict[str, float]] = Field(default_factory=dict)   # stage -> same keys (성능 요약)
     turn: dict[str, float] = Field(default_factory=dict)   # the latest run/resume only: usage keys + started_at, finished_at (답변 주석)

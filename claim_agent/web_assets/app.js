@@ -137,7 +137,7 @@ $("provider-model").onchange=()=>switchProvider({provider:providerInfo.provider,
 const routeNames = {CHAT:"일반 대화",META:"설정·진행 확인",AUTHORING_DRAFT:"청구항 작성·수정",FINALIZATION:"출원용 최종 검증",REVIEW_ONLY:"특허 의견·제한 검수"};
 // ---- 자유 작업 모드: 일반 에이전트와 1차 작업하고, 고른 메시지의 청구항에 고른 게이트 역할만 실행한다(REVIEW_ONLY, LOCK 없음).
 // 작업 도구 패널의 검수 도구·피드백 멘트는 누르면 고르기만 하고, 입력창의 Enter가 덧붙인 말과 함께 실행한다.
-const REVIEW_ROLES=[["syntax-scope-reviewer","통사·범위","귀속·결속·복수 분배·범위 불변을 봅니다"],["oa-strategy-reviewer","OA","명확성·기능적 표현·뒷받침 등 OA 위험을 봅니다"],["claim-success-reviewer","성공조건","독립항 성공조건과 원자료 근거를 감사합니다"],["blind-claim-reconstruction-reviewer","블라인드 복원","발명을 모르는 기술자가 독립항 문언만 읽고 무엇을 그리는지 봅니다 (기준 비교 없음)"]];
+const REVIEW_ROLES=[["claim-style-adjuster","문체 조정","스타일가이드·용어 출처 게이트로 범위를 바꾸지 않고 문언을 다듬어 냅니다 (함께 고른 검수는 다듬은 문언을 봅니다)"],["syntax-scope-reviewer","통사·범위","귀속·결속·복수 분배·범위 불변을 봅니다"],["oa-strategy-reviewer","OA","명확성·기능적 표현·뒷받침 등 OA 위험을 봅니다"],["claim-success-reviewer","성공조건","독립항 성공조건과 원자료 근거를 감사합니다"],["blind-claim-reconstruction-reviewer","블라인드 복원","발명을 모르는 기술자가 독립항 문언만 읽고 무엇을 그리는지 봅니다 (기준 비교 없음)"]];
 const REVIEW_LABEL=Object.fromEntries(REVIEW_ROLES.map(([id,label])=>[id,label]));
 const CLAIM_HEAD=/^[ \t]*(?:\*\*)?(?:【\s*청구항\s*\d+\s*】|\[\s*청구항\s*\d+\s*\])/m;
 const tools={open:false,roles:new Set(),target:"",options:null,phrases:[],editing:false};   // target "" = 가장 최근 청구항을 따라감
@@ -596,7 +596,9 @@ function claimBlock(text){
   const last=heads.at(-1),from=last.index+last[0].length,end=t.slice(from).search(/\n[ \t]*(?:#|※|---|\*\*\*|```)|\n[ \t]*\n[ \t]*\n/);
   return t.slice(heads[0].index,end<0?t.length:from+end).trim();
 }
-function candidateLabel({m,n}){const first=(claimBlock(m.text).split("\n").find(l=>l.trim()&&!CLAIM_HEAD.test(l))||"").trim();return (m.role==="user"?"내 메시지":"에이전트 답변")+" #"+n+" · "+(first.length>24?first.slice(0,24)+"…":first);}
+// 문체 조정 답은 다듬은 문언을 따로 들고 있다(보고서 사이에 있어 본문에서 잘라 내지 않는다).
+function claimOf(m){return m.review?.revise&&m.review?.claim_text||claimBlock(m.text);}
+function candidateLabel({m,n}){const first=(claimOf(m).split("\n").find(l=>l.trim()&&!CLAIM_HEAD.test(l))||"").trim();return (m.role==="user"?"내 메시지":"에이전트 답변")+" #"+n+" · "+(first.length>24?first.slice(0,24)+"…":first);}
 function renderTools(){
   const visible=tools.open&&state.view==="chat",free=freeMode(),cands=free?reviewCandidates():[];
   $("tool-panel").hidden=!visible;document.body.classList.toggle("tools-open",visible);$("tool-toggle").setAttribute("aria-expanded",String(visible));$("tool-toggle").classList.toggle("is-on",visible);
@@ -605,7 +607,7 @@ function renderTools(){
   if(key!==tools.options){tools.options=key;select.replaceChildren();const auto=el("option","",cands.length?"가장 최근 청구항 — "+candidateLabel(cands[0]):"청구항이 있는 메시지 없음");auto.value="";select.append(auto);for(const c of cands){const o=el("option","",candidateLabel(c));o.value=c.m.id;select.append(o);}}
   select.value=tools.target;select.disabled=!cands.length;
   const target=reviewTarget();if(!target)tools.roles.clear();
-  const preview=$("review-preview");preview.hidden=!target;if(target){const block=claimBlock(target.m.text);preview.textContent=block.length>320?block.slice(0,320)+"…":block;}
+  const preview=$("review-preview");preview.hidden=!target;if(target){const block=claimOf(target.m);preview.textContent=block.length>320?block.slice(0,320)+"…":block;}
   $("review-note").textContent=!free?"검수 도구는 자유 작업 모드에서 씁니다. 위쪽에서 자유 작업으로 바꾸세요.":!target?"아직 【청구항 N】 문언이 있는 메시지가 없습니다. 초안을 받거나 청구항을 붙여 넣으면 고를 수 있습니다.":"고른 메시지의 청구항 블록에 고른 검수를 실행합니다. 입력창이 비어 있으면 검수 결과만, 요청을 적으면 그 방향으로 검수한 뒤 요청대로 처리합니다. 여러 개를 함께 고를 수 있고, 결과는 LOCK 근거가 아닙니다.";
   for(const button of $("review-buttons").children){const on=tools.roles.has(button.dataset.role);button.classList.toggle("is-on",on);button.setAttribute("aria-pressed",String(on));}
   for(const [id,view] of state.nodes)view.article.classList.toggle("review-target",visible&&!!target&&id===target.m.id);

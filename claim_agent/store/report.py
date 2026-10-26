@@ -88,6 +88,13 @@ def _set_edit(state: RunState) -> bool:
     return bool(state.baseline_set) or state.request.get("authoring_scope") == "EXISTING_SET_EDIT"
 
 
+def _styled_lines(state: RunState) -> list[str]:
+    """REVIEW_ONLY style's restyled wording, which the other chosen roles reviewed: an unreviewed draft, never a LOCK."""
+    if not state.review_styled_text:
+        return []
+    return ["### 스타일 조정 문언 (claim-style-adjuster, r2 — 미검수 초안, LOCK 아님)", "", state.review_styled_text, ""]
+
+
 def _pending_list(state: RunState) -> list[str]:
     if state.request_mode.value == "REVIEW_ONLY":
         expected = state.request.get("reviewers") or ["syntax-scope-reviewer"]
@@ -370,6 +377,7 @@ def render_chat_report(state: RunState) -> str:
     out: list[str] = feedback_lines(state)     # a reply to feedback answers the feedback first
     if state.request_mode.value == "REVIEW_ONLY":
         out += ["## 검토 의견", "", "REVIEW_ONLY — 요청된 검수만 수행하며 청구항 작성·수정 또는 LOCK 발급 결과가 아닙니다.", ""]
+        out += _styled_lines(state)
         for role, report in state.review_reports.items():
             out += [f"### {role}", "", report, ""]
         if not state.review_reports:
@@ -422,6 +430,7 @@ def render_report(state: RunState, claims_only: bool = False) -> str:
     out.append("")
     if reviewing:
         out.append("REVIEW_ONLY — 요청된 검수만 수행하며 청구항 작성·수정 또는 LOCK 발급 결과가 아닙니다.")
+        out.extend([""] + _styled_lines(state) if state.review_styled_text else [])
         for role, report in state.review_reports.items():
             out.extend(["", f"### {role}", "", report])
         if not state.review_reports:

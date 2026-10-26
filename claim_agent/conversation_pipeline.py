@@ -318,6 +318,6 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
         **route.model_dump(), "run_id": state.run_id,
         "contract_sha256": hashlib.sha256((rt.cfg.project_root / "CLAUDE.md").read_bytes()).hexdigest(),
     }, ensure_ascii=False, indent=2), encoding="utf-8")
-    return dict(answer=answer, run_id=state.run_id, effective_mode=route.mode, revision_path=applied,
+    return dict(answer=answer, run_id=state.run_id, effective_mode=route.mode, revision_path=applied, styled_text=state.review_styled_text,
                 status="review" if state.halt else "complete", outcome=state.outcome,
                 route=route.model_dump(), finish_reason="PIPELINE_COMPLETED" if not state.halt else "PIPELINE_HALTED")
