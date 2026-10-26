@@ -17,7 +17,7 @@ _spec.loader.exec_module(pack)
 
 def test_pack_round_trips_every_file_and_fits_one_read(tmp_path):
     extra = tmp_path / "src.md"
-    extra.write_bytes("발명 원자료\r\n둘째 줄".encode("utf-8"))
+    extra.write_bytes("발명 원자료\r\n둘째 줄".encode())
     assert pack.main(["--role", "claim-success-reviewer", "--scope", "DEPENDENT_SET", "--extra", str(extra), "--out", str(tmp_path / "p")]) == 0
     parts = sorted(tmp_path.glob("p.part*.md"), key=lambda p: int(re.search(r"part(\d+)", p.name).group(1)))
     assert len(parts) > 1
@@ -30,7 +30,7 @@ def test_pack_round_trips_every_file_and_fits_one_read(tmp_path):
     found = re.findall(r"=== SOURCE: (.*?) \| sha256 (\w+) \| \d+ lines ===\n(.*?)=== END: \1 ===\n", joined, re.S)
     expected = pack.pack_files("claim-success-reviewer", "DEPENDENT_SET", [extra])
     assert len(found) == len(expected)
-    for (label, digest, body), path in zip(found, expected):
+    for (_label, digest, body), path in zip(found, expected, strict=True):
         original = path.read_text(encoding="utf-8").replace("\r\n", "\n")
         original = original if original.endswith("\n") else original + "\n"
         assert body == original and digest == hashlib.sha256(original.encode("utf-8")).hexdigest()
