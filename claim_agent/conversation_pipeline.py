@@ -7,7 +7,7 @@ import json
 import re
 from pathlib import Path
 
-from .claim_scope import apply_ui_target, constrain_target, find_existing_set, parse_target, ui_target_set
+from .claim_scope import apply_ui_target, claim_intent, constrain_target, find_existing_set, parse_target, ui_target_set
 from .models.prior_art import PriorSearchOptions
 from .models.request import IMAGE_EXT, RunRequest
 from .pipeline.engine import Decision
@@ -267,6 +267,8 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
         parent_claims=(request.get("review") or {}).get("parent_claims") or None,
         claim_file=baseline[0] if baseline else (source["path"] if source else None),
         authoring_scope=route.authoring_scope if authoring else None, **paths,
+        # Only the user's own words of this turn decide edit or new; the engine asks when they say neither.
+        edit_intent=(claim_intent(request["text"]) or "UNCLEAR") if baseline else "EDIT",
         # 선행기술 검색 체크(웹 작성 창·MCP claim_send): WIPS 검색 + Jev 선별 + 사전 심사, 나머지 값은 claim-agent.yaml prior_search
         prior_search=PriorSearchOptions(enabled=True) if (request.get("ui_hints") or {}).get("prior_search") and authoring and not previous else None,
     )

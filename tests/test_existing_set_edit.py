@@ -368,26 +368,86 @@ def test_a_user_lock_set_with_blank_numbers_stops_before_any_call_and_says_what_
     state = rt.store.load_state(result["run_id"])
     assert route.authoring_scope == "EXISTING_SET_EDIT" and provider.calls == []
     assert state.halt.reason_code == "BASELINE_SET_UNNUMBERED" and "프로젝트 USER_LOCK 확정 문언" in state.halt.message
-    assert [i["text"] for i in state.halt.open_issues] == [
-        "5번째 항(상기 리드 지지부는, 바디와, 상기 바디로부…): 항 번호(【청구항 】)가 비어 있음",
-        "6번째 항(상기 복수의 돌출부는, 서로 인접하는 상기 …): 항 번호(【청구항 】)와 인용항 번호(제항)가 비어 있음",
+    # Blank headers take their place numbers (5, 6) as the user counts them; a blank citation cannot be guessed.
+    issues = [i["text"] for i in state.halt.open_issues]
+    assert issues[:2] == [
+        "제6항(상기 복수의 돌출부는, 서로 인접하는 상기 …): 인용항 번호(제항)가 비어 있음",
         "3번째 항: 종결부 없이 '…하우징; 을 포함하고,'로 끝남",
     ]
+    # The request names claims the set already has without saying edit or new, so the same stop asks that too.
+    assert issues[2].startswith("요청한 제4항, 제5항, 제6항은 세트에 이미 있는 번호입니다.") and len(issues) == 3
 
 
-def test_a_numbered_set_whose_parent_claim_is_cut_off_stops_before_any_call(rt, request_indep, tmp_path):
-    numbered = LID_LOCK.replace("【청구항 】\n제1항", "【청구항 5】\n제1항").replace("【청구항 】\n제항", "【청구항 6】\n제5항")
-    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "unfinished", text=LID_REQUEST, instructions="", user_lock=numbered)
+def test_a_new_claim_request_on_a_set_whose_parent_claim_is_cut_off_stops_before_any_call(rt, request_indep, tmp_path):
+    numbered = LID_LOCK.replace("【청구항 】\n제항", "【청구항 】\n제5항")
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "unfinished", text="4항,5항,6항을 첨부 이미지로 새로 만들어줘",
+                                                   instructions="", user_lock=numbered)
     route = _route(blocks, target="4,5,6")
     provider = ScriptedProvider({})
     result = run_pipeline(rt, provider, request, route, blocks, paths, folder)
     state = rt.store.load_state(result["run_id"])
+    assert state.request["edit_intent"] == "NEW"
     assert provider.calls == [] and state.halt.reason_code == "BASELINE_SET_UNFINISHED"
-    assert [i["text"][:4] for i in state.halt.open_issues] == ["제3항:"]
+    assert [i["text"][:4] for i in state.halt.open_issues] == ["제3항:"]      # a new 제4~6항 may cite 제1~3항
+
+
+AMBIGUOUS_9 = "9항이 도면을 온전하게 설명하도록"
+
+
+def test_an_ambiguous_request_asks_before_any_call_and_new_inserts_the_claim_and_moves_the_rest(rt, request_indep, tmp_path, edit_roles):
+    """User decision 2026-10-26: '4항,5항,6항이 첨부 이미지를…' meant new claims. Unclear words → ask; 새로 → insert and move back."""
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "ask", text=AMBIGUOUS_9, instructions="", user_lock=BASELINE)
+    provider = ScriptedProvider(edit_script())
+    first = run_pipeline(rt, provider, request, _route(blocks), blocks, paths, folder)
+    state = rt.store.load_state(first["run_id"])
+    assert provider.calls == [] and state.halt.kind == "USER_DECISION" and state.halt.reason_code == "EDIT_OR_NEW_UNCLEAR"
+    assert "'수정'" in state.halt.message and "'새로'" in state.halt.message and state.request["edit_intent"] == "UNCLEAR"
+    state = rt.engine(provider).resume(state.run_id, Decision(text="새로 만들어줘"))
+    assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
+    base = state.baseline_set
+    assert state.request["edit_intent"] == "NEW" and base.renumbered == {9: 10} and base.edit_targets == [9]
+    assert base.chain_nos == [1, 2, 3, 4, 5, 6, 7, 8] and base.user_lock_released == []
+    design = next(c for c in provider.calls if c.role == "dependent-claim-strategy-architect")
+    assert "번호 재배열 (사용자 결정 — 요청 항을 새 항으로 끼움): 제9항→제10항" in design.packet_text
+    assert "제9항은(는) 사용자가 새로 만들라고 한 항" in design.packet_text
+    full = edited_set_text(state)
+    old_9 = parse_claim_set(BASELINE)[8].body
+    assert full.count("【청구항") == 10 and EDITED_9 + "\n\n【청구항 10】\n" + old_9 in full
+    assert all(c.text in full for c in parse_claim_set(BASELINE)[:8])
+    assert any("기존 항 번호·인용을 옮김(제9항→제10항)" in n for n in state.notes)
+
+
+def test_claim_intent_reads_only_explicit_words():
+    from claim_agent.claim_scope import claim_intent
+
+    assert claim_intent(LID_REQUEST) is None and claim_intent(AMBIGUOUS_9) is None
+    assert claim_intent("4항,5항,6항을 새로 만들어줘") == "NEW" and claim_intent("10항을 추가해줘") == "NEW"
+    assert claim_intent(INCIDENT_TEXT) == "EDIT"                     # 정리되지 않은 9항…; 중간끼워맞춤 is not 끼워 넣기
+    assert claim_intent("9항은 수정하고 10항은 추가해줘") is None       # both: ask
+
+
+def test_inserting_claims_moves_the_set_back_and_its_citations_follow():
+    from claim_agent.pipeline.claimtext import ClaimParseError, fill_blank_headers, insert_claims, renumber_text
+
+    claims = parse_claim_set(BASELINE)
+    moved, mapping = insert_claims(claims, {4, 5, 6})
+    by_no = {c.claim_no: c for c in moved}
+    assert mapping == {n: n + 3 for n in range(4, 10)} and sorted(by_no) == [1, 2, 3, 7, 8, 9, 10, 11, 12]
+    for old in claims:
+        new = by_no[mapping.get(old.claim_no, old.claim_no)]
+        assert new.parent_nos == [mapping.get(p, p) for p in old.parent_nos]
+        assert all(f"제{mapping.get(p, p)}항" in new.body[:20] for p in old.parent_nos)
+    assert insert_claims(claims, {10, 11}) == (claims, {})                    # an append moves nothing
+    ranged = BASELINE.replace("【청구항 9】\n제8항에 있어서", "【청구항 9】\n제3항 내지 제5항 중 어느 한 항에 있어서")
+    with pytest.raises(ClaimParseError, match="범위 인용"):
+        insert_claims(parse_claim_set(ranged), {4})
+    assert "【청구항 7】\n제3항에 있어서" in renumber_text(LID_LOCK.replace("【청구항 4】", "【청구항 】"), {4: 7})
+    shuffled = "【청구항 1】\nA.\n\n【청구항 3】\n제1항에 있어서, B.\n\n【청구항 】\n제1항에 있어서, C."
+    assert fill_blank_headers(shuffled) == shuffled                           # numbers out of place: not guessed
 
 
 def test_a_fixed_user_lock_sent_again_starts_a_new_run_on_the_fixed_set(rt, request_indep, tmp_path, edit_roles):
-    blank = BASELINE.replace("【청구항 9】", "【청구항 】")
+    blank = BASELINE.replace("【청구항 9】\n제8항", "【청구항 9】\n제항")
     request, blocks, paths, folder = _conversation(tmp_path, request_indep, "before-fix", instructions="", user_lock=blank)
     first = run_pipeline(rt, ScriptedProvider({}), request, _route(blocks), blocks, paths, folder)
     previous = rt.store.load_state(first["run_id"])

@@ -307,6 +307,70 @@ def claim_slots(text: str) -> list[tuple[int | None, str]]:
             for i, m in enumerate(heads)]
 
 
+def fill_blank_headers(text: str) -> str:
+    """Number blank headers (【청구항 】) by their place, as the user counts them, when every numbered header already
+    matches its place. Otherwise the text comes back as is and its blanks are reported (numbering_blanks)."""
+    norm = normalize_headers(text)[0]
+    heads = list(_ANY_HEAD.finditer(norm))
+    if all(m.group(1) for m in heads) or any(m.group(1) and int(m.group(1)) != i for i, m in enumerate(heads, 1)):
+        return text
+    places = iter(range(1, len(heads) + 1))
+    return _ANY_HEAD.sub(lambda m: f"【청구항 {next(places)}】", norm)
+
+
+def _renumber_claim(c: Claim, mapping: dict[int, int]) -> Claim:
+    """The claim at its new number with its citations following `mapping` (old → new; missing numbers stay)."""
+    no = mapping.get(c.claim_no, c.claim_no)
+    body = c.body
+    head = body[:_PREAMBLE_WINDOW]
+    cut = min((i for i in (head.find(m) for m in _PREAMBLE_MARKERS) if i >= 0), default=-1)
+    if c.parent_nos and cut >= 0:
+        pre = head[:cut]
+        for a, b in _PARENT_RANGE.findall(pre):
+            if mapping.get(int(b), int(b)) - mapping.get(int(a), int(a)) != int(b) - int(a):
+                raise ClaimParseError(f"청구항 {c.claim_no}의 범위 인용(제{a}항 내지 제{b}항) 사이에 새 항이 끼어 인용 범위가 달라짐")
+        pre = _PARENT_SINGLE.sub(lambda m: m.group(0) if mapping.get(int(m.group(1)), int(m.group(1))) == int(m.group(1))
+                                 else f"제{mapping[int(m.group(1))]}항", pre)
+        body = pre + body[cut:]
+    if no == c.claim_no and body == c.body:
+        return c
+    return Claim(no, f"【청구항 {no}】\n{body}", body, [mapping.get(p, p) for p in c.parent_nos], c.multi_dependent)
+
+
+def insert_claims(claims: list[Claim], inserted: set[int]) -> tuple[list[Claim], dict[int, int]]:
+    """Make room for new claims at the `inserted` numbers: each existing claim keeps its order and moves back past them,
+    and every citation follows. Returns the moved set and the numbers that changed (old → new).
+
+    Inserting nothing below the end of the set (an append) moves nothing. A range citation that a new claim would fall
+    inside ('제3항 내지 제5항' around a new 제4항) raises ClaimParseError, since its scope would change.
+    """
+    mapping, shift = {}, 0
+    for c in sorted(claims, key=lambda c: c.claim_no):
+        while c.claim_no + shift in inserted:
+            shift += 1
+        mapping[c.claim_no] = c.claim_no + shift
+    return [_renumber_claim(c, mapping) for c in claims], {o: n for o, n in mapping.items() if o != n}
+
+
+def renumber_text(text: str, mapping: dict[int, int]) -> str:
+    """A claim set's text read as an edit reads its baseline: blank headers numbered by place, claims moved by
+    `mapping`. Text that is not a claim set, or cannot be moved, comes back as is."""
+    try:
+        return "\n\n".join(_renumber_claim(c, mapping).text for c in parse_claim_set(fill_blank_headers(text)))
+    except ClaimParseError:
+        return text
+
+
+def renumber_line(mapping: dict[int, int]) -> str:
+    return ", ".join(f"제{o}항→제{n}항" for o, n in sorted(mapping.items()))
+
+
+def merged_set_text(base: list[tuple[int, str]], edits: dict[int, str]) -> str:
+    """The user's set with the edited claims in place and the new ones at their numbers, in claim-number order."""
+    claims = dict(base) | edits
+    return "\n\n".join(claims[n] for n in sorted(claims))
+
+
 def _blank_citation(body: str) -> bool:
     """'제항에 있어서': a dependent preamble whose cited number was left blank."""
     head = body[:_PREAMBLE_WINDOW]
@@ -352,9 +416,10 @@ def contains_user_lock(claim_text: str, user_lock: str | None) -> bool:
 
 def user_lock_kept(claim_text: str, user_lock: str | None, released: set[int]) -> bool:
     """contains_user_lock for an edit of the user's set: the USER_LOCK claims the request names for editing are released
-    (the request is their explicit re-approval), and every other USER_LOCK claim must survive verbatim."""
+    (the request is their explicit re-approval), and every other USER_LOCK claim must survive verbatim. A lock that is a
+    claim set is checked claim by claim, since new claims may now sit between its claims."""
     locked = numbered_claims(user_lock or "")
-    if not released or not locked:
+    if not locked:
         return contains_user_lock(claim_text, user_lock)
     return all(contains_user_lock(claim_text, c.text) for n, c in locked.items() if n not in released)
 

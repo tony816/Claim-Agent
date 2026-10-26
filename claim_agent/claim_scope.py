@@ -136,16 +136,18 @@ def find_existing_set(targets: set[int], sources: list[tuple[str, str]]) -> tupl
     takes it as a new claim right after its end (제3항 added to a set of 1~2).
 
     The set must also contain an independent claim: a lone fragment ('제8항에 있어서, …') is not a set to edit in place.
-    A set with blank numbers (【청구항 】, 제항) is matched by place, as the user counts it; the engine then stops on the
-    blanks before any call instead of the request falling through to a new independent claim.
+    Blank headers (【청구항 】) are numbered by place, as the user counts them. A set still left with blank numbers
+    (제항 citations) is matched by place too; the engine then stops on the blanks before any call instead of the request
+    falling through to a new independent claim.
     """
-    from .pipeline.claimtext import ClaimParseError, appended_nos, claim_slots, numbering_blanks, parse_claim_set
+    from .pipeline.claimtext import ClaimParseError, appended_nos, claim_slots, fill_blank_headers, numbering_blanks, parse_claim_set
 
-    for source_id, text in sources:
+    for source_id, original in sources:
+        text = fill_blank_headers(original)
         if numbering_blanks(text):
             slots = claim_slots(text)
             if len(slots) > 1 and all(1 < n <= len(slots) for n in targets):
-                return source_id, text
+                return source_id, original
             continue
         try:
             claims = parse_claim_set(text)
@@ -154,8 +156,22 @@ def find_existing_set(targets: set[int], sources: list[tuple[str, str]]) -> tupl
         by_no = {c.claim_no: c for c in claims}
         new = appended_nos(claims, targets)
         if any(c.is_independent for c in claims) and all(n in new or (n in by_no and not by_no[n].is_independent) for n in targets):
-            return source_id, text
+            return source_id, original
     return None
+
+
+_NEW_WORDS = re.compile(r"새로|새\s*항|신규|추가|끼워\s*넣|삽입|생성")     # not 끼워 alone: 끼워맞춤 is a fit
+_EDIT_WORDS = re.compile(r"수정|고쳐|고치|고친|정리|다듬|완성|바꿔|바꾸|변경|보완|손봐|손보|다시|재작성|보정|교정")
+
+
+def claim_intent(text: str) -> str | None:
+    """Whether the user's words ask to rework the named claims (EDIT) or to write new claims at those numbers (NEW).
+
+    None when they say neither or both: '4·5·6항이 첨부 이미지를 설명하도록' can mean either, and the edit then asks
+    before any call (사용자 결정 2026-10-26) instead of guessing.
+    """
+    new, edit = bool(_NEW_WORDS.search(text)), bool(_EDIT_WORDS.search(text))
+    return "NEW" if new and not edit else "EDIT" if edit and not new else None
 
 
 def ui_target_set(ui_hints: dict | None) -> set[int] | None:

@@ -14,7 +14,7 @@ from ..models.ids import Identifiers
 from ..models.request import MaterialBundle
 from ..models.state import RunState
 from ..provider.base import ImagePart
-from .claimtext import flatten
+from .claimtext import flatten, renumber_line
 
 
 @dataclass
@@ -48,6 +48,9 @@ def _hdr(state: RunState, ids: Identifiers, record_id: str, extra: dict[str, str
     if state.baseline_set:
         lines.append(f"authoring_scope: EXISTING_SET_EDIT (루트 기준: BASELINE_SET {state.baseline_set.record_id} — LOCK 아님, 이번 run 미검증)")
         lines.append("edit_targets: " + ", ".join(f"제{n}항" for n in state.baseline_set.edit_targets))
+        if state.baseline_set.renumbered:
+            lines.append("번호 재배열 (사용자 결정 — 요청 항을 새 항으로 끼움): " + renumber_line(state.baseline_set.renumbered)
+                         + ". BASELINE_SET은 옮긴 번호 기준이며, USER_LOCK 원문의 옛 번호는 이 대응으로 읽는다")
         if state.baseline_set.user_lock_released:
             lines.append("USER_LOCK 해제: " + ", ".join(f"제{n}항" for n in state.baseline_set.user_lock_released)
                          + " — 현재 요청이 편집 대상으로 지정한 항(명시적 재승인)이라 USER_LOCK 원문의 해당 항 문언은 보존 대상이 아니다. "
@@ -250,10 +253,16 @@ def _number_contract(state: RunState, target_nos: set[int] | None) -> str:
         fixed = "; ".join(f"제{n}항의 부모항 제{', '.join(map(str, parents[n]))}항" for n in sorted(target_nos) if n in parents)
         if fixed:
             text += f" EXISTING_SET_EDIT이므로 기존 인용관계({fixed})를 `parent_claim_no`로 유지하고, 부모항 체인을 흡수·병합해 독립항으로 설계하지 않는다."
-        new = [n for n in sorted(target_nos) if n not in parents]
+        last = max(parents, default=0)
+        new = [n for n in sorted(target_nos) if n not in parents and n > last]
         if new:
             text += (f" {', '.join(f'제{n}항' for n in new)}은(는) 기존 세트 끝에 새로 붙는 항이다. `parent_claim_no`는 기존 세트의 항 중에서 "
                      "필요한 선행 용어를 가진 가장 넓은 항으로 정하고, 기존 항의 번호·문언·인용관계는 바꾸지 않으며 부모항을 흡수·병합하지 않는다.")
+        inserted = [n for n in sorted(target_nos) if n not in parents and n < last]
+        if inserted:
+            text += (f" {', '.join(f'제{n}항' for n in inserted)}은(는) 사용자가 새로 만들라고 한 항으로, 기존 항을 뒤로 밀고 그 번호에 끼운다. "
+                     "`parent_claim_no`는 그보다 앞 번호의 항(먼저 끼우는 새 항 포함) 중에서 필요한 선행 용어를 가진 가장 넓은 항으로 정하고, "
+                     "옮긴 번호 기준의 기존 항 문언·인용관계는 바꾸지 않으며 부모항을 흡수·병합하지 않는다.")
     return text
 
 

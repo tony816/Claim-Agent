@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from typing import Any
 
-from ..claim_scope import parse_target
+from ..claim_scope import claim_intent, parse_target
 from ..config import AppConfig
 from ..graph.pipeline import GraphHooks
 from ..models.contracts import COMBINED_REVIEW, combined_contract, contract_for, main_tree_gate_gaps
@@ -48,12 +48,17 @@ from .claimtext import (
     claim_slots,
     contains_user_lock,
     exact_sha256,
+    fill_blank_headers,
+    insert_claims,
+    merged_set_text,
     numbered_claims,
     numbering_blanks,
     ordered_claims,
     parent_chain,
     parent_chain_text,
     parse_claim_set,
+    renumber_line,
+    renumber_text,
     unfinished,
     user_lock_kept,
     validate_parent_refs,
@@ -198,9 +203,13 @@ class PipelineEngine(PriorArtSteps):
 
         Only the named dependent claims are rewritten; their parent chains go to every role verbatim and are never
         absorbed into a new independent claim. Nothing in the set is gated by this run, so its record is UNVERIFIED.
+
+        Named claims that already exist are rewritten in place (edit_intent EDIT), or new claims are written at those
+        numbers with the set's own claims moved back and their citations following (NEW, 사용자 결정 2026-10-26). When
+        the user's words say neither, the run asks first; the answer comes back as the resumed run's feedback.
         """
-        def halt(code: str, message: str, issues: list[str] | None = None) -> None:
-            raise PipelineHalt(Halt(stage=Stage.DEP_ARCHITECT.value, role="engine", kind="BLOCK", reason_code=code, message=message,
+        def halt(code: str, message: str, issues: list[str] | None = None, kind: str = "BLOCK") -> None:
+            raise PipelineHalt(Halt(stage=Stage.DEP_ARCHITECT.value, role="engine", kind=kind, reason_code=code, message=message,
                                     open_issues=[{"kind": "SCOPE", "code": code, "text": t} for t in issues or []]))
 
         if req.request_mode != RequestMode.AUTHORING_DRAFT:
@@ -211,45 +220,72 @@ class PipelineEngine(PriorArtSteps):
         origin = "프로젝트 USER_LOCK 확정 문언" if lock and text.replace("\r\n", "\n").strip() == lock else "제공된 청구항 세트"
         targets = parse_target(req.dependent_target) or set()
         named = ", ".join(f"제{n}항" for n in sorted(targets))
-        blanks = numbering_blanks(text)
+        intent = req.edit_intent
+        if intent == "UNCLEAR":
+            intent = claim_intent(str((state.feedback or {}).get("text") or "")) or "UNCLEAR"
+            if intent != "UNCLEAR":
+                state.request = {**state.request, "edit_intent": intent}
+        filled = fill_blank_headers(text)
+        slots = claim_slots(filled)
+        present = sorted(n for n in targets if n in {no or place for place, (no, _) in enumerate(slots, 1)})
+        ask = (f"요청한 {', '.join(f'제{n}항' for n in present)}은 세트에 이미 있는 번호입니다. 기존 항을 고쳐 쓰려면 '수정', 그 번호에 새 항을 "
+               "만들어 끼우고 기존 항을 뒤로 밀려면 '새로'라고 답하거나, 그 말을 넣어 같은 요청을 다시 보내 주세요.") if intent == "UNCLEAR" and present else None
+        blanks = numbering_blanks(filled)
         if blanks:
-            # Parsed as is, a blank header would fold the claims after it into the claim before it.
-            loose = [f"{place}번째 항: 종결부 없이 '…{' '.join(body.split())[-12:]}'로 끝남" for place, (_, body) in enumerate(claim_slots(text), 1)
+            # Parsed as is, a blank citation reads as an independent claim, and blank headers out of place fold claims together.
+            loose = [f"{place}번째 항: 종결부 없이 '…{' '.join(body.split())[-12:]}'로 끝남" for place, (_, body) in enumerate(slots, 1)
                      if place not in targets and unfinished(body)]
             halt("BASELINE_SET_UNNUMBERED", f"편집할 기존 청구항 세트({origin})에 비어 있는 번호가 있어 {named}과 그 부모항 체인을 정할 수 없습니다. "
-                                            "번호를 채워 세트를 고친 뒤 같은 요청을 다시 보내 주세요. 번호가 없는 항은 세트 안의 순서로 표시합니다.", blanks + loose)
+                                            "번호를 채워 세트를 고친 뒤 같은 요청을 다시 보내 주세요. 번호가 없는 항은 세트 안의 순서로 표시합니다.",
+                 blanks + loose + ([ask] if ask else []))
         try:
-            claims = parse_claim_set(text)
+            claims = parse_claim_set(filled)
         except ClaimParseError as exc:
             halt("BASELINE_SET_INVALID", f"편집할 기존 청구항 세트를 읽을 수 없습니다: {exc}")
         problems = validate_parent_refs(claims)
         if problems:
             halt("BASELINE_SET_INVALID", "기존 청구항 세트의 번호·인용관계가 올바르지 않아 편집 대상의 부모항 체인을 정할 수 없습니다.", problems)
+        if ask:
+            halt("EDIT_OR_NEW_UNCLEAR", ask, kind="USER_DECISION")
+        moved: dict[int, int] = {}
+        if intent == "NEW" and present:
+            try:
+                claims, moved = insert_claims(claims, targets)
+            except ClaimParseError as exc:
+                halt("BASELINE_RENUMBER_INVALID", f"{named}을 새 항으로 끼우면 기존 항의 인용 범위가 달라져 번호를 옮길 수 없습니다. "
+                                                  "그 범위 인용을 고치거나, 새 항을 세트 끝에 붙여 달라고 요청해 주세요.", [str(exc)])
         by_no = {c.claim_no: c for c in claims}
-        new = appended_nos(claims, targets)
+        last = max(by_no, default=0)
+        beyond = {n for n in targets if n > last}
+        # New claims: inserted ones (their numbers were left free) and ones right after the end of the set.
+        new = (targets - set(by_no) - beyond if moved else set()) | appended_nos(claims, beyond)
         wrong = [f"제{n}항: 세트에 없음" for n in sorted(targets) if n not in by_no and n not in new]
         wrong += [f"제{n}항: 독립항" for n in sorted(targets) if n in by_no and by_no[n].is_independent]
         if not targets or wrong:
             halt("EDIT_TARGET_INVALID", "편집 대상은 제공된 세트에 있는 종속항 번호이거나 세트 끝에 바로 이어지는 새 번호여야 합니다.", wrong or ["편집 대상 번호 없음"])
-        digest = baseline_digest(text)
+        try:
+            digest = baseline_digest(text)
+        except ClaimParseError:
+            digest = exact_sha256(text)
         if state.baseline_set and state.baseline_set.sha256 == digest and state.baseline_set.edit_targets == sorted(targets):
             return
-        # A new claim's parent is chosen by the dependent design, so the whole set stays available as its chain.
-        cited = set().union(*(ancestor_nos(claims, n) for n in targets - new)) | (set(by_no) if new else set())
+        # A new claim's parent is chosen by the dependent design, so every claim before it stays available as its chain.
+        cited = set().union(*(ancestor_nos(claims, n) for n in targets - new)) | ({n for n in by_no if n < max(new)} if new else set())
         chain = sorted(cited - targets)
         loose = [f"제{n}항: 종결부 없이 '…{' '.join(by_no[n].body.split())[-12:]}'로 끝남" for n in chain if unfinished(by_no[n].body)]
         if loose:
             halt("BASELINE_SET_UNFINISHED", f"{named}의 부모항이 끝맺어지지 않았습니다. 부모항은 이 편집에서 고치지 않으므로 {origin}에서 고친 뒤 "
                                             "같은 요청을 다시 보내 주세요. 그 부모항까지 고치려면 그 항도 편집 대상으로 지정해 주세요.", loose)
-        # Naming a USER_LOCK claim for editing is its explicit re-approval; the other USER_LOCK claims stay locked.
-        released = sorted(targets & set(numbered_claims(lock)))
+        # Naming a USER_LOCK claim for editing is its explicit re-approval; the other USER_LOCK claims stay locked,
+        # read at the numbers they moved to.
+        released = sorted((targets - new) & set(numbered_claims(renumber_text(lock, moved)))) if lock else []
         ids = Identifiers(state.candidate.candidate_id, "r1", "N/A", input_revision=state.input_revision)
         rid = record_id("baseline_set", ids)
         state.baseline_set = BaselineSet(
             record_id=rid, source_path=req.claim_file or "", sha256=digest,
             claims=[BaselineClaim(claim_no=c.claim_no, parent_nos=c.parent_nos, text=c.text) for c in claims],
             edit_targets=sorted(targets), chain_nos=chain, chain_text=claim_set_text([by_no[n] for n in chain]),
-            user_lock_released=released,
+            user_lock_released=released, renumbered=moved,
         )
         record, md = build_baseline_record(state)
         self.store.write_record(state.run_id, rid, {**record, "report_markdown": md}, md)
@@ -257,7 +293,8 @@ class PipelineEngine(PriorArtSteps):
                                        status="BASELINE", gates={}, text_sha256=digest, ids=ids.as_dict(), source_set_id=state.source_set_id)
         state.notes.append(f"기존 청구항 세트 편집: {named}만 작성 — 부모항 체인 "
                            f"{', '.join(f'제{n}항' for n in chain)}은 읽기 전용(BASELINE_SET {rid}, 미검증)"
-                           + (f"; USER_LOCK 중 {', '.join(f'제{n}항' for n in released)}은 이번 요청이 편집 대상으로 지정해 잠금 해제" if released else ""))
+                           + (f"; USER_LOCK 중 {', '.join(f'제{n}항' for n in released)}은 이번 요청이 편집 대상으로 지정해 잠금 해제" if released else "")
+                           + (f"; {named}을 새 항으로 끼우며 기존 항 번호·인용을 옮김({renumber_line(moved)})" if moved else ""))
 
     def scope_guard(self, state: RunState, bundle: MaterialBundle) -> None:
         """Refuse a dependent-claim request that has no independent claim to hang it on — before any model call.
@@ -1196,15 +1233,15 @@ class PipelineEngine(PriorArtSteps):
             problems = validate_parent_refs(all_claims)
             if problems:
                 raise PipelineHalt(Halt(stage=st.value, role="engine", kind="BLOCK", reason_code="OTHER", message="인용관계 오류: " + "; ".join(problems), record_id=rid))
-            lock_text, released = root_text + "\n" + set_text, set()
+            lock_text, lock, released = root_text + "\n" + set_text, bundle.user_lock, set()
             if state.baseline_set:
-                # An edit hands back the user's whole set with the targets replaced, so that is where USER_LOCK must hold.
+                # An edit hands back the user's whole set with the targets in place, so that is where USER_LOCK must hold,
+                # read at the numbers the set's claims moved to.
                 base = state.baseline_set
-                edits = {cl.claim_no: cl.text for cl in all_claims if cl.claim_no in set_nos}
-                kept = {b.claim_no for b in base.claims}
-                lock_text = "\n\n".join([edits.get(b.claim_no, b.text) for b in base.claims] + [edits[n] for n in sorted(edits) if n not in kept])
+                lock_text = merged_set_text([(b.claim_no, b.text) for b in base.claims], {cl.claim_no: cl.text for cl in all_claims if cl.claim_no in set_nos})
+                lock = renumber_text(lock, base.renumbered) if lock else lock
                 released = set(base.user_lock_released)
-            if not user_lock_kept(lock_text, bundle.user_lock, released):
+            if not user_lock_kept(lock_text, lock, released):
                 raise PipelineHalt(Halt(stage=st.value, role="engine", kind="BLOCK", reason_code="USER_LOCK_NOT_PRESERVED", message="USER_LOCK 문언 미보존", record_id=rid))
             dc_by_no = {cl.claim_no: cl.dc_id for cl in env.claims}
             cur.exact_text = set_text

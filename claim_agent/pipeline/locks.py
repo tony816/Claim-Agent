@@ -110,9 +110,10 @@ def build_baseline_record(state: RunState) -> tuple[dict[str, Any], str]:
         "baseline_sha256": base.sha256,
         "edit_targets": [f"제{n}항" for n in base.edit_targets],
         "parent_chain_nos": [f"제{n}항" for n in base.chain_nos],
+        "renumbered": {f"제{o}항": f"제{n}항" for o, n in sorted(base.renumbered.items())},
         "rules": [
             "부모항 체인은 읽기 전용 비교 입력이다. 흡수·병합·재작성하지 않는다.",
-            "편집 대상 항의 번호와 인용관계를 유지한다.",
+            "편집 대상 항의 번호와 인용관계를 유지한다. 새 항으로 끼운 번호가 있으면 기존 항은 renumbered 대응으로 옮긴 번호·인용 그대로다.",
             "편집 대상 외의 항 번호를 산출하지 않는다. 나머지 항은 사용자 원문 그대로 반환된다.",
         ],
         "parent_chain_text": base.chain_text,

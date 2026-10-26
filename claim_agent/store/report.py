@@ -239,10 +239,10 @@ def edited_set_text(state: RunState) -> str | None:
     base, dep = state.baseline_set, state.dependent
     if not base or not dep or not dep.current or not dep.current.exact_text:
         return None
-    edited = {c["claim_no"]: c["text"] for c in dep.current.claims}
-    kept = {c.claim_no for c in base.claims}
-    appended = [edited[n] for n in sorted(edited) if n not in kept]      # new claims added after the end of the set
-    return "\n\n".join([edited.get(c.claim_no, c.text) for c in base.claims] + appended)
+    from ..pipeline.claimtext import merged_set_text
+
+    # New claims sit at their numbers: after the end of the set, or inserted with the set's claims moved back.
+    return merged_set_text([(c.claim_no, c.text) for c in base.claims], {c["claim_no"]: c["text"] for c in dep.current.claims})
 
 
 def no_lock_line(state: RunState) -> str:
@@ -276,7 +276,12 @@ def _edit_section(state: RunState) -> list[str]:
     full = edited_set_text(state)
     if full:
         tag = "부모항 체인 미검증" if lock else f"{nos}은 {unlocked_label(state)}"
-        out += [f"### 전체 청구항 세트 ({nos}만 교체 · 나머지 항은 제공된 원문 그대로 · {tag})", "", full, ""]
+        if base.renumbered:
+            from ..pipeline.claimtext import renumber_line
+
+            out += [f"### 전체 청구항 세트 ({nos}을 새 항으로 끼움 · 기존 항은 번호·인용만 옮김: {renumber_line(base.renumbered)} · {tag})", "", full, ""]
+        else:
+            out += [f"### 전체 청구항 세트 ({nos}만 교체 · 나머지 항은 제공된 원문 그대로 · {tag})", "", full, ""]
     return out
 
 
