@@ -543,7 +543,7 @@ class Workspace:
             fixed = source and source.get("role") == "assistant" and (source.get("review") or {}).get("revise")
             if not source or source.get("status") == "running" or (source.get("mode") == "REVIEW" and not fixed):
                 raise ValueError("검수할 메시지를 찾을 수 없습니다.")
-            target = review_target(source["text"])
+            target = (fixed and source["review"].get("claim_text")) or review_target(source["text"])
             if not target:
                 raise ValueError("이 메시지에는 검수할 청구항(【청구항 N】으로 시작하는 문언)이 없습니다.")
             self.require_connection()
@@ -855,6 +855,9 @@ class Workspace:
                         message["revision_path"] = result["revision_path"]
                     if "revised" in result and message.get("review") is not None:
                         message["review"]["revise"] = bool(result["revised"])     # fixed wording can be the next review target
+                        if result.get("claim_text"):
+                            # Style's restyled wording sits among the reports, so the target is kept, not cut from the text.
+                            message["review"]["claim_text"] = self.redact(result["claim_text"])
                     if result.get("run_id") and result.get("effective_mode") in {"AUTHORING_DRAFT", "FINALIZATION"}:
                         session["run_id"] = result["run_id"]
                 else:

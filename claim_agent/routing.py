@@ -15,7 +15,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .claim_scope import constrain_target
 from .provider.base import CallSpec, GenParams, LLMProvider
 
-Reviewer = Literal["syntax-scope-reviewer", "oa-strategy-reviewer", "claim-success-reviewer", "blind-claim-reconstruction-reviewer"]
+# claim-style-adjuster is a free work tool only (it returns restyled wording); the router never keeps it (route()).
+Reviewer = Literal["claim-style-adjuster", "syntax-scope-reviewer", "oa-strategy-reviewer", "claim-success-reviewer", "blind-claim-reconstruction-reviewer"]
 RevisionKind = Literal["NONE", "STYLE_ONLY", "MEANING", "DESIGN"]
 AuthoringScope = Literal["NEW_INDEPENDENT", "NEW_DEPENDENT_SET", "EXISTING_SET_EDIT"]
 
@@ -157,6 +158,9 @@ def classify_request(provider: LLMProvider, root: Path, model: str, text: str,
     if result.finish_reason not in ("", "STOP"):
         raise ValueError("요청 분류가 완료되지 않았습니다. 일반 대화로 우회하지 않습니다.")
     route = RouteDecision.model_validate(result.parsed if result.parsed is not None else json.loads(result.text))
+    if "claim-style-adjuster" in route.reviewers:
+        # A gated REVIEW_ONLY leaves the wording as it is; restyling is authoring and takes the full gates.
+        route.reviewers = [r for r in route.reviewers if r != "claim-style-adjuster"] or ["syntax-scope-reviewer"]
     if route.claim_source_id and route.claim_source_id not in {b["id"] for b in blocks}:
         raise ValueError("요청 분류기가 존재하지 않는 청구항 원문을 지정했습니다.")
     # A second, deterministic guard covers explicit patent requests even if the

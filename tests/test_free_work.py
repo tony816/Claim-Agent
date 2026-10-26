@@ -142,6 +142,42 @@ def test_a_question_beside_the_review_is_answered_without_rewriting_a_claim(rt, 
     assert result["answer"].startswith(free_work.ANSWERED_LABEL.format(labels="OA 검수")) and answer in result["answer"]
 
 
+STYLED = ("【청구항 1】\n본체; 및\n상기 본체에서 돌출되는 복수의 돌출부;를 포함하는,\n클립 홀더.\n\n"
+          "【청구항 2】\n제1항에 있어서,\n상기 돌출부는 탄성 재질인,\n클립 홀더.")
+
+
+def test_style_restyles_first_and_the_other_tools_review_its_wording(rt, tmp_path, monkeypatch):
+    provider = ScriptedProvider({"claim-style-adjuster": [R.style("DEPENDENT_SET", text=STYLED)], "syntax-scope-reviewer": [R.syntax()]})
+    _offline(rt, monkeypatch, provider)
+    folder = tmp_path / "request"
+    folder.mkdir()
+    request = _review_request("syntax-scope-reviewer")
+    request["review"]["roles"] = ["syntax-scope-reviewer", "claim-style-adjuster"]       # style runs first whatever the order
+    result = free_work.review_turn(provider, rt.cfg, None, request, folder)
+    style, syntax = [c for c in provider.calls if c.phase == "main"]     # style may first take its corpus tool phase
+    target = free_work.review_target(DRAFT)
+    assert style.role == "claim-style-adjuster" and "style_change_mode: REVIEW_ONLY_INPUT" in style.packet_text and target in style.packet_text
+    assert not style.images and "DESIGN_GATE: LOCKED" not in style.packet_text
+    assert syntax.role == "syntax-scope-reviewer" and STYLED in syntax.packet_text and "revision: r2" in syntax.packet_text
+    assert target not in syntax.packet_text
+    state = rt.store.load_state(result["run_id"])
+    assert state.review_styled_text == STYLED and state.candidate.draft_claim_lock is None and state.outcome == "REVIEW_ONLY_DONE"
+    # The restyled wording is the answer's draft: shown among the reports and kept as the next review target.
+    assert result["revised"] is True and result["claim_text"] == STYLED
+    assert free_work.STYLE_NOTE in result["answer"] and "### 스타일 조정 문언" in result["answer"] and STYLED in result["answer"]
+
+
+def test_style_that_changes_nothing_leaves_the_target_as_it_was(rt, tmp_path, monkeypatch):
+    target = free_work.review_target(DRAFT)
+    provider = ScriptedProvider({"claim-style-adjuster": [R.style("DEPENDENT_SET", text=target)]})
+    _offline(rt, monkeypatch, provider)
+    folder = tmp_path / "request"
+    folder.mkdir()
+    result = free_work.review_turn(provider, rt.cfg, None, _review_request("claim-style-adjuster"), folder)
+    assert result["revised"] is False and result["claim_text"] is None
+    assert free_work.STYLE_UNCHANGED_NOTE in result["answer"] and "### 스타일 조정 문언" not in result["answer"]
+
+
 def test_blind_reads_each_claim_with_its_parent_chain_and_skips_picture(rt, tmp_path, monkeypatch):
     provider = ScriptedProvider({"blind-claim-reconstruction-reviewer": [R.blind(), R.blind()], free_work.FREE_ROLE: [FIXED]})
     _offline(rt, monkeypatch, provider)

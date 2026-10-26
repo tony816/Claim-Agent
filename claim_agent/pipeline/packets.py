@@ -487,6 +487,26 @@ def review_only(state: RunState, bundle: MaterialBundle, ids: Identifiers, recor
     return Packet(txt, imgs)
 
 
+def review_style(state: RunState, bundle: MaterialBundle, ids: Identifiers, record_id: str, scope: Scope, claim_text: str, request_text: str) -> Packet:
+    """REVIEW_ONLY style: the given wording stands in for the meaning draft, and the adjuster returns it restyled.
+
+    Like the gated style stage it gets the text materials only, no drawings.
+    """
+    mats, _ = _materials(bundle, ("invention", "drawing", "spec"))
+    txt = _user_lock(bundle) + mats
+    txt += _hdr(state, ids, record_id, {"style_scope": scope.value, "style_change_mode": "REVIEW_ONLY_INPUT", "design_revision": "N/A", "style_record_id": record_id})
+    txt += _section("검토 요청", request_text)
+    txt += _section("입력 청구항 전문 (의미 초안 대용 — 게이트 미통과)", claim_text)
+    txt += _section("평문(줄바꿈·번호 제거)", flatten(claim_text))
+    txt += _section("REVIEW_ONLY 스타일 규칙", "DESIGN_GATE·drafter 보고서·루트 LOCK이 없다. 입력 청구항 전문이 정한 구성·관계·한정·단수·복수·인용관계·항 번호를 잠긴 계약으로 보고 "
+                    "역할 파일의 허용 수정만 한다. 설계 계약이 없어 할 수 없는 대조는 개별 UNVERIFIED로 둔다. 의미를 바꿔야 고칠 수 있는 결함은 고치지 않고 "
+                    "문제 구절·이유를 적는다. 결과 문언은 NOT_FINALIZED(미검수 초안)이며 LOCK의 PASS 근거가 아니다.")
+    txt += _section("조건부 보조 소스", "`search_style_corpus`/`open_routing_index` 도구가 제공된 경우에만 07 §3 조건에서 사용하고, 사용하지 않았으면 `조건부 보조 소스: NOT_ACTIVATED`로 기록한다.")
+    txt += _output_contract("`exact_claim_text`에 스타일 적용 후 청구항 전문(항 번호·인용관계 그대로, 바꿀 것이 없으면 입력 그대로)을 넣고, `finalized_status`는 NOT_FINALIZED로, "
+                            "`TERM_EXPRESSION_GATE`, `CLAIM_STYLE_GATE`, `NON_PATENT_TECHNICAL_READER_GATE`, `GEOMETRIC_OBJECT_GATE`, `FUNCTION_DEDUCTION_GATE`를 채운다. " + _GATE_DEDUCTION)
+    return Packet(txt)
+
+
 # --------------------------------------------------------------------------- prior-art search and pre-exam
 #
 # docs/선행기술조사_사전심사_설계_2026-10.md. The searcher sees only the invention text (no drawings, no sources);

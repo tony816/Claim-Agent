@@ -23,6 +23,7 @@ FREE = "free"
 GATED = "gated"
 FREE_ROLE = "자유 작업"
 REVIEW_ROLES = {
+    "claim-style-adjuster": "문체 조정",
     "syntax-scope-reviewer": "통사·범위 검수",
     "oa-strategy-reviewer": "OA 검수",
     "claim-success-reviewer": "성공조건 감사",
@@ -38,6 +39,9 @@ ANSWERED_LABEL = ("※ 선택 검수({labels}) 결과로 사용자 요청에 답
                   "검수 보고서 전문은 '전체 보고서 펼치기'에 있습니다.")
 BLIND_NOTE = ("※ 블라인드 복원은 역피처 검수의 1단계만입니다. 자유 작업에는 DESIGN_GATE가 없어 기준 비교(picture)는 실행하지 않았고, "
               "종속항은 부모항 체인과 함께 항마다 따로 읽혔습니다.")
+STYLE_NOTE = ("※ 문체 조정은 고른 문언을 고쳐 냅니다(스타일가이드·용어표현 출처게이트, 범위 불변). 스타일 조정 문언은 미검수 초안이고 LOCK이 없으며, "
+              "함께 고른 다른 검수는 그 문언을 읽었습니다. 이 문언은 다음 검수 대상으로 고를 수 있습니다.")
+STYLE_UNCHANGED_NOTE = "※ 문체 조정이 고칠 곳을 찾지 못했거나 문언을 내지 않아, 다른 검수는 고른 문언 그대로를 읽었습니다."
 BLIND_NOTE_TEXT = "※ 입력한 요청은 블라인드 복원에 보내지 않았습니다(블라인드는 청구항 문언만 받는 새 context). 다른 검수와 요청을 처리하는 단계에만 반영했습니다."
 HALTED_NOTE = "※ 검수가 끝까지 실행되지 않아, 끝난 검수 결과로만 요청을 처리했습니다. 중지 원인은 작업 로그와 전체 보고서에 있습니다."
 PROJECT_FILES_HEAD ="## 프로젝트 소스 파일 (프로젝트에 미리 등록되어 매 요청에 자동 첨부 — 사용자 제공 원자료)"
@@ -60,7 +64,8 @@ FREE_SYSTEM = """너는 Claim-Agent의 자유 작업 에이전트다. 사용자�
 - 한국어로, 동료 변리사와 작업하듯 간결하게 쓴다."""
 
 REVIEW_REQUEST = ("자유 작업 모드에서 사용자가 작업 도구 패널에서 고른 검수({labels})다. '제공된 청구항 전문'은 게이트를 거치지 않은 초안이다. "
-                  "이 역할의 기준으로 결함을 찾고, 결함마다 문제 구절·이유·고칠 방향을 적는다. 수정 문언 전문은 쓰지 않는다. "
+                  "이 역할의 기준으로 결함을 찾고, 결함마다 문제 구절·이유·고칠 방향을 적는다. 수정 문언 전문은 쓰지 않는다"
+                  "(문체 조정만 예외로, 범위 불변으로 고친 문언 전문을 낸다). "
                   "사용자 요청이 있으면 그 요청이 가리키는 관점·대상·범위로 이 역할의 검수를 하고, 요청한 지점을 먼저 판단한다.")
 # The general agent's turn after the reviews (only when the user typed a request): the reports are in the history right
 # above this message. The request decides whether the wording is rewritten or the findings answer it.
@@ -184,15 +189,19 @@ def review_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
         _close(pipeline_provider)
     note = str(review.get("note") or "").strip()
     blind = "blind-claim-reconstruction-reviewer" in roles
-    reports = "\n".join([REVIEW_NOTE] + ([BLIND_NOTE] if blind else [])) + "\n\n" + result["answer"]
+    # Style hands back restyled wording; the other chosen roles read it, and it can be the next review target.
+    styled = result.get("styled_text") if "claim-style-adjuster" in roles else None
+    style_notes = [STYLE_NOTE if styled else STYLE_UNCHANGED_NOTE] if "claim-style-adjuster" in roles else []
+    reports = "\n".join([REVIEW_NOTE] + style_notes + ([BLIND_NOTE] if blind else [])) + "\n\n" + result["answer"]
     # The history holds what happened, in order: the reviews asked and answered, then the request asked and answered.
     reviewed = [{"role": "user", "parts": [{"text": review_asked_text(roles, note, target)}]}, {"role": "model", "parts": [{"text": reports}]}]
     if not note:
         # Review only: the reports, as the reviewers wrote them, are the answer.
         rt.store.write_chat_report(result["run_id"], reports)
-        return {**result, "answer": reports, "history": [*history, *reviewed], "effective_mode": "REVIEW_ONLY", "revised": False}
+        return {**result, "answer": reports, "history": [*history, *reviewed], "effective_mode": "REVIEW_ONLY", "revised": bool(styled),
+                "claim_text": styled}
     provider = UsageMeter(provider, cfg.telemetry.pricing)
-    message = user_message(FOLLOW_UP_REQUEST.format(labels=labels, note=note, target=target), "", [])
+    message = user_message(FOLLOW_UP_REQUEST.format(labels=labels, note=note, target=styled or target), "", [])
     preset = request.get("attachments") or []
     sent = {"role": "user", "parts": [*_preset_parts(preset), *message["parts"]]} if preset else None
     gen = GenParams(temperature=0.3, thinking_level="MEDIUM", max_output_tokens=cfg.model.max_output_tokens)
@@ -203,10 +212,15 @@ def review_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
     usage = {k: v for k, v in turn_usage(rt.store.load_state(result["run_id"]))[0].items() if k not in ("started_at", "finished_at")}
     notes = [(REVISED_LABEL if revised else ANSWERED_LABEL).format(labels=labels)] + ([BLIND_NOTE] if blind else []) + ([BLIND_NOTE_TEXT] if blind else [])
     notes += [HALTED_NOTE] if result["status"] != "complete" else []
-    answer = "\n".join(notes) + "\n\n" + done["answer"] + "\n\n" + usage_note(add_usage(usage, provider.usage), time.time() - started)
+    body = done["answer"]
+    if styled and not revised:
+        # Answered from the findings without a rewrite: the restyled wording is still this turn's draft to carry on from.
+        notes += style_notes
+        body += "\n\n### 스타일 조정 문언 (미검수 초안)\n\n" + styled
+    answer = "\n".join(notes) + "\n\n" + body + "\n\n" + usage_note(add_usage(usage, provider.usage), time.time() - started)
     rt.store.write_chat_report(result["run_id"], answer)
     return {**result, "answer": answer, "history": done["history"], "effective_mode": "REVIEW_ONLY", "finish_reason": done["finish_reason"],
-            "revised": revised}
+            "revised": revised or bool(styled), "claim_text": None if revised else styled}
 
 
 def parent_claims_text(history: list[dict]) -> str:

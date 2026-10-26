@@ -46,6 +46,12 @@ def test_invalid_route_fails_closed(project_root, decision):
         classify_request(provider, project_root, "test", "검토해줘", [], "invalid-route")
 
 
+def test_router_never_keeps_the_style_tool_in_a_gated_review(project_root):
+    provider = ScriptedProvider({"request-router": [{"mode": "REVIEW_ONLY", "reason": "의견", "reviewers": ["claim-style-adjuster"]}]})
+    decision = classify_request(provider, project_root, "test", "문체를 검토해줘", [], "style-route")
+    assert decision.reviewers == ["syntax-scope-reviewer"]
+
+
 def test_harness_question_stays_meta(project_root):
     provider = ScriptedProvider({"request-router": [{"mode": "META", "reason": "프로그램 설정 감사"}]})
     decision = classify_request(provider, project_root, "test", "청구항 수정 시 하네스 코드를 어떻게 고쳐?", [], "meta")
