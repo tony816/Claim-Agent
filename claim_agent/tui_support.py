@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from .models.request import IMAGE_EXT, TEXT_EXT, RunRequest
+from .models.request import IMAGE_EXT, TEXT_EXT
 from .sources.extract import DOC_EXT
 
 CATEGORIES = {"invention": "발명 자료", "drawing": "도면", "prior_art": "선행기술", "spec": "정식 명세서"}
@@ -72,50 +72,6 @@ def validate_attachment(path: Path, category: str = "invention") -> Attachment:
     return Attachment(path, category)
 
 
-def prepare_request(
-    root: Path, run_id: str, request: str, pasted_material: str,
-    attachments: list[Attachment], dependent: bool, dependent_target: str,
-    mode: str = "AUTHORING_DRAFT",
-) -> Path:
-    if not request.strip():
-        raise ValueError("요청 내용을 입력해 주세요.")
-    if mode not in {"AUTHORING_DRAFT", "FINALIZATION"}:
-        raise ValueError("지원하지 않는 작성 모드입니다.")
-    checked = [validate_attachment(a.path, a.category) for a in attachments]
-    if not pasted_material.strip() and not any(a.category in {"invention", "drawing", "spec"} for a in checked):
-        raise ValueError("발명 자료를 첨부하거나 '발명 설명 붙여넣기'에 원자료를 입력해 주세요.")
-    specs = [str(a.path) for a in checked if a.category == "spec"]
-    if len(specs) > 1:
-        raise ValueError("정식 명세서는 한 파일만 선택하세요. 나머지는 발명 자료로 추가할 수 있습니다.")
-    if mode == "FINALIZATION" and not specs:
-        raise ValueError("출원용 최종 검증에는 정식 명세서 지정이 필요합니다. 통합 첨부는 '잠정안 작성'으로 실행하고, 명세서를 지정한 최종 검증은 CLI의 --spec 옵션을 사용하세요.")
-    if dependent and not dependent_target.strip():
-        raise ValueError("종속항 범위를 입력해 주세요. 예: 2~8")
-    folder = root / ".tui" / "requests" / run_id
-    folder.mkdir(parents=True, exist_ok=False)
-    sources = [str(a.path) for a in checked if a.category == "invention"]
-    if pasted_material.strip():
-        material = folder / "발명설명.txt"
-        material.write_text(pasted_material, encoding="utf-8")
-        sources.append(str(material))
-    req = RunRequest(
-        request_mode=mode, request_text=request.strip(), invention_sources=sources,
-        drawings=[str(a.path) for a in checked if a.category == "drawing"],
-        prior_art=[str(a.path) for a in checked if a.category == "prior_art"],
-        spec_path=specs[0] if specs else None, dependent=dependent,
-        dependent_target=dependent_target.strip() if dependent else None,
-    )
-    path = folder / "request.json"
-    # JSON is valid YAML; the existing request loader handles these absolute paths.
-    path.write_text(req.model_dump_json(indent=2), encoding="utf-8")
-    return path
-
-
-def run_command(root: Path, request_path: Path, run_id: str, model: str) -> list[str]:
-    return [sys.executable, "-u", "-m", "claim_agent.cli", "--project-root", str(root),
-            "run", "--request-yaml", str(request_path), "--run-id", run_id, "--model", model]
-
-
 RESUME_KINDS = {
     "none": [],                                  # re-run the halted stage with the decision text
     "style": ["--apply-style-fix"],              # STYLE_ONLY_REVISION, r+1
@@ -123,7 +79,20 @@ RESUME_KINDS = {
     "redesign": ["--redesign"],                  # design_revision d+1, architect first
     "restart": ["--restart-from", "ARCHITECT"],  # full restart (materials changed)
     "accept_unverified": ["--accept-unverified"],
+    "select_prior_art": ["--select-prior-art-from-decision"],   # decision text: skeys (comma/space) and an optional YYYY-MM-DD
 }
+
+
+def prior_art_decision(skeys: list[str], base_date: str | None = None) -> str:
+    """The decision text of a select_prior_art resume; `none` picks no searched document."""
+    return (", ".join(skeys) or "none") + (f" {base_date}" if base_date else "")
+
+
+def parse_prior_art_decision(text: str) -> tuple[list[str], str | None]:
+    """(skeys, base_date) from a select_prior_art decision text."""
+    tokens = [t for t in re.split(r"[\s,]+", text.strip()) if t]
+    dates = [t for t in tokens if re.fullmatch(r"\d{4}-\d{2}-\d{2}", t)]
+    return [t for t in tokens if t not in dates and t.lower() != "none"], (dates[-1] if dates else None)
 
 
 def claim_proposal_route(kind: str, text: str, scope: str | None, dependent_live: bool) -> tuple[str, str | None]:
@@ -154,28 +123,45 @@ def resume_command(root: Path, run_id: str, decision_path: Path, kind: str, mode
     return command
 
 
-def feedback_command(root: Path, folder: Path, state: dict, feedback: str, material: str,
-                     attachments: list[Attachment], model: str) -> list[str]:
-    """Keep the existing run and USER_LOCK; invalidate dependent gates via redesign."""
+ACCEPT_UNVERIFIED = re.compile(r"미검증\s*(?:으로|을|를)?\s*(?:수용|진행|받아들)")
+
+
+def chat_resume_kind(text: str, halt: dict | None, new_material: bool = False) -> str | None:
+    """How a chat message continues a halted run; None when the run is not waiting for a decision.
+
+    A halted run waits for the user's decision, so the next chat message is that decision on the same run: the
+    prior-art pick when the halt asks for documents, the non-gating UNVERIFIED acceptance when the message says so,
+    a restart from the architect when it brings new material, and otherwise a re-run of the halted stage.
+    """
+    if not halt:
+        return None
+    if halt.get("reason_code") == "PRIOR_ART_SELECTION":
+        return "select_prior_art"
+    if ACCEPT_UNVERIFIED.search(text):
+        return "accept_unverified"
+    return "restart" if new_material else "none"
+
+
+def chat_resume_command(root: Path, folder: Path, state: dict | None, text: str, material: str,
+                        attachments: list[Attachment], model: str) -> list[str] | None:
+    """The resume command for a chat message on a halted run (same run, same USER_LOCK); None when not halted."""
     import hashlib
 
-    if not feedback.strip():
-        raise ValueError("수정할 내용을 프롬프트에 입력해 주세요.")
+    if not (state or {}).get("halt"):
+        return None
     checked = [validate_attachment(a.path) for a in attachments]
-    folder.mkdir(parents=True, exist_ok=False)
-    decision = folder / "feedback.txt"
-    decision.write_text(feedback, encoding="utf-8")
-    command = resume_command(root, state["run_id"], decision, "restart", model)
     known = {str(Path(item["path"]).resolve()) for item in state.get("material_meta", [])}
-    for item in checked:
-        if str(item.path.resolve()) not in known:
-            command += ["--add-source", str(item.path)]
+    add = [str(item.path) for item in checked if str(item.path.resolve()) not in known]
+    folder.mkdir(parents=True, exist_ok=False)
     digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
     if material.strip() and digest not in {item.get("sha256") for item in state.get("material_meta", [])}:
         source = folder / "추가설명.txt"
         source.write_text(material, encoding="utf-8")
-        command += ["--add-source", str(source)]
-    return command
+        add.append(str(source))
+    kind = chat_resume_kind(text, state["halt"], bool(add))
+    decision = folder / "decision.txt"
+    decision.write_text(text, encoding="utf-8")
+    return resume_command(root, state["run_id"], decision, kind, model, add if kind == "restart" else None)
 
 
 def child_options(root: Path) -> dict:

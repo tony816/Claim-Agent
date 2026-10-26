@@ -71,7 +71,8 @@ def proposal_outside_targets(baseline: list[dict], targets: list[int], text: str
     for no, claim in sorted(pasted_claims(text).items()):
         old = base.get(no)
         if old is None:
-            out.append(f"제{no}항: 기존 세트에 없는 항")
+            if no not in targets:                           # a target appended after the set is new by definition
+                out.append(f"제{no}항: 기존 세트에 없는 항")
             continue
         cite = f"인용 {_cites(list(old['parent_nos']))} → {_cites(claim.parent_nos)}" if claim.parent_nos != list(old["parent_nos"]) else ""
         if no in targets:
@@ -191,6 +192,18 @@ def parse_claim_set(text: str) -> list[Claim]:
     return claims
 
 
+def as_claim_set(text: str, no: int = 1) -> str:
+    """A lone claim without a header (an independent claim's exact text) as a one-claim set headed 【청구항 no】.
+
+    The style adjuster may return the independent claim body alone; the dependent stages parse it together with the
+    dependent set, so it needs a header. Text that already has one is returned as is.
+    """
+    text = text.strip()
+    if not text or _CLAIM_HEAD.search(normalize_headers(text)[0]):
+        return text
+    return f"【청구항 {no}】\n{text}"
+
+
 def validate_parent_refs(claims: list[Claim]) -> list[str]:
     """Return human-readable problems: forward references, missing parents, duplicates."""
     problems: list[str] = []
@@ -244,6 +257,16 @@ def ordered_claims(*texts: str | None) -> list[Claim]:
     return sorted(claims, key=lambda c: c.claim_no)
 
 
+def appended_nos(claims: list[Claim], targets: set[int]) -> set[int]:
+    """Targets an edit adds right after the end of the set (N+1, N+2, … without a gap), e.g. 제3항 on a set of 1~2.
+
+    A gap (제5항 on a set of 1~2) returns nothing, so those numbers stay outside the set and the edit is refused.
+    """
+    last = max((c.claim_no for c in claims), default=0)
+    new = {n for n in targets if n > last}
+    return new if new == set(range(last + 1, last + 1 + len(new))) else set()
+
+
 def ancestor_nos(claims: list[Claim], target_no: int) -> set[int]:
     """Every claim the target cites directly or indirectly, over all alternatives of multi-dependent claims."""
     return {c.claim_no for chain in parent_chain(claims, target_no, expand_multi=True) for c in chain}
@@ -252,6 +275,15 @@ def ancestor_nos(claims: list[Claim], target_no: int) -> set[int]:
 def baseline_digest(text: str) -> str:
     """Identity of a claim set independent of header spelling and line endings."""
     return exact_sha256(claim_set_text(parse_claim_set(text.replace("\r\n", "\n"))))
+
+
+def independent_text(text: str) -> str:
+    """The first independent claim of a claim document (header included), or the whole text when it has no headers."""
+    try:
+        claims = parse_claim_set(text)
+    except ClaimParseError:
+        return text.strip()
+    return next((c.text for c in claims if c.is_independent), claims[0].text).strip()
 
 
 def parent_chain_text(chain: list[Claim]) -> str:

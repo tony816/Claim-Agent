@@ -12,7 +12,7 @@
   <div class="side-bottom"><span class="local-dot"></span> 이 컴퓨터에 저장됨<button id="shutdown">프로그램 종료</button></div>
 </aside>
 <main>
-  <header><div class="header-left"><button id="menu" aria-label="대화 목록 열기">☰</button><strong>Claim-Agent</strong><div class="provider-switch"><select id="provider-kind" aria-label="연결 방식"></select><select id="provider-model" aria-label="사용 모델"></select><span id="provider-note" class="provider-note"></span></div><button id="project-chip" class="project-chip" hidden title="프로젝트 설정 열기"></button></div><span class="header-note">대화에서 초안까지</span></header>
+  <header><div class="header-left"><button id="menu" aria-label="대화 목록 열기">☰</button><strong>Claim-Agent</strong><div class="provider-switch"><select id="provider-kind" aria-label="연결 방식"></select><select id="provider-model" aria-label="사용 모델"></select><span id="provider-note" class="provider-note"></span></div><div id="work-mode" class="work-mode" role="group" aria-label="작업 방식"><button type="button" data-mode="gated" aria-pressed="true" title="모든 요청을 분류해, 청구항 문언은 설계부터 역구성·LOCK까지 전체 게이트로 작성·검수합니다">게이트 자동</button><button type="button" data-mode="free" aria-pressed="false" title="게이트 없는 일반 에이전트와 1차 작업하고, 필요한 검수 역할만 답변 아래 버튼으로 실행합니다">자유 작업</button></div><button id="project-chip" class="project-chip" hidden title="프로젝트 설정 열기"></button></div><span class="header-note">대화에서 초안까지</span></header>
   <section id="project-panel" aria-label="프로젝트 설정" hidden>
     <div class="project-inner">
       <div class="project-head"><h2 id="project-title">프로젝트</h2><div class="project-head-actions"><button type="button" id="project-new-chat" class="primary">＋ 이 프로젝트에서 새 대화</button><button type="button" id="project-delete" class="danger">프로젝트 삭제</button></div></div>
@@ -64,25 +64,17 @@
       <details id="run-gates"><summary>게이트 표</summary><table id="run-gate-table"></table></details>
       <details id="run-diff"><summary>리비전 대조 (기존 문언 / 제안 문언 / 변경 이유 / 권리범위 영향 / 근거)</summary><div id="run-diff-body" class="run-diff-body"></div></details>
       <div class="run-actions"><a id="export-docx" class="run-link" download>DOCX 내보내기</a><a id="export-md" class="run-link" download>MD 내보내기</a><a id="export-evidence" class="run-link" download>근거·판정 부록 포함 DOCX</a></div>
-      <form id="resume-form" class="resume-form">
-        <label class="resume-label">재개·수정 결정</label>
-        <textarea id="resume-text" rows="2" placeholder="결정 내용 또는 수정 지시 (예: 오목면의 주체는 기둥 둘레면)"></textarea>
-        <div class="resume-row">
-          <select id="resume-kind" aria-label="재개 종류"></select>
-          <select id="resume-scope" aria-label="수정 범위" hidden><option value="">독립항 (종속항은 재검수)</option><option value="DEPENDENT">종속항만</option></select>
-          <span id="resume-files" class="resume-files"></span>
-          <button type="submit" id="resume-send">실행</button>
-        </div>
-        <p class="resume-hint">스타일만: 조사·띄어쓰기·표면 용어 (r+1) · 의미: 절 결속·관계 술어 (r+1) · 재설계: 주골격·한정 집합 (d+1). 추가 자료를 첨부하면 항상 재설계로 실행됩니다.</p>
-      </form>
+      <p class="run-chat-hint">수정이나 결정은 아래 입력창에 그대로 적어 보내세요. 이 작업에 이어서 반영됩니다.</p>
+      <pre id="prior-candidates" class="prior-candidates" hidden></pre>
     </section>
   </div>
   <footer>
     <div id="error" role="alert" hidden></div>
+    <p id="free-banner" class="free-banner" hidden><strong>자유 작업 모드</strong> · 일반 에이전트의 답변은 게이트를 거치지 않은 <strong>미검수 초안</strong>입니다. 청구항 아래 <strong>검수 실행</strong> 버튼으로 필요한 검수 역할만 돌려 보세요(검수 결과는 LOCK 근거가 아님). 잠정 LOCK이 필요하면 위에서 <strong>게이트 자동</strong>으로 바꿔 작성을 요청하세요.</p>
     <form id="composer">
       <div id="attachments" aria-label="보낼 첨부 파일"></div>
       <textarea id="prompt" rows="1" placeholder="무엇이든 물어보세요" aria-label="메시지 입력" autofocus></textarea>
-      <div class="composer-tools"><div class="tools-left"><button type="button" id="attach" title="파일 첨부" aria-label="파일 첨부">＋</button><select id="mode" aria-label="대화 모드"><option value="CHAT">자동 분류 · 대화</option><option value="AUTHORING_DRAFT">청구항 작성·수정</option></select><details id="options" hidden><summary id="options-summary">작성 옵션 · 독립항만</summary><div class="options-panel"><p class="options-title">작성 대상</p><label class="target-mode"><input type="radio" name="target-mode" value="independent" checked> 독립항만</label><label class="target-mode"><input type="radio" name="target-mode" value="single"> 특정 항 1개 <span class="target-single">제 <input id="target-claim" type="number" min="1" max="1000" value="2" aria-label="항 번호"> 항만</span></label><label class="target-mode"><input type="radio" name="target-mode" value="range"> 종속항 범위</label><div id="target-segments" class="target-segments" aria-label="종속항 구간"></div><button type="button" id="target-add" class="target-add">＋ 구간 추가</button><p class="target-preview">전달 범위 <code id="target-preview">—</code></p><p class="target-hint">문장에 항 번호를 적으면 문장이 우선합니다. 1항만 고르면 독립항만 작성합니다.</p></div></details></div><button type="submit" id="send" title="보내기" aria-label="보내기">↑</button><button type="button" id="stop" title="응답 중지" aria-label="응답 중지" hidden>■</button></div>
+      <div class="composer-tools"><div class="tools-left"><button type="button" id="attach" title="파일 첨부" aria-label="파일 첨부">＋</button><details id="options"><summary id="options-summary">작성 옵션 · 미지정</summary><div class="options-panel"><p class="options-title">작성 대상</p><label class="target-mode"><input type="radio" name="target-mode" value="auto" checked> 미지정 (요청 내용대로)</label><label class="target-mode"><input type="radio" name="target-mode" value="independent"> 독립항만</label><label class="target-mode"><input type="radio" name="target-mode" value="single"> 특정 항 1개 <span class="target-single">제 <input id="target-claim" type="number" min="1" max="1000" value="2" aria-label="항 번호"> 항만</span></label><label class="target-mode"><input type="radio" name="target-mode" value="range"> 종속항 범위</label><div id="target-segments" class="target-segments" aria-label="종속항 구간"></div><button type="button" id="target-add" class="target-add">＋ 구간 추가</button><p class="target-preview">전달 범위 <code id="target-preview">—</code></p><p class="target-hint">미지정이면 요청 문장과 자료로 범위를 정합니다. 문장에 항 번호를 적으면 문장이 우선합니다. 1항만 고르면 독립항만 작성합니다.</p><p class="options-title">선행기술</p><label class="target-mode"><input type="checkbox" id="prior-search"> 설계 전에 WIPS 선행기술 검색·사전 심사 (검색 집합 기준, 전수 조사 아님)</label></div></details></div><button type="submit" id="send" title="보내기" aria-label="보내기">↑</button><button type="button" id="stop" title="응답 중지" aria-label="응답 중지" hidden>■</button></div>
     </form>
     <p id="hint">Enter로 보내기 · Shift+Enter로 줄바꿈 · 파일을 끌어 놓거나 이미지를 붙여넣으세요</p>
     <input id="file-picker" type="file" accept=".txt,.md,.json,.yaml,.yml,.csv,.pdf,.docx,.hwpx,.hwp,.png,.jpg,.jpeg,.webp" multiple hidden>

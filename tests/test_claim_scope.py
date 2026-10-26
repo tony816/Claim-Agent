@@ -57,14 +57,15 @@ def test_format_target_collapses_consecutive_numbers():
 
 
 @pytest.mark.parametrize("data,expected", [
+    ({"target_mode": "auto"}, (False, None, "auto")),
     ({"target_mode": "independent"}, (False, None, "independent")),
     ({"target_mode": "single", "target_claim": "3"}, (True, "3", "single")),
     ({"target_mode": "single", "target_claim": 1}, (False, None, "single")),
     ({"target_mode": "range", "target_segments": [{"from": 2, "to": 4}, {"from": 6}, 9, {"from": "7", "to": "8"}]}, (True, "2~4,6~9", "range")),
     ({"target_mode": "range", "target_segments": "청구항 2~3, 5"}, (True, "2~3,5", "range")),
     ({"dependent": True, "target": "2~8"}, (True, "2~8", "range")),
-    ({"dependent": False, "target": "2~8"}, (False, None, "independent")),
-    ({}, (False, None, "independent")),
+    ({"dependent": False, "target": "2~8"}, (False, None, "auto")),
+    ({}, (False, None, "auto")),
 ])
 def test_resolve_claim_target(data, expected):
     assert resolve_claim_target(data) == expected
@@ -90,6 +91,14 @@ def test_ui_target_set_only_for_explicit_picks():
     assert ui_target_set({"dependent": True, "target": "2~8"}) is None          # legacy default hint, not a pick
     assert ui_target_set({"target_mode": "single", "dependent": False, "target": ""}) is None
     assert ui_target_set(None) is None
+
+
+def test_independent_pick_drops_dependent_work_unless_the_text_names_claims():
+    independent, auto = {"target_mode": "independent", "dependent": False, "target": ""}, {"target_mode": "auto", "dependent": False, "target": ""}
+    assert apply_ui_target("AUTHORING_DRAFT", True, "2~8", "청구항 세트 작성해줘", independent) == (False, None)
+    assert apply_ui_target("AUTHORING_DRAFT", True, "3", "3항도 고쳐줘", independent) == (True, "3")
+    assert apply_ui_target("AUTHORING_DRAFT", True, "2~8", "청구항 세트 작성해줘", auto) == (True, "2~8")   # 미지정: router decides
+    assert apply_ui_target("REVIEW_ONLY", False, None, "검토해줘", independent) == (False, None)
 
 
 def test_apply_ui_target_narrows_but_the_request_text_wins():

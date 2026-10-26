@@ -8,11 +8,10 @@ from pathlib import Path
 
 import pytest
 from textual.events import Paste
-from textual.widgets import Button, DataTable, Input, Select, TextArea
+from textual.widgets import Button, Checkbox, DataTable, Input, Select, TextArea
 
-from claim_agent.models.request import RunRequest
 from claim_agent.tui import ClaimAgentApp, Composer
-from claim_agent.tui_support import Attachment, normalize_path, parse_paths, prepare_request, run_command, validate_attachment
+from claim_agent.tui_support import Attachment, normalize_path, parse_paths, validate_attachment
 
 
 def test_paths_with_spaces_quotes_newlines_and_uri(tmp_path):
@@ -36,31 +35,6 @@ def test_attachment_classification_and_secret_rejection(tmp_path):
         path.write_text("data")
         with pytest.raises(ValueError):
             validate_attachment(path, "invention")
-
-
-def test_request_preserves_categories_and_pasted_source(tmp_path):
-    specs = tmp_path / "명세서.txt"
-    prior = tmp_path / "선행기술.txt"
-    specs.write_text("명세서", encoding="utf-8")
-    prior.write_text("선행기술", encoding="utf-8")
-    path = prepare_request(tmp_path, "test", "요청", "사용자 제공 원자료", [Attachment(specs, "spec"), Attachment(prior, "prior_art")], True, "2~8", "FINALIZATION")
-    req = RunRequest.from_yaml(path)
-    assert req.request_text == "요청"
-    assert req.spec_path == str(specs)
-    assert req.prior_art == [str(prior)]
-    assert req.dependent and req.dependent_target == "2~8"
-    assert Path(req.invention_sources[0]).read_text(encoding="utf-8") == "사용자 제공 원자료"
-    command = run_command(tmp_path, path, "test", "gemini-3.8-flash")
-    assert command[0] == sys.executable
-    assert command[command.index("--request-yaml") + 1] == str(path)
-    assert "GEMINI_API_KEY" not in " ".join(command)
-
-
-@pytest.mark.parametrize("request_text,source,mode", [("", "자료", "AUTHORING_DRAFT"), ("요청", "", "AUTHORING_DRAFT"), ("요청", "자료", "FINALIZATION")])
-def test_invalid_request_never_creates_job(tmp_path, request_text, source, mode):
-    with pytest.raises(ValueError):
-        prepare_request(tmp_path, "test", request_text, source, [], False, "", mode)
-    assert not (tmp_path / ".tui").exists()
 
 
 def test_headless_paste_attachment_removal_and_resize(tmp_path, monkeypatch):
@@ -136,33 +110,35 @@ def test_headless_clipboard_text_and_files(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
-def test_headless_offline_pipeline_result(project_root, tmp_path, monkeypatch):
+def test_headless_claim_request_runs_through_chat(project_root, tmp_path, monkeypatch):
+    """No mode picker: a claim request typed in the one composer is routed and runs the gated pipeline."""
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-    from claim_agent import tui
     config = tmp_path / "config.json"
     config.write_text(json.dumps({"paths": {"runs_dir": str(tmp_path / "runs"), "lessons_dir": str(tmp_path / "lessons")}}), encoding="utf-8")
-    original_command = run_command
+    original_spawn = asyncio.create_subprocess_exec
+    requests = []
 
-    def offline_command(root, request, run_id, model):
-        # The checked-in recording has fixed IDs for this sample candidate.
-        data = json.loads(request.read_text(encoding="utf-8"))
-        data["candidate_id"] = "clip-holder"
-        request.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        return original_command(root, request, run_id, model) + ["--replay", str(project_root / "eval/cases/sample-clip-holder/fixtures")]
+    async def scripted_chat(*args, **kwargs):
+        if "claim_agent.chat" in args:
+            requests.append(json.loads(Path(args[args.index("--request") + 1]).read_text(encoding="utf-8")))
+            program = ("from claim_agent import chat,routing,runtime; from claim_agent.routing import RouteDecision; "
+                       "from claim_agent.provider.scripted import ScriptedProvider; from tests import scripted_roles as R; "
+                       "routing.classify_request=lambda *a: RouteDecision(mode='AUTHORING_DRAFT',reason='청구항 작성 요청'); "
+                       "runtime.make_provider=lambda *a,**k: ScriptedProvider(R.happy_script(dependent=False)); raise SystemExit(chat.main())")
+            args = (sys.executable, "-u", "-c", program, *args[args.index("claim_agent.chat") + 1:])
+        return await original_spawn(*args, **kwargs)
 
-    monkeypatch.setattr(tui, "run_command", offline_command)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", scripted_chat)
 
     async def scenario():
         app = ClaimAgentApp(project_root, config_path=config)
         async with app.run_test(size=(130, 45)) as pilot:
-            app.query_one("#mode", Select).value = "AUTHORING_DRAFT"
+            assert not app.query("#mode")
             app.query_one("#request", Composer).load_text("독립항 잠정안 작성")
             app.query_one("#material", Composer).load_text("오프라인 UI 연결 시험용 원자료")
             notes = []
             monkeypatch.setattr(app, "notify", lambda message, *a, **k: notes.append(str(message)))
             await pilot.pause()
-            # Press the widget rather than clicking screen coordinates: after the mode change the compositor map can
-            # lag the re-layout and a coordinate click then lands beside the button (intermittent on loaded runners).
             app.query_one("#start", Button).press()
             try:
                 async with asyncio.timeout(5):      # Button.Pressed is delivered asynchronously
@@ -171,12 +147,13 @@ def test_headless_offline_pipeline_result(project_root, tmp_path, monkeypatch):
             except TimeoutError:
                 raise AssertionError(f"start did not begin a run; notifications={notes}") from None
             assert app.query_one("#start", Button).disabled
-            async with asyncio.timeout(30):
+            async with asyncio.timeout(60):
                 while app.running:
                     await asyncio.sleep(0.1)
             await pilot.pause()
-            assert app.current_state()["outcome"] == "DRAFT_CLAIM_LOCK"
-            assert app.result_text and app.query_one("#result", TextArea).text == app.result_text
+            assert requests[0]["ui_hints"] == dict(dependent=False, target="", target_mode="auto")
+            assert app.current_state()["outcome"] == "DRAFT_CLAIM_LOCK", notes
+            assert app.last_pipeline_run and app.result_text and app.query_one("#result", TextArea).text == app.result_text
             assert not app.query_one("#copy", Button).disabled
             assert not app.query_one("#log-panel").display
             await pilot.click("#toggle-logs")
@@ -184,15 +161,34 @@ def test_headless_offline_pipeline_result(project_root, tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
+def test_dependent_checkbox_is_a_router_hint(tmp_path):
+    async def scenario():
+        app = ClaimAgentApp(tmp_path)
+        async with app.run_test(size=(130, 45)):
+            assert app.claim_hints() == dict(dependent=False, target="", target_mode="auto")
+            app.query_one("#dependent", Checkbox).value = True
+            app.query_one("#dep-target", Input).value = "2~4"
+            assert app.claim_hints() == dict(dependent=True, target="2~4", target_mode="range")
+            app.query_one("#dep-target", Input).value = "많이"
+            with pytest.raises(ValueError):
+                app.claim_hints()
+    asyncio.run(scenario())
+
+
 def test_headless_stop_reaps_child(tmp_path, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-    from claim_agent import tui
-    monkeypatch.setattr(tui, "run_command", lambda *args: [sys.executable, "-u", "-c", "import time; print('waiting', flush=True); time.sleep(120)"])
+    original_spawn = asyncio.create_subprocess_exec
+
+    async def sleeping_chat(*args, **kwargs):
+        if "claim_agent.chat" in args:
+            args = (sys.executable, "-u", "-c", "import time; print('waiting', flush=True); time.sleep(120)")
+        return await original_spawn(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", sleeping_chat)
 
     async def scenario():
         app = ClaimAgentApp(tmp_path)
         async with app.run_test(size=(130, 45)) as pilot:
-            app.query_one("#mode", Select).value = "AUTHORING_DRAFT"
             app.query_one("#request", Composer).load_text("독립항 잠정안 작성")
             app.query_one("#material", Composer).load_text("시험 자료")
             await pilot.click("#start")

@@ -97,3 +97,23 @@ def test_multi_dependent_reconstruction_is_review_then_expands_on_approval(tmp_p
     state2 = expanded.engine(prov).resume("multi-01", Decision())
     assert state2.outcome == "DRAFT_CLAIM_LOCK+DRAFT_DEPENDENT_SET_LOCK", state2.halt
     assert set(state2.dependent.current.targets) == {"2", "3", "4-alt1", "4-alt2"}
+
+
+def test_dependent_set_parses_with_a_headerless_root(tmp_path, request_dep):
+    """The style adjuster may return the independent claim without 【청구항 1】; the dependent stages still parse it."""
+    root = _rt(tmp_path)
+    bare = R.ROOT_CLAIM.split("\n", 1)[1]
+    script = R.happy_script(dependent=True)
+    script["claim-style-adjuster"] = [R.style("INDEPENDENT", text=bare), R.style("DEPENDENT_SET")]
+    prov = ScriptedProvider(script)
+    state = root.engine(prov).run(root.engine(prov).start(request_dep, "bare-root-01"))
+    assert state.candidate.current.exact_text == bare
+    assert state.outcome == "DRAFT_CLAIM_LOCK+DRAFT_DEPENDENT_SET_LOCK", state.halt
+
+
+def test_as_claim_set_adds_a_header_only_when_missing():
+    from claim_agent.pipeline.claimtext import as_claim_set
+    bare = R.ROOT_CLAIM.split("\n", 1)[1]
+    assert as_claim_set(bare).startswith("【청구항 1】\n")
+    assert as_claim_set(R.ROOT_CLAIM) == R.ROOT_CLAIM
+    assert as_claim_set("") == ""

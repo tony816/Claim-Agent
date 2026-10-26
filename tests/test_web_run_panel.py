@@ -14,6 +14,12 @@ from claim_agent.provider.scripted import ScriptedProvider
 from . import scripted_roles as R
 
 
+def web_halt():
+    from claim_agent.models.state import Halt
+
+    return Halt(stage="SYNTAX", role="syntax-scope-reviewer", kind="REVIEW", reason_code="TEST_DECISION", message="결정 필요")
+
+
 def test_run_panel_endpoints(rt, request_indep, tmp_path, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "offline-web-secret")
     script = R.happy_script(dependent=False)
@@ -38,7 +44,7 @@ def test_run_panel_endpoints(rt, request_indep, tmp_path, monkeypatch):
         with call("/?token=" + server.token, {}) as response:
             cookie = response.headers["Set-Cookie"].split(";")[0]
             page = response.read().decode()
-            assert 'id="run-panel"' in page and 'id="resume-form"' in page and "export-docx" in page
+            assert 'id="run-panel"' in page and 'id="resume-form"' not in page and "export-docx" in page
         headers = {"Cookie": cookie}
         sid = workspace.create()["id"]
         workspace.sessions[sid]["run_id"] = "panel-run"
@@ -52,7 +58,7 @@ def test_run_panel_endpoints(rt, request_indep, tmp_path, monkeypatch):
             assert "## 기존 문언" in text and "## 제안 문언" in text and "r1 → r2" in text
         with call("/api/export?id=" + sid + "&format=md", headers) as response:
             body = response.read().decode()
-            assert response.headers["Content-Disposition"].startswith("attachment;") and R.ROOT_CLAIM.replace("조임 나사", "조임나사") in body
+            assert response.headers["Content-Disposition"].startswith("attachment;") and R.ROOT_CLAIM.replace("조임 나사", "조임나사") in body.replace("\r\n", "\n")
         with call("/api/export?id=" + sid + "&format=docx&evidence=1", headers) as response:
             assert response.headers["Content-Type"].startswith("application/vnd.openxmlformats") and response.read()[:2] == b"PK"
         sid2 = workspace.create()["id"]
@@ -65,7 +71,27 @@ def test_run_panel_endpoints(rt, request_indep, tmp_path, monkeypatch):
             call(f"/api/report?id={workspace.create()['id']}&message=m1", headers)
         assert "app.js" in (web.ASSETS / "index.html").read_text(encoding="utf-8")
         js = (web.ASSETS / "app.js").read_text(encoding="utf-8")
-        assert "renderRun" in js and "/api/resume" in js and "/api/diff" in js and "/api/report" in js
+        assert "renderRun" in js and "/api/resume" not in js and "/api/diff" in js and "/api/report" in js
+        sid3 = workspace.create()["id"]
+        workspace.sessions[sid3]["run_id"] = "panel-run"
+        state.halt = web_halt()
+        rt.store.save_state(state)
+        resumed = []
+        monkeypatch.setattr(workspace, "resume", lambda s, d: resumed.append((s, d)))
+        workspace.start(sid3, {"text": "미검증 수용", "files": []})
+        assert workspace.jobs.get(sid3) is None
+        # Moderator on: a plain message on a halted run is read first, with the halt attached; the run keeps waiting.
+        started = []
+        monkeypatch.setattr(workspace, "require_connection", lambda: None)
+        monkeypatch.setattr(workspace, "execute", lambda s, job, command: (started.append(job), job.update(done=True)))
+        workspace.start(sid3, {"text": "왜 멈췄어?", "files": []})
+        workspace.jobs[sid3]["thread"].join()
+        packet = json.loads((started[0]["folder"] / "chat.json").read_text(encoding="utf-8"))
+        assert packet["ui_hints"]["halted"]["stage"] == state.halt.stage and [d["kind"] for _, d in resumed] == ["accept_unverified"]
+        # Moderator off: the message is the halted run's decision, as before.
+        monkeypatch.setattr(workspace.cfg.conversation, "moderator", "off")
+        workspace.start(sid3, {"text": "오목면의 주체는 기둥 둘레면", "files": []})
+        assert [d["kind"] for _, d in resumed] == ["accept_unverified", "none"]
     finally:
         server.shutdown()
         server.server_close()

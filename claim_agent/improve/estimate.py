@@ -42,6 +42,14 @@ def expected_calls(req: RunRequest, n_targets_default: int = 3) -> dict[str, int
         "claim-success-reviewer": 1, "syntax-scope-reviewer": 1, "oa-strategy-reviewer": 1,
         "blind-claim-reconstruction-reviewer": 1, "picture-claim-reconstruction-reviewer": 1,
     }
+    # Prior-art search: one query call (screening runs on Jev, not counted here); pre-exam: COMPARE per document + JUDGE.
+    # max_docs is the upper bound; PRIOR_TRIM usually leaves fewer documents.
+    docs = len(req.prior_art)
+    if req.prior_search is not None and req.prior_search.enabled:
+        calls["prior-art-searcher"] = 1
+        docs += req.prior_search.max_docs
+    if docs:
+        calls["prior-art-pre-examiner"] = docs + 1
     if req.dependent:
         try:
             targets = parse_target(req.dependent_target)

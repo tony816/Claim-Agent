@@ -1,0 +1,44 @@
+[
+  {
+    "SourcePath": "C:\\Users\\mssong\\Desktop\\Claim-Agent\\sources\\독립항_작성_성공조건.md",
+    "ProjectFilename": "독립항_작성_성공조건.md",
+    "SHA256": "eb52a646c2209a246e061dc97b936b1df9330577968256becabac82feb45314e",
+    "Bytes": 33526
+  },
+  {
+    "SourcePath": "C:\\Users\\mssong\\Desktop\\Claim-Agent\\sources\\04_청구항_스타일가이드.md",
+    "ProjectFilename": "04_청구항_스타일가이드.md",
+    "SHA256": "85d1803b46d7d6d9a3c54d4c0f1a8dda56b8d4128e3a8b4841f58bad41d28237",
+    "Bytes": 28336
+  },
+  {
+    "SourcePath": "C:\\Users\\mssong\\Desktop\\Claim-Agent\\sources\\07_용어표현_출처게이트.md",
+    "ProjectFilename": "07_용어표현_출처게이트.md",
+    "SHA256": "2f7eb90d0ec468c4125f10c79dbff40c8c7a940a64a4086ebe17da0fcbc217e0",
+    "Bytes": 9539
+  },
+  {
+    "SourcePath": "C:\\Users\\mssong\\Desktop\\Claim-Agent\\sources\\05_종속항_전개패턴_가이드.md",
+    "ProjectFilename": "05_종속항_전개패턴_가이드.md",
+    "SHA256": "2f5601d941a234bc0c7795191ec4fbc3645d241582a8c7ea4218677f34dc6377",
+    "Bytes": 26946
+  },
+  {
+    "SourcePath": "C:\\Users\\mssong\\Desktop\\Claim-Agent\\sources\\08_종속항_기술기여_게이트.md",
+    "ProjectFilename": "08_종속항_기술기여_게이트.md",
+    "SHA256": "947c502fc6bc1f60c6c3327f7914dfd7072b9f4cd7cf4872349251a85e4e3328",
+    "Bytes": 15289
+  },
+  {
+    "SourcePath": "C:\\Users\\mssong\\Desktop\\Claim-Agent\\sources\\청구항_예시검색_라우팅인덱스.md",
+    "ProjectFilename": "청구항_예시검색_라우팅인덱스.md",
+    "SHA256": "ed59d56acd80be25de6f322be04a90fa9a9925df529005e66fa6b50d9814c1e3",
+    "Bytes": 5051
+  },
+  {
+    "SourcePath": "C:\\Users\\mssong\\Desktop\\Claim-Agent\\sources\\청구항_문체학습용_분야별검색최적화본.md",
+    "ProjectFilename": "청구항_문체학습용_분야별검색최적화본.md",
+    "SHA256": "83ab0d93cccf61290e12a6f60520ac75883659a4b26cd0691fc97e8f1db7aa8d",
+    "Bytes": 80526
+  }
+]

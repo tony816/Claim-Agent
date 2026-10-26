@@ -15,7 +15,7 @@ provider:
     timeout_s: 600
   codex_oauth:
     model: default                 # CLI account default, or account-accessible model ID
-    executable: 'C:\Users\mssong\.aside\runtime\node\codex.cmd'
+    # executable unset: the newest codex found (PATH, ~/.local/bin, the Codex desktop app's bundled CLI) is used.
     timeout_s: 600
   antigravity:
     model: gemini-3.1-pro-high     # `agy models` lists the signed-in account's models
@@ -38,6 +38,15 @@ roles:
   blind-claim-reconstruction-reviewer:   {thinking_level: MEDIUM, temperature: 0.7, cache: false, tools: false}
   picture-claim-reconstruction-reviewer: {thinking_level: HIGH,   temperature: 0.1}
   dependent-claim-strategy-architect:    {thinking_level: HIGH,   temperature: 0.2}
+  # Prior-art search (검색 문장·Jev 실패 시 선별) and pre-exam (문헌별 대비·종합 판단), docs/선행기술조사_사전심사_설계_2026-10.md
+  prior-art-searcher:                    {thinking_level: MEDIUM, temperature: 0.2}
+  prior-art-pre-examiner:                {thinking_level: HIGH,   temperature: 0.1}
+  # Conversation moderator (CLAUDE.md 대화 모더레이터): routes every chat turn, answers CONSULT questions and writes the
+  # `## 답변` over pipeline results. Not a gate role; it never writes or seals claim wording.
+  conversation-moderator:                {provider: claude_oauth, model: claude-opus-5-5, thinking_level: HIGH, temperature: 0.3}
+
+conversation:
+  moderator: "on"           # on | off (quoted: bare on/off are YAML booleans) — off: router on the conversation model, plain reports, no CONSULT answers
 
 cache:
   enabled: true
@@ -45,7 +54,7 @@ cache:
   min_expected_reuse: 2
 
 pipeline:
-  max_return_loops: {STYLE_ONLY: 2, DRAFTER: 2, ARCHITECT: 1, DEPENDENT_ARCHITECT: 1}
+  max_return_loops: {STYLE_ONLY: 2, DRAFTER: 2, ARCHITECT: 1, DEPENDENT_ARCHITECT: 1, PREEXAM: 2}
   max_concurrency: 3
   expand_multi_dependent: false
   retry: {max_attempts: 3, backoff_s: [2, 8, 20]}
@@ -54,6 +63,21 @@ pipeline:
   max_calls: 60
   max_total_tokens: null
   max_cost_usd: null
+
+# WIPS search before the design (설계 4절). Off by default; a request turns it on with `prior_search: {enabled: true}`.
+# Candidates are screened and trimmed by Jev through OpenRouter (OPENROUTER_API_KEY); WIPS needs WIPS_API_KEY in .env.
+prior_search:
+  enabled: false
+  countries: [KR, JP, US, CN, EP, PCT]
+  size_per_query: 10
+  max_docs: 5
+  confirm: false            # true: the user picks the documents and the base date before fetching
+  base_date: null           # 출원 예정일 (YYYY-MM-DD); null → the run date
+  inventive_high: note      # note | review — INVENTIVE_RISK HIGH is recorded, or stops the run for review
+  screen_threshold: 0.5
+  trim_threshold: 0.3       # relevance question on claims+abstract; 0.5 kept only 1 of 5 cable holders in the live check
+  trim: true
+  max_wips_calls: 40
 
 paths:
   roles_dir: .claude/agents

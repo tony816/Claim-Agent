@@ -113,16 +113,52 @@ def _picture(env: RoleEnvelope, mode: RequestMode) -> bool:
     )
 
 
+_DEP_CANDIDATE_GATES = ("DEPENDENT_SOURCE_GATE", "CAUSAL_CONTRIBUTION_GATE", "CLAIMABILITY_GATE", "ENFORCEMENT_VALUE_GATE")
+
+
+def main_tree_gate_gaps(env: RoleEnvelope) -> list[str]:
+    """08 §5.6: every TECHNICAL_SOLUTION_CANDIDATE in the main tree needs the four candidate gates at PASS and a scenario."""
+    gaps = []
+    for c in env.candidates:
+        if c.classification != CandidateClass.TECHNICAL_SOLUTION_CANDIDATE:
+            continue
+        bad = [g for g in _DEP_CANDIDATE_GATES if getattr(c, g) != GateValue.PASS]
+        if not (c.enforcement_scenario or "").strip():
+            bad.append("enforcement_scenario")
+        if bad:
+            gaps.append(f"{c.dc_id}: {', '.join(bad)}")
+    return gaps
+
+
 def _dep_architect(env: RoleEnvelope, mode: RequestMode) -> bool:
     return (
         env.status == Status.PASS
         and _g(env, "DEPENDENT_DESIGN_GATE", {GateValue.LOCKED})
         and any(c.classification == CandidateClass.TECHNICAL_SOLUTION_CANDIDATE for c in env.candidates)
+        and not main_tree_gate_gaps(env)
     )
 
 
 def _dep_success(env: RoleEnvelope, mode: RequestMode) -> bool:
     return env.status == Status.PASS and env.handoff_ready
+
+
+def _prior_query(env: RoleEnvelope, mode: RequestMode) -> bool:
+    return env.status == Status.PASS and bool([q for q in env.queries_ko if q.strip()])
+
+
+def _prior_screen(env: RoleEnvelope, mode: RequestMode) -> bool:
+    return env.status == Status.PASS
+
+
+def _preexam_compare(env: RoleEnvelope, mode: RequestMode) -> bool:
+    return env.status == Status.PASS and bool(env.preexam_rows)
+
+
+def _preexam_judge(env: RoleEnvelope, mode: RequestMode) -> bool:
+    # The role's PREEXAM_NOVELTY_GATE is only a suggestion: the engine applies 설계 5.3 to its rows and the code tally.
+    # Any status counts once the judgment ran: the live run returned UNVERIFIED for "searched set, inventive step open".
+    return env.execution_status == ExecStatus.RUN and bool(env.novelty)
 
 
 CONTRACTS: dict[tuple[str, Scope], GateContract] = {
@@ -201,6 +237,10 @@ CONTRACTS: dict[tuple[str, Scope], GateContract] = {
     ("dependent-claim-strategy-architect", Scope.DEPENDENT_SET): GateContract(
         "dependent-claim-strategy-architect", ["DEPENDENT_DESIGN_GATE"], _dep_architect, ["DEPENDENT_DESIGN_GATE"]
     ),
+    ("prior-art-searcher", Scope.PRIOR_QUERY): GateContract("prior-art-searcher", [], _prior_query, []),
+    ("prior-art-searcher", Scope.PRIOR_SCREEN): GateContract("prior-art-searcher", [], _prior_screen, []),
+    ("prior-art-pre-examiner", Scope.PREEXAM_COMPARE): GateContract("prior-art-pre-examiner", [], _preexam_compare, []),
+    ("prior-art-pre-examiner", Scope.PREEXAM_JUDGE): GateContract("prior-art-pre-examiner", ["PREEXAM_NOVELTY_GATE"], _preexam_judge, ["PREEXAM_NOVELTY_GATE"]),
 }
 
 

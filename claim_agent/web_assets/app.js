@@ -8,17 +8,40 @@ function settingsError(text){$("model-settings-error").textContent=text;$("model
 function settingsChanged(){$("model-settings-saved").textContent="저장하지 않은 변경사항";}
 function settingSelect(label, options, value, change){
   const wrap=el("label","model-field",label),select=el("select");select.setAttribute("aria-label",label);
-  for(const [id,title] of options){const option=el("option","",title);option.value=id;select.append(option);}
+  for(const [id,title] of options){const option=el("option","",title);option.value=id;option.title=title;select.append(option);}
   select.value=value;select.onchange=()=>{change(select.value);settingsChanged();};wrap.append(select);return wrap;
+}
+// OpenRouter처럼 모델이 많은 목록은 검색 칸을 붙인다. 검색어(공백으로 나눈 낱말 모두)가 ID·이름·가격·컨텍스트에 들어 있는 모델만 남긴다.
+const SEARCH_MIN=20;
+function modelTitle(providers,kind,model){const label=providers[kind]?.labels?.[model];return label?`${model} — ${label}`:model;}
+function modelSearch(select,choices,fixed,total,label,expand){
+  const box=el("input"),count=el("small","model-search-count");box.type="search";box.className="model-search";
+  box.placeholder="모델 검색 — 이름·제공사·가격 (예: claude opus, free, 1M)";box.setAttribute("aria-label",label+" 검색");
+  const apply=()=>{
+    const words=box.value.toLowerCase().split(/\s+/).filter(Boolean),current=select.value;
+    const shown=choices.filter(([id,title])=>fixed.includes(id)||id===current||words.every(w=>(id+" "+title).toLowerCase().includes(w)));
+    fillSelect(select,shown,current);
+    const hits=shown.filter(([id])=>!fixed.includes(id)).length;
+    count.textContent=words.length?`${total}개 중 ${hits}개`:`${total}개`;
+    if(expand)select.size=words.length?Math.max(2,Math.min(8,shown.length)):0;
+  };
+  box.oninput=apply;
+  box.onkeydown=e=>{    // Enter: 첫 검색 결과 선택, ↓: 결과 목록으로 이동
+    const first=[...select.options].find(o=>!fixed.includes(o.value)&&o.value!==select.value)||[...select.options].find(o=>!fixed.includes(o.value));
+    if(e.key==="Enter"){e.preventDefault();if(first){select.value=first.value;select.dispatchEvent(new Event("change"));}}
+    else if(e.key==="ArrowDown"){e.preventDefault();select.focus();}
+  };
+  apply();return [box,count];
 }
 function modelPicker(kind,value,label,inherit,onchange){
   const models=modelSettings.providers[kind].models,choices=inherit?[["","기본 모델 따름 · "+modelSettings.defaults[kind]]]:[];
-  for(const model of models)choices.push([model,model==="default"?"계정 기본 모델 (CLI 자동 선택)":model]);
+  for(const model of models)choices.push([model,model==="default"?"계정 기본 모델 (CLI 자동 선택)":modelTitle(modelSettings.providers,kind,model)]);
   choices.push(["__custom","모델 ID 직접 입력…"]);
   const custom=value!==null&&!models.includes(value), wrap=settingSelect(label,choices,custom?"__custom":value||"",v=>{
     input.hidden=v!=="__custom";input.required=v==="__custom";
     onchange(v==="__custom"?input.value:v||null);if(v==="__custom")input.focus();
   });
+  if(models.length>SEARCH_MIN){const select=wrap.querySelector("select");select.before(...modelSearch(select,choices,["","__custom"],models.length,label,true));}
   const input=el("input");input.placeholder="모델 ID 입력";input.setAttribute("aria-label",label+" 직접 입력");input.value=custom?value:"";input.hidden=!custom;input.required=custom;input.maxLength=160;
   input.oninput=()=>{onchange(input.value.trim());settingsChanged();};wrap.append(input);return wrap;
 }
@@ -77,13 +100,14 @@ $("model-settings-form").onsubmit=async event=>{
 let providerInfo=null;
 function fillSelect(select,options,value){
   select.replaceChildren();
-  for(const [id,title] of options){const option=el("option","",title);option.value=id;select.append(option);}
+  for(const [id,title] of options){const option=el("option","",title);option.value=id;option.title=title;select.append(option);}
   select.value=value;
 }
 function providerLock(){    // 목록을 다시 만들지 않는 잠금 갱신: 열려 있는 선택 상자를 건드리지 않는다.
   const kinds=$("provider-kind"),models=$("provider-model");
   const running=!!state.data?.running||!!providerInfo?.busy,fixed=providerInfo?providerInfo.roles.filter(r=>r.provider).length:0;
   kinds.disabled=models.disabled=running||!providerInfo;
+  const search=document.querySelector(".provider-switch .model-search");if(search)search.disabled=models.disabled;
   const note=!providerInfo?"":running?"응답이 끝난 뒤 바꿀 수 있습니다":fixed?`다음 요청부터 적용 · 서브에이전트 ${fixed}개는 개별 지정`:"다음 요청부터 적용됩니다";
   $("provider-note").textContent=note;kinds.title=models.title=note;
 }
@@ -92,7 +116,10 @@ function renderProviderSwitch(){
     fillSelect($("provider-kind"),Object.entries(providerInfo.providers).map(([id,p])=>[id,p.label]),providerInfo.provider);
     const current=providerInfo.defaults[providerInfo.provider],names=providerInfo.providers[providerInfo.provider].models.slice();
     if(!names.includes(current))names.unshift(current);
-    fillSelect($("provider-model"),names.map(m=>[m,m==="default"?"계정 기본 모델":m]),current);
+    const choices=names.map(m=>[m,m==="default"?"계정 기본 모델":modelTitle(providerInfo.providers,providerInfo.provider,m)]);
+    fillSelect($("provider-model"),choices,current);
+    for(const node of document.querySelectorAll(".provider-switch .model-search,.provider-switch .model-search-count"))node.remove();
+    if(names.length>SEARCH_MIN)$("provider-model").before(...modelSearch($("provider-model"),choices,[],names.length,"사용 모델",false));
   }
   providerLock();
 }
@@ -108,6 +135,25 @@ async function switchProvider(body){
 $("provider-kind").onchange=()=>switchProvider({provider:$("provider-kind").value});
 $("provider-model").onchange=()=>switchProvider({provider:providerInfo.provider,model:$("provider-model").value});
 const routeNames = {CHAT:"일반 대화",META:"설정·진행 확인",AUTHORING_DRAFT:"청구항 작성·수정",FINALIZATION:"출원용 최종 검증",REVIEW_ONLY:"특허 의견·제한 검수"};
+// ---- 자유 작업 모드: 일반 에이전트와 1차 작업하고, 메시지의 청구항에 고른 게이트 역할만 버튼으로 실행한다(REVIEW_ONLY, LOCK 없음).
+const REVIEW_ROLES=[["syntax-scope-reviewer","통사·범위","귀속·결속·복수 분배·범위 불변을 검수합니다"],["oa-strategy-reviewer","OA","명확성·기능적 표현·뒷받침 등 OA 위험을 검수합니다"],["claim-success-reviewer","성공조건","독립항 성공조건과 원자료 근거를 감사합니다"],["blind-claim-reconstruction-reviewer","블라인드 복원","발명을 모르는 기술자가 독립항 문언만 읽고 무엇을 그리는지 봉인합니다 (기준 비교는 하지 않음)"]];
+const REVIEW_LABEL=Object.fromEntries(REVIEW_ROLES.map(([id,label])=>[id,label]));
+const CLAIM_HEAD=/^[ \t]*(?:\*\*)?(?:【\s*청구항\s*\d+\s*】|\[\s*청구항\s*\d+\s*\])/m;
+function freeMode(){return state.data?.work_mode==="free";}
+async function setWorkMode(mode){
+  if(!state.id||state.busy||state.data?.running||state.data?.work_mode===mode)return;
+  try{await api("/api/work-mode",{id:state.id,mode});try{localStorage.setItem("claim-work-mode",mode);}catch(e){}await refresh();await list();}catch(e){error(e.message);}
+}
+for(const button of document.querySelectorAll("#work-mode button"))button.onclick=()=>setWorkMode(button.dataset.mode);
+async function runReview(message,role){
+  if(state.busy||state.data?.running)return;state.busy=true;controls();error("");
+  try{await api("/api/review",{id:state.id,message,role});await refresh();restartPoll();$("conversation").scrollTop=$("conversation").scrollHeight;}catch(e){error(e.message);}finally{state.busy=false;controls();}
+}
+function renderWorkMode(){
+  const free=freeMode(),locked=!!state.data?.running||state.busy;
+  for(const button of document.querySelectorAll("#work-mode button")){const on=button.dataset.mode===(free?"free":"gated");button.classList.toggle("is-on",on);button.setAttribute("aria-pressed",String(on));button.disabled=locked;}
+  $("free-banner").hidden=!free;$("options").hidden=free;
+}
 const el = (tag, cls, text) => {const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
 function error(message){$("error").textContent=message;$("error").hidden=!message;}
 async function api(path, body, raw=false){
@@ -132,13 +178,13 @@ function markdown(node,text){
   }
 }
 function resize(){const p=$("prompt");p.style.height="auto";p.style.height=Math.min(p.scrollHeight,180)+"px";}
-function controls(){const running=!!state.data?.running;providerLock();$("send").hidden=running;$("stop").hidden=!running;$("send").disabled=state.busy||state.uploading>0||!$("prompt").value.trim()||!claimTarget().ok;$("attach").disabled=state.uploading>0;$("mode").disabled=running||state.busy;$("options").hidden=$("mode").value!=="AUTHORING_DRAFT";$("prompt").placeholder=$("mode").value==="CHAT"?"무엇이든 물어보세요":state.data?.run_id?"수정하고 싶은 내용을 알려주세요":"발명을 설명하거나 자료를 첨부해 주세요";}
-// ---- 작성 대상: 독립항만 / 특정 항 1개 / 종속항 범위. 서버의 resolve_claim_target와 같은 정규형(2~4,6)을 미리 보여 준다.
+function controls(){const running=!!state.data?.running,free=freeMode();providerLock();renderWorkMode();$("send").hidden=running;$("stop").hidden=!running;$("send").disabled=state.busy||state.uploading>0||!$("prompt").value.trim()||(!free&&!claimTarget().ok);$("attach").disabled=state.uploading>0;$("prompt").placeholder=free?"자유롭게 요청하세요 · 답변은 미검수 초안이며, 청구항 아래 버튼으로 필요한 검수만 실행합니다":state.data?.run_id?"질문하거나 수정하고 싶은 내용을 알려주세요":"무엇이든 물어보세요 · 청구항 작성은 발명을 설명하거나 자료를 첨부해 주세요";for(const button of document.querySelectorAll(".review-bar button"))button.disabled=running||state.busy;}
+// ---- 작성 대상: 미지정 / 독립항만 / 특정 항 1개 / 종속항 범위. 서버의 resolve_claim_target와 같은 정규형(2~4,6)을 미리 보여 준다.
 const target={segments:[{from:2,to:8}]};
 function formatTarget(numbers){const a=[...numbers].sort((x,y)=>x-y);if(!a.length)return "";const parts=[];let start=a[0],prev=a[0];for(const n of a.slice(1).concat([null])){if(n!==null&&n===prev+1){prev=n;continue;}parts.push(start===prev?String(start):start+"~"+prev);if(n!==null)start=prev=n;}return parts.join(",");}
-function targetMode(){return document.querySelector("input[name=target-mode]:checked")?.value||"independent";}
+function targetMode(){return document.querySelector("input[name=target-mode]:checked")?.value||"auto";}
 function claimTarget(){
-  const mode=targetMode();const out={target_mode:mode,target_claim:null,target_segments:[],dependent:false,target:null,ok:true,label:"독립항만",error:""};
+  const mode=targetMode();const out={target_mode:mode,target_claim:null,target_segments:[],dependent:false,target:null,ok:true,label:mode==="auto"?"미지정":"독립항만",error:""};
   if(mode==="single"){const n=parseInt($("target-claim").value,10);if(!(n>=1&&n<=1000)){out.ok=false;out.error="항 번호는 1~1000 사이 숫자여야 합니다.";}else{out.target_claim=n;if(n>1){out.dependent=true;out.target=String(n);}out.label=n===1?"1항(독립항)만":n+"항만";}}
   else if(mode==="range"){const numbers=new Set();for(const seg of target.segments){const lo=parseInt(seg.from,10),hi=parseInt(seg.to===""||seg.to===undefined?seg.from:seg.to,10);if(!(lo>=2&&hi>=lo&&hi<=1000)){out.ok=false;out.error=lo===1||hi===1?"종속항 범위에는 2항 이상만 넣을 수 있습니다.":"구간은 시작 항 ≤ 끝 항, 2~1000 사이여야 합니다.";break;}for(let n=lo;n<=hi;n++)numbers.add(n);}
     if(out.ok&&!numbers.size){out.ok=false;out.error="구간을 하나 이상 추가하세요.";}
@@ -153,8 +199,10 @@ function renderSegments(){
     row.append(document.createTextNode("제 "),from,document.createTextNode(" ~ "),to,document.createTextNode(" 항"),remove);box.append(row);});
   $("target-add").disabled=mode!=="range";$("target-claim").disabled=mode!=="single";
 }
-function updateTarget(){const t=claimTarget();$("target-preview").textContent=t.ok?(t.dependent?t.target:"독립항만"):"—";$("target-preview").className=t.ok?"":"invalid";$("target-preview").title=t.error;$("options-summary").textContent="작성 옵션 · "+(t.ok?t.label:"입력 확인");controls();}
+function updateTarget(){const t=claimTarget();$("target-preview").textContent=t.ok?(t.dependent?t.target:t.target_mode==="auto"?"요청 내용대로":"독립항만"):"—";$("target-preview").className=t.ok?"":"invalid";$("target-preview").title=t.error;$("options-summary").textContent="작성 옵션 · "+(t.ok?t.label:"입력 확인");controls();}
 for(const radio of document.querySelectorAll("input[name=target-mode]"))radio.onchange=()=>{renderSegments();updateTarget();};
+// 작성 대상은 미지정이 기본이다. 다른 대화로 옮기면 미지정으로 되돌리고 옵션 창을 닫는다.
+function resetTarget(){const auto=document.querySelector("input[name=target-mode][value=auto]");if(auto)auto.checked=true;$("options").open=false;renderSegments();updateTarget();}
 $("target-claim").oninput=updateTarget;$("target-add").onclick=()=>{const last=target.segments.at(-1);const next=(parseInt(last?.to||last?.from,10)||1)+1;target.segments.push({from:next,to:next});renderSegments();updateTarget();};
 renderSegments();updateTarget();
 function pending(){const container=$("attachments");container.replaceChildren();for(const file of state.pending){const chip=el("div","attachment");chip.append(el("span","","▤ "+file.name));const remove=el("button","","×");remove.type="button";remove.setAttribute("aria-label",file.name+" 첨부 취소");remove.onclick=()=>{state.pending=state.pending.filter(x=>x.id!==file.id);pending();};chip.append(remove);container.append(chip);}controls();}
@@ -176,16 +224,25 @@ function render(data){
       }
       article.append(body);
       if(m.files?.length){const files=el("div","message-files");for(const f of m.files)files.append(el("span","file-tag","▤ "+f.name));article.append(files);}
+      let apply=null;
       if(m.role==="assistant"){
         const actions=el("div","message-actions"),copy=el("button","","복사"),revise=el("button","","수정 요청");
         copy.onclick=async()=>{try{await navigator.clipboard.writeText(view.text);copy.textContent="복사됨";setTimeout(()=>copy.textContent="복사",1300);}catch(e){error("텍스트를 선택한 뒤 Ctrl+C로 복사하세요.");}};
-        revise.onclick=()=>{$("mode").value=m.mode;$("prompt").focus();controls();};actions.append(copy,revise);article.append(actions);
+        revise.onclick=()=>{$("prompt").focus();controls();};actions.append(copy,revise);
+        if(m.mode==="REVIEW"){apply=el("button","","지적 반영 요청");apply.type="button";apply.title="이 검수 지적을 반영해 고쳐 달라는 요청을 입력창에 채웁니다(보내기 전에 고칠 수 있음)";apply.onclick=()=>{$("prompt").value="위 검수 지적을 반영해서 청구항을 고쳐 줘.";resize();controls();$("prompt").focus();};actions.append(apply);}
+        article.append(actions);
       }
-      $("messages").append(article);view={article,body,logs,pre,summary,routeLabel,full,fullBody,text:null,status:null};state.nodes.set(m.id,view);
+      // 자유 작업: 이 메시지의 【청구항 N】 문언에 고른 게이트 역할 하나만 실행한다.
+      const reviewBar=el("div","review-bar");reviewBar.hidden=true;reviewBar.append(el("span","review-title","검수 실행"));
+      for(const [role,label,title] of REVIEW_ROLES){const b=el("button","",label);b.type="button";b.title=title;b.onclick=()=>runReview(m.id,role);reviewBar.append(b);}
+      article.append(reviewBar);
+      $("messages").append(article);view={article,body,logs,pre,summary,routeLabel,full,fullBody,reviewBar,apply,text:null,status:null};state.nodes.set(m.id,view);
     }
     if(view.full)view.full.hidden=!(m.pipeline_run_id&&m.status&&m.status!=="running");
-    if(view.routeLabel){view.routeLabel.textContent=m.execution_mode?"자동 분류 · "+(routeNames[m.execution_mode]||m.execution_mode):m.mode==="AUTHORING_DRAFT"?"청구항 작성·수정":"";view.routeLabel.title=m.route_reason||"";}
-    if(view.text!==m.text||view.status!==m.status){if(m.role==="user")view.body.textContent=m.text;else if(m.text)markdown(view.body,m.text);else view.body.replaceChildren(el("span","pending",m.mode==="CHAT"?"답변을 작성하고 있어요…":"에이전트가 자료를 검토하고 있어요…"));view.text=m.text;}
+    view.reviewBar.hidden=!(freeMode()&&m.status!=="running"&&m.mode!=="REVIEW"&&CLAIM_HEAD.test(m.text||""));
+    if(view.apply)view.apply.hidden=!(freeMode()&&m.status&&m.status!=="running"&&m.status!=="error");
+    if(view.routeLabel){view.routeLabel.textContent=m.mode==="FREE"?"자유 작업 · 미검수 초안":m.mode==="REVIEW"?"선택 검수 · "+(REVIEW_LABEL[m.review?.role]||"")+" · LOCK 없음":m.execution_mode?"자동 분류 · "+(routeNames[m.execution_mode]||m.execution_mode):"";view.routeLabel.title=m.route_reason||"";}
+    if(view.text!==m.text||view.status!==m.status){if(m.role==="user")view.body.textContent=m.text;else if(m.text)markdown(view.body,m.text);else view.body.replaceChildren(el("span","pending",m.mode==="FREE"?"답변을 준비하고 있어요…":m.mode==="REVIEW"?"검수 역할을 실행하고 있어요…":"요청을 분류하고 답변을 준비하고 있어요…"));view.text=m.text;}
     if(view.logs){
       if(m.status==="running"){view.pre.textContent=state.log.text||"연결 중…";view.summary.textContent="작업 중 · 실시간 로그";if(view.status!=="running")view.logs.open=true;}
       else {view.summary.textContent=(m.status==="error"?"오류 확인 · ":m.status==="review"?"검토 필요 · ":"")+"작업 로그 펼치기";if(view.status==="running"){view.logs.open=false;view.pre.textContent="";}}
@@ -215,7 +272,7 @@ async function list(){
   for(const p of data.projects){const b=el("button",p.id===state.project?"active":"");b.append(el("span","","▣ "+p.name),el("span","count",String(p.sessions)));b.title=p.name+" · 대화 "+p.sessions+"개 · 파일 "+p.files+"개";b.onclick=()=>openProject(p.id).catch(e=>error(e.message));projects.append(b);}
   const sessions=$("sessions");sessions.replaceChildren();
   const visible=data.sessions.filter(s=>!state.project||s.project_id===state.project);
-  for(const s of visible){const row=el("div","session-row"+(s.id===state.id&&state.view==="chat"?" active":""));const b=el("button","session-open");b.append(document.createTextNode(s.title));if(!state.project&&s.project_id&&names.has(s.project_id))b.append(el("span","tag",names.get(s.project_id)));b.onclick=()=>open(s.id).catch(e=>error(e.message));const del=el("button","session-delete","×");del.title="대화 삭제";del.setAttribute("aria-label",s.title+" 삭제");del.onclick=()=>deleteSession(s.id,s.title).catch(e=>error(e.message));row.append(b,del);sessions.append(row);}
+  for(const s of visible){const row=el("div","session-row"+(s.id===state.id&&state.view==="chat"?" active":""));const b=el("button","session-open");b.append(document.createTextNode(s.title));if(s.work_mode==="free")b.append(el("span","tag tag-free","자유"));if(!state.project&&s.project_id&&names.has(s.project_id))b.append(el("span","tag",names.get(s.project_id)));b.onclick=()=>open(s.id).catch(e=>error(e.message));const del=el("button","session-delete","×");del.title="대화 삭제";del.setAttribute("aria-label",s.title+" 삭제");del.onclick=()=>deleteSession(s.id,s.title).catch(e=>error(e.message));row.append(b,del);sessions.append(row);}
   if(!visible.length)sessions.append(el("p","side-empty",state.project?"아직 대화가 없습니다.":"대화가 없습니다."));
   $("new-chat").textContent=state.project&&names.has(state.project)?"＋ 새 대화 · "+names.get(state.project):"＋ 새 대화";
   return data.sessions;
@@ -223,11 +280,11 @@ async function list(){
 function showChat(){state.view="chat";$("project-panel").hidden=true;$("improve-panel").hidden=true;$("conversation").hidden=false;document.querySelector("main footer").hidden=false;}
 async function open(id){
   if(state.busy||state.uploading)return;
-  if(state.id)drafts.set(state.id,{text:$("prompt").value,files:state.pending,mode:$("mode").value});
+  if(state.id)drafts.set(state.id,{text:$("prompt").value,files:state.pending});
   const version=++state.generation;state.log={cursor:null, text:""};const data=await fetchSession(id,false);if(version!==state.generation)return;
+  if(state.id!==id)resetTarget();
   state.id=id;state.nodes.clear();$("messages").replaceChildren();state.pending=drafts.get(id)?.files||[];
   $("prompt").value=drafts.get(id)?.text||localStorage.getItem("draft-"+id)||"";
-  $("mode").value=drafts.get(id)?.mode||data.messages.filter(m=>m.role==="user").at(-1)?.mode||"CHAT";
   state.project=data.project?data.project.id:null;if(state.project)localStorage.setItem("claim-project",state.project);else localStorage.removeItem("claim-project");
   showChat();localStorage.setItem("claim-session",id);document.body.classList.remove("sidebar-open");error("");render(data);pending();resize();await list();$("conversation").scrollTop=$("conversation").scrollHeight;$("prompt").focus();
 }
@@ -241,7 +298,9 @@ async function deleteSession(id,title){
   const sessions=await list();const next=sessions.find(s=>!state.project||s.project_id===state.project);
   if(next)await open(next.id);else await create();
 }
-async function create(projectId){if(state.busy||state.uploading)return;const data=await api("/api/new",{project_id:projectId===undefined?state.project:projectId});await open(data.id);}
+// 새 대화는 마지막으로 고른 작업 방식(게이트 자동 / 자유 작업)으로 시작한다.
+function lastWorkMode(){try{return localStorage.getItem("claim-work-mode")==="free"?"free":"gated";}catch(e){return "gated";}}
+async function create(projectId){if(state.busy||state.uploading)return;const data=await api("/api/new",{project_id:projectId===undefined?state.project:projectId,work_mode:lastWorkMode()});await open(data.id);}
 async function refresh(){const id=state.id,version=state.generation;if(!id)return;const data=await fetchSession(id,true);if(id===state.id&&version===state.generation){const wasRunning=state.data?.running;render(data);if(wasRunning&&!data.running)await list();}}
 async function upload(files){
   if(state.view==="project")return projectUpload(files);
@@ -250,9 +309,11 @@ async function upload(files){
 }
 async function send(event){
   event.preventDefault();if(state.composing||state.busy||state.uploading||state.data?.running||!$("prompt").value.trim())return;
+  const free=freeMode(),t=claimTarget();if(!free&&!t.ok){error(t.error);return;}
   state.busy=true;controls();error("");const id=state.id,text=$("prompt").value;
-  const t=claimTarget();if(!t.ok){error(t.error);return;}
-  try{await api("/api/send",{id,text,mode:$("mode").value,files:state.pending.map(f=>f.id),target_mode:t.target_mode,target_claim:t.target_claim,target_segments:t.target_segments,dependent:t.dependent,target:t.target});$("prompt").value="";localStorage.removeItem("draft-"+id);state.pending=[];drafts.delete(id);pending();resize();await refresh();restartPoll();await list();$("conversation").scrollTop=$("conversation").scrollHeight;}
+  // 자유 작업에는 작성 대상·선행기술 검색 옵션이 없다(일반 에이전트가 요청 문장대로 답한다).
+  const body=free?{id,text,files:state.pending.map(f=>f.id)}:{id,text,files:state.pending.map(f=>f.id),target_mode:t.target_mode,target_claim:t.target_claim,target_segments:t.target_segments,dependent:t.dependent,target:t.target,prior_search:$("prior-search").checked};
+  try{await api("/api/send",body);$("prompt").value="";localStorage.removeItem("draft-"+id);state.pending=[];drafts.delete(id);pending();resize();await refresh();restartPoll();await list();$("conversation").scrollTop=$("conversation").scrollHeight;}
   catch(e){error(e.message);}finally{state.busy=false;controls();$("prompt").focus();}
 }
 $("composer").onsubmit=send;
@@ -268,7 +329,7 @@ document.addEventListener("dragleave",()=>{if(--drag<=0){drag=0;$("drop-overlay"
 document.addEventListener("drop",event=>{drag=0;$("drop-overlay").hidden=true;if(event.dataTransfer.files.length){event.preventDefault();upload([...event.dataTransfer.files]);}});
 $("new-chat").onclick=()=>create().catch(e=>error(e.message));$("menu").onclick=()=>document.body.classList.toggle("sidebar-open");
 $("new-project").onclick=()=>createProject().catch(e=>error(e.message));
-$("mode").onchange=controls;$("stop").onclick=async()=>{try{await api("/api/stop",{id:state.id});await refresh();}catch(e){error(e.message);}};
+$("stop").onclick=async()=>{try{await api("/api/stop",{id:state.id});await refresh();}catch(e){error(e.message);}};
 $("shutdown").onclick=async()=>{if(state.data?.running&&!confirm("진행 중인 응답을 중지하고 프로그램을 종료할까요?"))return;try{await api("/api/shutdown",{});stopPolling();$("composer").hidden=true;error("프로그램을 종료했습니다. 다시 이용하려면 바탕화면 실행기를 더블클릭하세요.");}catch(e){error(e.message);}};
 for(const button of document.querySelectorAll("[data-prompt]"))button.onclick=()=>{$("prompt").value=button.dataset.prompt;resize();controls();$("prompt").focus();};
 let timer=null,polling=true;
@@ -326,10 +387,9 @@ $("project-attach").onclick=()=>$("project-file-picker").click();$("project-file
 $("project-delete").onclick=async()=>{const p=state.projectData;if(!p)return;if(!confirm(`"${p.name}" 프로젝트와 저장된 지침·소스 파일을 삭제할까요? 대화 ${p.sessions.length}개는 남고 프로젝트 연결만 해제됩니다.`))return;
   try{await api("/api/project/delete",{id:p.id});state.project=null;localStorage.removeItem("claim-project");const sessions=await list();if(sessions.length)await open(sessions[0].id);else await create(null);}catch(e){error(e.message);}};
 
-// ---- 작업 상태 패널: 단계 스텝퍼 · 게이트 표 · 중지 사유 · 재개 · 내보내기 · 리비전 대조
+// ---- 작업 상태 패널: 단계 스텝퍼 · 게이트 표 · 중지 사유 · 내보내기 · 리비전 대조 (수정·결정은 입력창으로)
 const STAGES_ROOT=["ARCHITECT","DRAFT","STYLE","SUCCESS","SYNTAX","OA","BLIND","PICTURE","LOCK"],STAGES_DEP=["DEP_ARCHITECT","DEP_DRAFT","DEP_STYLE","DEP_SUCCESS","DEP_SYNTAX","DEP_OA","DEP_RECON","DEP_LOCK"];
 const STAGE_LABEL={ARCHITECT:"설계",DRAFT:"의미 초안",STYLE:"문체",SUCCESS:"성공조건",SYNTAX:"통사",OA:"OA",BLIND:"블라인드",PICTURE:"기준 비교",LOCK:"독립항 LOCK",DEP_ARCHITECT:"종속 설계",DEP_DRAFT:"종속 초안",DEP_STYLE:"종속 문체",DEP_SUCCESS:"종속 성공조건",DEP_SYNTAX:"종속 통사",DEP_OA:"종속 OA",DEP_RECON:"종속 역구성",DEP_LOCK:"종속 LOCK"};
-const KIND_LABEL={none:"같은 단계 재실행",accept_unverified:"미검증 수용(명세서·선행기술 부재만)",style:"스타일만 수정 (r+1)",meaning:"의미 수정 (r+1)",redesign:"재설계 (d+1)",restart:"처음부터"};
 let runKey="";
 function renderRun(data){
   const panel=$("run-panel"),run=data.run;
@@ -346,32 +406,20 @@ function renderRun(data){
     li.title=rec?`${rec.role}: ${rec.status} ${Object.entries(rec.gates||{}).map(([k,v])=>k+"="+v).join(", ")}`:"";steps.append(li);}
   const halt=$("run-halt");halt.replaceChildren();
   if(run.halt){halt.hidden=false;halt.append(el("strong","",`${run.halt.kind} @ ${run.halt.stage} (${run.halt.role||""})`),document.createTextNode("\n"+(run.halt.message||"")));
-    if(run.halt.open_issues&&run.halt.open_issues.length){const ul=el("ul");for(const o of run.halt.open_issues)ul.append(el("li","",`[${o.kind||""}] ${o.code||""} ${o.text||""}`));halt.append(ul);}}
+    if(run.halt.open_issues&&run.halt.open_issues.length){const ul=el("ul");for(const o of run.halt.open_issues)ul.append(el("li","",`[${o.kind||""}] ${o.code||""} ${o.text||""}`));halt.append(ul);}
+    halt.append(el("p","run-chat-hint","이 작업은 결정을 기다립니다. 결정이나 수정할 내용을 입력창에 보내면 같은 작업이 이어집니다. 명세서·선행기술이 없어 남은 미검증을 그대로 받아들이려면 '미검증 수용'이라고 보내세요."));}
   else halt.hidden=true;
   const table=$("run-gate-table");table.replaceChildren();
   const head=el("tr");for(const h of ["단계","역할","상태","게이트","비고"]){head.append(el("th","",h));}table.append(head);
   for(const r of run.stages||[]){const tr=el("tr");tr.className=r.superseded||r.stale?"superseded":"";for(const v of [r.stage,r.role,r.status,Object.entries(r.gates||{}).map(([k,v])=>k+": "+v).join(", "),(r.superseded?"superseded ":"")+(r.stale?"STALE":"")])tr.append(el("td","",v||""));table.append(tr);}
   const base=`/api/export?id=${encodeURIComponent(data.id)}`;
   $("export-docx").href=base+"&format=docx";$("export-md").href=base+"&format=md";$("export-evidence").href=base+"&format=docx&evidence=1";
-  const kinds=run.halt?["none","style","meaning","redesign","accept_unverified"]:["style","meaning","redesign"];
-  const select=$("resume-kind");const current=select.value;select.replaceChildren();
-  for(const k of kinds){const o=el("option","",KIND_LABEL[k]);o.value=k;select.append(o);}
-  if(kinds.includes(current))select.value=current;
-  $("resume-scope").hidden=!(run.dependent&&(run.dependent.draft_set_lock||run.dependent.final_set_lock));
-  $("resume-files").textContent=state.pending.length?`첨부 ${state.pending.length}개 → 재설계로 실행`:"";
+  const pc=$("prior-candidates");pc.hidden=!run.prior_art;
+  if(run.prior_art)pc.textContent=`선행기술 후보 (선별 ${run.prior_art.screening||"-"}, 기준일 ${run.prior_art.base_date}) — 대비할 문헌의 skey를 쉼표로, 기준일을 YYYY-MM-DD로 입력창에 적어 보내세요 (고르지 않으려면 none)\n`+run.prior_art.candidates.map(c=>`${c.sealed?"●":"○"} ${c.skey}  ${c.number}  ${c.title}  ${c.published||"-"}  Jev ${c.p_screen==null?"-":c.p_screen.toFixed(2)}  ${c.relevance||""}`).join("\n");
   const key=data.id+"|"+(run.outcome||"")+"|"+(run.revision||"")+"|"+(run.dependent&&run.dependent.draft_set_lock||"");
   if(key!==runKey){runKey=key;$("run-diff").open=false;$("run-diff-body").textContent="";}
 }
 $("run-diff").ontoggle=async()=>{if($("run-diff").open&&!$("run-diff-body").textContent){try{const r=await api(`/api/diff?id=${encodeURIComponent(state.id)}`);$("run-diff-body").textContent=r.text;}catch(e){$("run-diff-body").textContent=e.message;}}};
-$("resume-form").onsubmit=async event=>{
-  event.preventDefault();if(state.busy||state.data?.running)return;
-  const kind=$("resume-kind").value,text=$("resume-text").value.trim();
-  if(kind!=="accept_unverified"&&!text){error("결정 내용을 입력하세요.");return;}
-  state.busy=true;controls();error("");
-  try{await api("/api/resume",{id:state.id,kind:state.pending.length&&kind!=="none"&&kind!=="accept_unverified"?"restart":kind,text,files:state.pending.map(f=>f.id),scope:$("resume-scope").hidden?"":$("resume-scope").value});
-    $("resume-text").value="";state.pending=[];pending();await refresh();restartPoll();$("conversation").scrollTop=$("conversation").scrollHeight;}
-  catch(e){error(e.message);}finally{state.busy=false;controls();}
-};
 
 // ---- 개선 / Approval Inbox (ACE): 자동 제안은 전부 승인 대기. 승인해도 회귀 평가 전에는 주입되지 않는다.
 const GATE_CLASS={PENDING:"gate-pending",CANDIDATE_APPROVED:"gate-wait",ACTIVE_APPROVED:"gate-active",APPROVED_BUT_FAILED_EVAL:"gate-failed",HELD:"gate-held"};

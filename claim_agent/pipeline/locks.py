@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from .. import EXECUTION_PROFILE, PROTOCOL_VERSION
+from ..models.prior_art import LABEL_NONE
 from ..models.state import RunState
 
 PROVISIONAL_LABEL = "명세서 뒷받침·실시가능성 미검증 잠정안"
@@ -57,6 +58,7 @@ def build_claim_lock(state: RunState, lock_id: str, final: bool, root_text: str,
         "independence": "FRESH_CALL_NO_PROJECT_CONTEXT",
         "reference_compare_record_id": picture,
         "reference_compare_decision": (state.record(picture).status if state.record(picture) else "N/A"),
+        **_prior_art_fields(state, rec.get("preexam_judge")),
         "assurance_note": "Python 오케스트레이터가 별도 Gemini 호출로 각 역할을 실행; blind는 소스·설계 정보 없는 fresh 호출",
         "unverified": _unverified(state, oa),
         "status_label": FINAL_LABEL if final else PROVISIONAL_LABEL,
@@ -68,8 +70,24 @@ def _unverified(state: RunState, oa_id: str | None) -> list[str]:
     out = []
     if not state.spec_present:
         out.append("OA_FINAL_GATE: UNVERIFIED — SPEC_NOT_PROVIDED")
-    if not state.prior_art_present:
+    label = state.prior_art_label()
+    if label == LABEL_NONE:
         out.append("신규성·진보성: UNVERIFIED — PRIOR_ART_NOT_PROVIDED")
+    elif "SEARCHED" in label:
+        out.append("신규성·진보성: 검색 집합 기준 결과뿐 — 전수 조사가 아니며 등록 가능성을 뜻하지 않는다")
+    return out
+
+
+def _prior_art_fields(state: RunState, preexam_id: str | None) -> dict[str, Any]:
+    """PRIOR_ART_SET label, sealed set and pre-exam decision (설계 6④)."""
+    pa = state.prior_art
+    pre = state.record(preexam_id)
+    out: dict[str, Any] = {"PRIOR_ART_SET": state.prior_art_label()}
+    if pa is not None and pa.set_id and not pa.skipped:
+        out.update({"prior_art_set_id": pa.set_id, "prior_art_set_record_id": pa.set_record_id, "prior_art_base_date": f"{pa.base_date} ({pa.base_date_source})"})
+    if pre is not None:
+        out.update({"preexam_record_id": preexam_id, "preexam_novelty_gate": pre.gates.get("PREEXAM_NOVELTY_GATE", "N/A"),
+                    "inventive_risk": pre.gates.get("INVENTIVE_RISK", "N/A")})
     return out
 
 
@@ -144,7 +162,7 @@ def build_dependent_set_lock(state: RunState, lock_id: str, final: bool, root_te
         "dependent_claim_set_text": set_text,
         "set_text_sha256": cur.exact_sha256,
         "invention_sources": material_names,
-        "PRIOR_ART_SET": "제공됨" if state.prior_art_present else "NONE",
+        **_prior_art_fields(state, state.candidate.preexam_record_id),
         "dependent_design_record_id": d.design_record_id,
         "dependent_design_gate": (design.gates.get("DEPENDENT_DESIGN_GATE") if design else "N/A"),
         "dependent_meaning_draft_id": rec.get("dependent_meaning_draft"),

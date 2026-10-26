@@ -1,0 +1,17 @@
+{
+  "projectName": "청구항",
+  "projectUrl": "https://chatgpt.com/g/g-p-6ad9b537ec4c8191a5e3f66ca12051e5/project",
+  "contextVersion": "CA-PORTABLE-2026-10-22-v1",
+  "previousInstructions": "",
+  "savedInstructionsFile": "05_ChatGPT_프로젝트지침.md",
+  "savedInstructionsCharacters": 4002,
+  "exactLocalFileMatch": true,
+  "sourcesVisibleAfterUpload": [
+    "01_통합컨텍스트.md",
+    "02_invention-problem-finder_전용컨텍스트.md",
+    "03_기준전문_선택첨부.md"
+  ],
+  "problemFinderPreviewReadable": true,
+  "modelBehaviorTest": "NOT_RUN",
+  "proofScreenshot": "청구항_프로젝트_적용완료.jpg"
+}

@@ -175,6 +175,17 @@ def test_dependent_no_tsc_halts_without_padding(rt, request_dep):
     assert not [c for c in engine.provider.calls if c.role == "claim-drafter" and c.scope == "DEPENDENT_SET"]
 
 
+def test_dependent_main_tree_without_enforcement_value_halts(rt, request_dep):
+    script = R.happy_script(dependent=True)
+    script["dependent-claim-strategy-architect"] = [R.dep_architect(enforcement="BLOCK")]
+    engine = _engine(rt, script)
+    state = engine.run(engine.start(request_dep, "run-test-10b"))
+    assert state.outcome == "HALTED_REVIEW" and state.halt.stage == "DEP_ARCHITECT"
+    assert state.halt.message.startswith("MAIN_TREE_GATE_GAP")
+    assert "ENFORCEMENT_VALUE_GATE" in state.halt.message and "enforcement_scenario" in state.halt.message
+    assert not [c for c in engine.provider.calls if c.role == "claim-drafter" and c.scope == "DEPENDENT_SET"]
+
+
 def test_oa_merged_verdict_is_rejected(rt, request_indep):
     script = R.happy_script(dependent=False)
     script["oa-strategy-reviewer"] = [R.oa(merged=True), R.oa(merged=True)]
@@ -291,3 +302,18 @@ def test_usage_note_says_when_the_cost_cannot_be_computed():
     assert "API 비용 $0.0123 이상 (호출 2회 중 1회 단가 없음)" in usage_note({**priced, "unpriced_calls": 1}, 59)
     assert "작업 소요 59초" in usage_note(priced, 59) and "산출 불가" in usage_note({**priced, "unpriced_calls": 2}, 125)
     assert usage_note({}, None) == "※ 작업 소요 미기록 · API 호출 없음 (토큰 0 · 비용 $0)"
+
+
+def test_style_packets_carry_the_drafters_text_even_when_its_report_only_points_at_it(rt, request_dep):
+    # The scripted drafter, like a live one in web-fe8a…, puts the wording only in exact_claim_text/claims[]:
+    # the adjuster must get that text from the engine, or it halts with MEANING_DRAFT_TEXT_MISSING.
+    from claim_agent.pipeline.packets import DRAFT_TEXT_TITLE
+
+    provider = ScriptedProvider(R.happy_script())
+    engine = rt.engine(provider)
+    state = engine.run(engine.start(request_dep, "style-gets-draft-text"))
+    assert state.outcome == "DRAFT_CLAIM_LOCK+DRAFT_DEPENDENT_SET_LOCK"
+    styles = {c.scope: c.packet_text for c in provider.calls if c.role == "claim-style-adjuster" and c.phase == "main"}
+    head = DRAFT_TEXT_TITLE.split("(")[0]
+    assert head in styles["INDEPENDENT"] and R.ROOT_CLAIM.replace("홀더 본체", "[C3: 홀더 본체]") in styles["INDEPENDENT"]
+    assert head in styles["DEPENDENT_SET"] and R.DEP_SET_TEXT in styles["DEPENDENT_SET"]
