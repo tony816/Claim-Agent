@@ -154,13 +154,14 @@ def drafter_independent(state: RunState, store, bundle: MaterialBundle, ids: Ide
 
 # The drafter's text as the engine stored it from `exact_claim_text`/`claims[]`. A report body may only point at that
 # field ("exact_claim_text 참조"), and then the adjuster had no wording to style (MEANING_DRAFT_TEXT_MISSING).
+STYLE_TARGET_TITLE = "문체 기준 (엔진이 정함 — 기존 세트에 붙이면 그 세트, 새로 쓰면 코퍼스)"
 DRAFT_TEXT_TITLE = "PRE_STYLE 의미 초안 전문 ({id} — drafter가 exact_claim_text로 인계한 문언, 보고서 본문과 다르면 이 전문이 기준)"
 
 
 def style_independent(
     state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, design_record_id: str,
     meaning_draft_id: str | None, mode: StyleChangeMode, prior_text: str | None, prior_style_record_id: str | None, feedback: str | None,
-    draft_text: str | None = None,
+    draft_text: str | None = None, style_target: str | None = None,
 ) -> Packet:
     mats, imgs = _materials(bundle, ("invention", "drawing", "spec"))
     txt = _user_lock(bundle) + mats
@@ -177,6 +178,7 @@ def style_independent(
         if mode == StyleChangeMode.DRAFTER_REVISION and prior_text:
             txt += _section("직전 확정 revision 청구항 전문", prior_text)
             txt += _section("이번 의미 수정 목표", feedback or "")
+    txt += _section(STYLE_TARGET_TITLE, style_target) if style_target else ""
     txt += _section("조건부 보조 소스", "`search_style_corpus`/`open_routing_index` 도구가 제공된 경우에만 07 §3 조건에서 사용하고, 사용하지 않았으면 `조건부 보조 소스: NOT_ACTIVATED`로 기록한다.")
     txt += _output_contract("`exact_claim_text`에 스타일 적용 후 최종 청구항 전문을 넣고, `finalized_status`, `TERM_EXPRESSION_GATE`, `CLAIM_STYLE_GATE`, `NON_PATENT_TECHNICAL_READER_GATE`, `GEOMETRIC_OBJECT_GATE`, `FUNCTION_DEDUCTION_GATE`를 채운다. " + _GATE_DEDUCTION)
     return Packet(txt, imgs)
@@ -262,15 +264,16 @@ def _number_contract(state: RunState, target_nos: set[int] | None) -> str:
     base = state.baseline_set
     if not target_nos and base and base.numbered_by_design:
         last = max((c.claim_no for c in base.claims), default=0)
-        return (f" 요청에 항 번호가 없다. 기존 세트는 제{last}항에서 끝나므로 `TECHNICAL_SOLUTION_CANDIDATE`의 `planned_claim_no`는 제{last + 1}항부터 "
-                "빈 번호 없이 이어 매기고, 후보 수는 기술기여가 확인된 만큼만 둔다(항 수를 채우려고 후보를 넣지 않는다). `parent_claim_no`는 기존 세트의 항이나 "
+        return (f" 요청에 항 번호가 없다. 기존 세트는 제{last}항에서 끝나므로 주된 트리(`TECHNICAL_SOLUTION_CANDIDATE`)와 보조 축(`FALLBACK_ONLY`, 08 제4절)의 "
+                f"`planned_claim_no`는 제{last + 1}항부터 빈 번호 없이 주된 트리 → 보조 축 순으로 이어 매긴다. 주된 트리는 기술기여가 확인된 만큼만, 보조 축은 "
+                "원자료 근거와 청구 가능성이 있는 특징만 둔다(항 수를 채우려고 후보를 넣지 않는다). `parent_claim_no`는 기존 세트의 항이나 "
                 "그보다 앞의 새 항 중에서 필요한 선행 용어를 가진 가장 넓은 항으로 정하고, 기존 항의 번호·문언·인용관계는 바꾸지 않으며 부모항을 흡수·병합하지 않는다."
                 + _excluded_note(state))
     if not target_nos:
         return ""
     nos = ", ".join(map(str, sorted(target_nos)))
-    text = (f" 요청된 종속항 번호 집합은 [{nos}]이다. `TECHNICAL_SOLUTION_CANDIDATE`인 `candidates[].planned_claim_no` 집합은 이 집합과 정확히 "
-            "일치해야 하며 임의 발번·범위 확대·누락은 계약 위반이다. 해당 번호로 낼 기술기여 후보가 없으면 후보를 만들지 말고 `status: REVIEW`로 사유를 보고한다.")
+    text = (f" 요청된 종속항 번호 집합은 [{nos}]이다. 주된 트리와 보조 축을 합친 `candidates[].planned_claim_no` 집합은 이 집합과 정확히 "
+            "일치해야 하며(주된 트리 후보로 먼저 채운다) 임의 발번·범위 확대·누락은 계약 위반이다. 해당 번호로 낼 기술기여 후보가 없으면 후보를 만들지 말고 `status: REVIEW`로 사유를 보고한다.")
     if state.baseline_set:
         parents = {c.claim_no: c.parent_nos for c in state.baseline_set.claims}
         fixed = "; ".join(f"제{n}항의 부모항 제{', '.join(map(str, parents[n]))}항" for n in sorted(target_nos) if n in parents)
@@ -324,7 +327,7 @@ def dep_architect(state: RunState, store, bundle: MaterialBundle, ids: Identifie
         txt += _section("번호 계약 위반 복구 (1회)", f"직전 설계가 번호 계약을 어겨 중지되었다: {scope_repair}\n"
                         "예정 항 번호와 부모항을 아래 출력 계약의 번호 집합·인용관계와 정확히 일치시켜 다시 설계한다.")
     txt += _section(_root_label(state)[1], root_text)
-    txt += _output_contract("`gates.DEPENDENT_DESIGN_GATE`, `gates.INVENTIVE_STEP`, `candidates[]`(DC-NN별 분류·네 후보 게이트(DEPENDENT_SOURCE·CAUSAL_CONTRIBUTION·CLAIMABILITY·ENFORCEMENT_VALUE)·`enforcement_scenario`·`enforcement_failed_tests`·`business_fit`·`business_fit_basis`·예정 항·부모항과 10_심사이력_경험기준의 `exam_pattern`·`design_change_risk`·`exam_pattern_basis`)를 채운다. TECHNICAL_SOLUTION_CANDIDATE는 네 후보 게이트가 모두 PASS이고 `enforcement_scenario`가 비어 있지 않아야 한다."
+    txt += _output_contract("`gates.DEPENDENT_DESIGN_GATE`, `gates.INVENTIVE_STEP`, `candidates[]`(DC-NN별 분류·네 후보 게이트(DEPENDENT_SOURCE·CAUSAL_CONTRIBUTION·CLAIMABILITY·ENFORCEMENT_VALUE)·`enforcement_scenario`·`enforcement_failed_tests`·`business_fit`·`business_fit_basis`·예정 항·부모항과 10_심사이력_경험기준의 `exam_pattern`·`design_change_risk`·`exam_pattern_basis`)를 채운다. TECHNICAL_SOLUTION_CANDIDATE는 네 후보 게이트가 모두 PASS이고 `enforcement_scenario`가 비어 있지 않아야 한다. 보조 축 FALLBACK_ONLY는 `planned_claim_no`를 갖고 DEPENDENT_SOURCE·CLAIMABILITY가 PASS여야 한다."
                             + _number_contract(state, target_nos))
     return Packet(txt, imgs)
 
@@ -342,7 +345,7 @@ def drafter_dependent(state: RunState, store, bundle: MaterialBundle, ids: Ident
 
 
 def style_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_text: str, dep_design_record_id: str, dep_meaning_draft_id: str | None, mode: StyleChangeMode, prior_set_text: str | None, prior_style_record_id: str | None, feedback: str | None,
-                    draft_text: str | None = None) -> Packet:
+                    draft_text: str | None = None, style_target: str | None = None) -> Packet:
     txt, imgs = _dependent_stable(state, store, bundle, root_lock_id, None, ("invention", "drawing", "spec"))
     txt += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE: LOCKED 전문")
     txt += _hdr(state, ids, record_id, {"style_scope": "DEPENDENT_SET", "style_change_mode": mode.value, "dependent_style_record_id": record_id})
@@ -358,6 +361,7 @@ def style_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identif
         if mode == StyleChangeMode.DRAFTER_REVISION and prior_set_text:
             txt += _section("직전 확정 dependent_revision 세트 전문", prior_set_text)
             txt += _section("이번 의미 수정 목표", feedback or "")
+    txt += _section(STYLE_TARGET_TITLE, style_target) if style_target else ""
     txt += _output_contract("`claims[]`에 최종 종속항 세트(항별 전문)를, `exact_claim_text`에 세트 전문을, `per_claim_gates[]`에 목표항별 독자·기하 판정을 넣는다. " + _GATE_DEDUCTION + _edit_contract(state))
     return Packet(txt, imgs)
 
@@ -490,9 +494,11 @@ def review_only(state: RunState, bundle: MaterialBundle, ids: Identifiers, recor
 def review_style(state: RunState, bundle: MaterialBundle, ids: Identifiers, record_id: str, scope: Scope, claim_text: str, request_text: str) -> Packet:
     """REVIEW_ONLY style: the given wording stands in for the meaning draft, and the adjuster returns it restyled.
 
-    Like the gated style stage it gets the text materials only, no drawings.
+    Unlike the gated style stage it gets the drawings, as REVIEW_ONLY syntax and OA do: there is no design contract whose
+    term sources and geometry contract stand in for them. Without them every term that only a drawing labels read as
+    unsourced while the packet said the drawings were attached (run web-8b0ef48d: 단열재·PEEK·써멀 퓨즈 all REVIEW).
     """
-    mats, _ = _materials(bundle, ("invention", "drawing", "spec"))
+    mats, imgs = _materials(bundle, ("invention", "drawing", "spec"))
     txt = _user_lock(bundle) + mats
     txt += _hdr(state, ids, record_id, {"style_scope": scope.value, "style_change_mode": "REVIEW_ONLY_INPUT", "design_revision": "N/A", "style_record_id": record_id})
     txt += _section("검토 요청", request_text)
@@ -504,7 +510,7 @@ def review_style(state: RunState, bundle: MaterialBundle, ids: Identifiers, reco
     txt += _section("조건부 보조 소스", "`search_style_corpus`/`open_routing_index` 도구가 제공된 경우에만 07 §3 조건에서 사용하고, 사용하지 않았으면 `조건부 보조 소스: NOT_ACTIVATED`로 기록한다.")
     txt += _output_contract("`exact_claim_text`에 스타일 적용 후 청구항 전문(항 번호·인용관계 그대로, 바꿀 것이 없으면 입력 그대로)을 넣고, `finalized_status`는 NOT_FINALIZED로, "
                             "`TERM_EXPRESSION_GATE`, `CLAIM_STYLE_GATE`, `NON_PATENT_TECHNICAL_READER_GATE`, `GEOMETRIC_OBJECT_GATE`, `FUNCTION_DEDUCTION_GATE`를 채운다. " + _GATE_DEDUCTION)
-    return Packet(txt)
+    return Packet(txt, imgs)
 
 
 # --------------------------------------------------------------------------- prior-art search and pre-exam

@@ -88,6 +88,10 @@ def _live_provider(cfg: AppConfig, kind: str, events=None, api_key: str | None =
         from .provider.openrouter import OpenRouterProvider
 
         return OpenRouterProvider(cfg.provider.openrouter, events)
+    if kind == "runpod":
+        from .provider.runpod import RunPodProvider
+
+        return RunPodProvider(cfg.provider.runpod, events)
     if kind != "gemini":
         raise ValueError(f"unknown provider.kind: {kind}")
     from .provider.files import FileStore

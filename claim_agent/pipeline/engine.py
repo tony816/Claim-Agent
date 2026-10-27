@@ -10,7 +10,7 @@ from typing import Any
 from ..claim_scope import claim_intent, format_target, parse_target
 from ..config import AppConfig
 from ..graph.pipeline import GraphHooks
-from ..models.contracts import COMBINED_REVIEW, combined_contract, contract_for, main_tree_gate_gaps
+from ..models.contracts import COMBINED_REVIEW, combined_contract, contract_for, fallback_gate_gaps, main_tree_gate_gaps, set_candidates
 from ..models.enums import ExecStatus, NextStep, RequestMode, Scope, Status, StyleChangeMode
 from ..models.envelope import OpenIssue, RoleEnvelope, envelope_schema_for
 from ..models.ids import Identifiers, bump_dependent_design_revision, bump_dependent_revision, bump_design_revision, bump_revision, input_revision_id, record_id
@@ -68,6 +68,7 @@ from .corpus_tool import ToolLog, make_tools
 from .handoff import write_handoff
 from .locks import build_baseline_record, build_claim_lock, build_dependent_set_lock
 from .prior_steps import PriorArtSteps, PriorArtTools, stage_is_prior
+from .style_profile import StyleProfile, drift, render_target, target_profile
 from .transitions import LOOP_KEY, Transition, decide
 
 ROLE_BY_STAGE = {
@@ -588,7 +589,7 @@ class PipelineEngine(PriorArtSteps):
                 and env.status in (Status.PASS, Status.PASS_RANGE)):
             # No number asked for: the design's own numbers are the targets, if they go on from the set's end without a gap.
             last = max(base_parents, default=0)
-            planned = sorted(x.planned_claim_no or 0 for x in env.candidates if x.classification.value == "TECHNICAL_SOLUTION_CANDIDATE")
+            planned = sorted(x.planned_claim_no or 0 for x in set_candidates(env))
             if planned != list(range(last + 1, last + 1 + len(planned))):
                 scope_problem = (f"번호 없이 세트 끝에 붙이는 새 항은 제{last + 1}항부터 빈 번호 없이 이어 매겨야 합니다: 설계 예정 항 "
                                  + (", ".join(f"제{n}항" if n else "번호 없음" for n in planned) or "없음"))
@@ -600,14 +601,14 @@ class PipelineEngine(PriorArtSteps):
         if requested and env.status in (Status.PASS, Status.PASS_RANGE):
             actual = None
             if stage == Stage.DEP_ARCHITECT:
-                tsc = [x for x in env.candidates if x.classification.value == "TECHNICAL_SOLUTION_CANDIDATE"]
-                planned = [x.planned_claim_no for x in tsc]
+                written = set_candidates(env)            # main tree and fallback axis
+                planned = [x.planned_claim_no for x in written]
                 actual = set(planned)
                 if len(planned) != len(actual):
                     scope_problem = "종속항 설계 번호가 중복되었습니다."
                 moved = [f"{x.dc_id} 제{x.planned_claim_no}항의 부모 제{x.parent_claim_no}항 (기존 제{', '.join(map(str, base_parents[x.planned_claim_no]))}항)"
-                         for x in tsc if x.planned_claim_no in base_parents and x.parent_claim_no is not None and x.parent_claim_no not in base_parents[x.planned_claim_no]]
-                outside = [f"{x.dc_id} 제{x.planned_claim_no}항의 부모 제{x.parent_claim_no}항" for x in tsc
+                         for x in written if x.planned_claim_no in base_parents and x.parent_claim_no is not None and x.parent_claim_no not in base_parents[x.planned_claim_no]]
+                outside = [f"{x.dc_id} 제{x.planned_claim_no}항의 부모 제{x.parent_claim_no}항" for x in written
                            if state.baseline_set and x.planned_claim_no is not None and x.planned_claim_no not in base_parents
                            and x.parent_claim_no is not None and x.parent_claim_no not in allowed(x.planned_claim_no)]
             elif stage in (Stage.DEP_DRAFT, Stage.DEP_STYLE):
@@ -638,10 +639,11 @@ class PipelineEngine(PriorArtSteps):
             # 조건 4: 근거표 공란 0건. A PASS with UNCONFIRMED evidence rows contradicts itself → REVIEW.
             evidence_problem = f"EVIDENCE_UNCONFIRMED: 근거 미확인 한정 {len(unconfirmed)}건이 PASS 판정과 함께 보고됨: " + "; ".join(unconfirmed[:5])
             issued = False
-        tree_gaps = main_tree_gate_gaps(env) if stage == Stage.DEP_ARCHITECT and env.status == Status.PASS else []
+        tree_gaps = main_tree_gate_gaps(env) + fallback_gate_gaps(env) if stage == Stage.DEP_ARCHITECT and env.status == Status.PASS else []
         if tree_gaps:
-            # 08 §5.6: a LOCKED tree whose main candidates lack a PASS candidate gate or the enforcement scenario contradicts itself.
-            evidence_problem = "MAIN_TREE_GATE_GAP: 주된 트리 후보의 필수 게이트 PASS 또는 권리행사 시나리오가 없음: " + "; ".join(tree_gaps)
+            # 08 §5.6: a LOCKED tree whose main candidates lack a PASS candidate gate or the enforcement scenario, or whose
+            # fallback-axis claims lack a PASS source or claimability gate (08 §4), contradicts itself.
+            evidence_problem = "MAIN_TREE_GATE_GAP: 세트 후보의 필수 게이트 PASS 또는 권리행사 시나리오가 없음: " + "; ".join(tree_gaps)
             unconfirmed = tree_gaps
             issued = False
         if scope_problem:
@@ -907,11 +909,11 @@ class PipelineEngine(PriorArtSteps):
         state.total_loops += 1
         state.stage = Stage.ARCHITECT
 
-    def _apply_return(self, state: RunState, tr: Transition, env: RoleEnvelope, rid: str, dependent: bool) -> None:
+    def _apply_return(self, state: RunState, tr: Transition, env: RoleEnvelope, rid: str, dependent: bool, feedback: str | None = None) -> None:
         key = LOOP_KEY[tr.return_to]  # type: ignore[index]
         counts = state.dependent.loop_counts if dependent and state.dependent else state.candidate.loop_counts
         counts[key] = counts.get(key, 0) + 1
-        fb = self._feedback(env, rid)
+        fb = feedback or self._feedback(env, rid)
         if tr.return_to == NextStep.RETURN_TO_ARCHITECT and state.baseline_set:
             ref = state.records.get(rid)
             raise PipelineHalt(Halt(
@@ -996,8 +998,9 @@ class PipelineEngine(PriorArtSteps):
         if st == Stage.STYLE:
             rid = record_id("style", ids)
             prior_style = self._prior_record(state, "style")
+            profile = self._style_profile(state)
             pk = packets.style_independent(state, self.store, bundle, ids, rid, c.design_record_id or "", cur.records.get("meaning_draft"), cur.style_change_mode, self._prior_text(state), prior_style, cur.change_goal,
-                                          cur.meaning_draft_text)
+                                          cur.meaning_draft_text, render_target(profile, self.sources.get("CORPUS").text))
             env, ref = self._call(state, "claim-style-adjuster", Scope.INDEPENDENT, st, "style", pk, ids, rid, use_tools=True, loop_index=c.loop_counts.get("STYLE_ONLY", 0))
             tr = self._decide(state, env, "claim-style-adjuster", Scope.INDEPENDENT, st, rid, c.loop_counts)
             if tr.kind == "RETURN":
@@ -1006,6 +1009,8 @@ class PipelineEngine(PriorArtSteps):
             text = (env.exact_claim_text or "").strip()
             if not contains_user_lock(text, bundle.user_lock):
                 raise PipelineHalt(Halt(stage=st.value, role="engine", kind="BLOCK", reason_code="USER_LOCK_NOT_PRESERVED", message="USER_LOCK 문언이 최종 문언에 그대로 남아 있지 않다", record_id=rid))
+            if self._style_drift_return(state, env, rid, drift(text, profile, user_lock=bundle.user_lock), dependent=False):
+                return
             cur.exact_text = text
             cur.exact_sha256 = exact_sha256(text)
             cur.records["style"] = rid
@@ -1111,6 +1116,30 @@ class PipelineEngine(PriorArtSteps):
             if kind in rs.records:
                 return rs.records[kind]
         return None
+
+    def _style_profile(self, state: RunState) -> StyleProfile:
+        """The form the style stage writes to: the user's set when the run adds to one, the corpus otherwise."""
+        base = state.baseline_set
+        bodies = [c.body for b in base.claims for c in parse_claim_set(as_claim_set(b.text))] if base else None
+        return target_profile(self.sources.get("CORPUS").text, bodies)
+
+    def _style_drift_return(self, state: RunState, env: RoleEnvelope, rid: str, issues: list[str], dependent: bool) -> bool:
+        """Send a style revision whose form left the target back to the style adjuster as a STYLE_ONLY revision.
+
+        Only line breaks and one comma differ between the forms, so the adjuster can always fix them without moving
+        the scope; past the STYLE_ONLY limit the run stops like any other loop.
+        """
+        if not issues:
+            return False
+        counts = state.dependent.loop_counts if dependent and state.dependent else state.candidate.loop_counts
+        limit = self.cfg.pipeline.max_return_loops.get("STYLE_ONLY", 1)
+        fb = "STYLE_PROFILE_DRIFT — 엔진이 최종 문언의 형식을 문체 기준과 대조한 결과다. 아래 항목만 고치고 다른 문언은 그대로 둔다.\n" + "\n".join(f"- {i}" for i in issues)
+        if counts.get("STYLE_ONLY", 0) >= limit:
+            raise PipelineHalt(Halt(stage=state.stage.value, role="engine", kind="LOOP_LIMIT", reason_code="STYLE_PROFILE_DRIFT",
+                                    message=f"STYLE_ONLY 루프 한도 초과 ({counts.get('STYLE_ONLY', 0)}) — 문체 기준과 다른 형식이 남음:\n" + "\n".join(issues),
+                                    return_to=NextStep.RETURN_TO_STYLE_ADJUSTER.value, record_id=rid))
+        self._apply_return(state, Transition("RETURN", NextStep.RETURN_TO_STYLE_ADJUSTER, None, "STYLE_PROFILE_DRIFT"), env, rid, dependent, fb)
+        return True
 
     def _corpus_fragments(self, style_record_id: str | None) -> str | None:
         if not style_record_id:
@@ -1232,7 +1261,7 @@ class PipelineEngine(PriorArtSteps):
             if tr.kind == "RETURN":
                 self._apply_return(state, tr, env, rid, dependent=True)
                 return
-            planned = sorted(x.planned_claim_no for x in env.candidates if x.classification.value == "TECHNICAL_SOLUTION_CANDIDATE" and x.planned_claim_no)
+            planned = sorted(x.planned_claim_no for x in set_candidates(env) if x.planned_claim_no)
             if by_design and planned:
                 base.edit_targets = planned                      # type: ignore[union-attr]
                 state.request = {**state.request, "dependent_target": format_target(set(planned))}
@@ -1265,8 +1294,9 @@ class PipelineEngine(PriorArtSteps):
 
         if st == Stage.DEP_STYLE:
             rid = record_id("dependent_style", ids)
+            profile = self._style_profile(state)
             pk = packets.style_dependent(state, self.store, bundle, ids, rid, d.root_lock_id, root_text, d.design_record_id or "", cur.records.get("dependent_meaning_draft"), cur.style_change_mode, self._dep_prior_text(state), self._dep_prior_record(state, "dependent_style"), cur.change_goal,
-                                        cur.meaning_draft_text)
+                                        cur.meaning_draft_text, render_target(profile, self.sources.get("CORPUS").text))
             env, ref = self._call(state, "claim-style-adjuster", Scope.DEPENDENT_SET, st, "dependent_style", pk, ids, rid, use_tools=True, loop_index=d.loop_counts.get("STYLE_ONLY", 0))
             tr = self._decide(state, env, "claim-style-adjuster", Scope.DEPENDENT_SET, st, rid, d.loop_counts)
             if tr.kind == "RETURN":
@@ -1292,6 +1322,11 @@ class PipelineEngine(PriorArtSteps):
                 released = set(base.user_lock_released)
             if not user_lock_kept(lock_text, lock, released):
                 raise PipelineHalt(Halt(stage=st.value, role="engine", kind="BLOCK", reason_code="USER_LOCK_NOT_PRESERVED", message="USER_LOCK 문언 미보존", record_id=rid))
+            styled = {cl.claim_no for cl in all_claims if cl.claim_no in set_nos and not cl.is_independent}
+            if state.baseline_set and state.baseline_set.edit_targets:
+                styled &= set(state.baseline_set.edit_targets)   # the set's own claims are the user's wording, not restyled here
+            if self._style_drift_return(state, env, rid, drift(set_text, profile, styled, lock), dependent=True):
+                return
             dc_by_no = {cl.claim_no: cl.dc_id for cl in env.claims}
             cur.exact_text = set_text
             cur.exact_sha256 = exact_sha256(set_text)

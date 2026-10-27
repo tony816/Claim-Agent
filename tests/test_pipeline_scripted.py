@@ -202,6 +202,41 @@ def test_dependent_main_tree_without_enforcement_value_halts(rt, request_dep):
     assert not [c for c in engine.provider.calls if c.role == "claim-drafter" and c.scope == "DEPENDENT_SET"]
 
 
+def _fallback(dc_id: str, claimability: str = "PASS"):
+    """The design keeps one candidate on the fallback axis (08 §4): sourced and claimable, no causal contribution of its own."""
+    def design(spec):
+        env = R.dep_architect()(spec)
+        for c in env["candidates"]:
+            if c["dc_id"] == dc_id:
+                c.update(classification="FALLBACK_ONLY", CAUSAL_CONTRIBUTION_GATE="BLOCK", ENFORCEMENT_VALUE_GATE="BLOCK",
+                         enforcement_scenario=None, CLAIMABILITY_GATE=claimability)
+        return env
+    return design
+
+
+def test_a_numbered_fallback_candidate_is_written_with_the_main_tree(rt, request_dep):
+    """Run web-c90e0c66: the design kept disclosed parts (PEEK cover, metal PCB plate, aligned holes) off the set as
+    FALLBACK_ONLY, and only main-tree numbers counted, so the gated answer had 4 claims where the bare model wrote 9."""
+    script = R.happy_script(dependent=True)
+    script["dependent-claim-strategy-architect"] = [_fallback("DC-03")]
+    engine = _engine(rt, script)
+    state = engine.run(engine.start(request_dep, "run-test-10c"))
+    assert state.outcome == "DRAFT_CLAIM_LOCK+DRAFT_DEPENDENT_SET_LOCK", state.halt
+    assert set(state.dependent.current.targets) == {"2", "3", "4"}
+    design = next(c for c in engine.provider.calls if c.role == "dependent-claim-strategy-architect")
+    assert "보조 축 FALLBACK_ONLY" in design.packet_text and "주된 트리와 보조 축을 합친" in design.packet_text
+
+
+def test_a_fallback_candidate_without_claimability_halts_the_design(rt, request_dep):
+    script = R.happy_script(dependent=True)
+    script["dependent-claim-strategy-architect"] = [_fallback("DC-03", claimability="REVIEW")]
+    engine = _engine(rt, script)
+    state = engine.run(engine.start(request_dep, "run-test-10d"))
+    assert state.outcome == "HALTED_REVIEW" and state.halt.stage == "DEP_ARCHITECT"
+    assert state.halt.message.startswith("MAIN_TREE_GATE_GAP") and "DC-03(FALLBACK_ONLY): CLAIMABILITY_GATE" in state.halt.message
+    assert not [c for c in engine.provider.calls if c.role == "claim-drafter" and c.scope == "DEPENDENT_SET"]
+
+
 def test_oa_merged_verdict_is_rejected(rt, request_indep):
     script = R.happy_script(dependent=False)
     script["oa-strategy-reviewer"] = [R.oa(merged=True), R.oa(merged=True)]

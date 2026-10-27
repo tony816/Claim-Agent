@@ -27,6 +27,8 @@ PROVIDERS = {
     "antigravity": {"label": "Antigravity · 구독 로그인", "models": ["gemini-3.1-pro-high"]},
     # OpenRouter /models로 전체 목록을 채운다(model_catalog). 목록을 못 받으면 이 항목과 직접 입력만 남는다.
     "openrouter": {"label": "OpenRouter · API 키", "models": ["deepseek/deepseek-v4.1-flash-1017"]},
+    # 사용자 RunPod 서버리스 vLLM 엔드포인트(provider.runpod.endpoint_id). 모델은 엔드포인트가 내놓는 served model name이다.
+    "runpod": {"label": "RunPod 서버리스 · API 키", "models": ["claim-drafter"]},
 }
 THINKING = ["MINIMAL", "LOW", "MEDIUM", "HIGH"]
 
@@ -125,6 +127,10 @@ def connection(cfg, kind):
         from .provider.openrouter import connection_status as openrouter_status
 
         return openrouter_status(cfg.provider.openrouter)
+    if kind == "runpod":
+        from .provider.runpod import connection_status as runpod_status
+
+        return runpod_status(cfg.provider.runpod)
     key = cfg.model.api_key_env
     present = bool(os.environ.get(key) or os.environ.get("GOOGLE_API_KEY"))
     return {"installed": True, "connected": present, "message": "API 키 설정됨" if present else f".env에 {key} 설정 필요"}

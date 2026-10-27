@@ -154,6 +154,19 @@ def login(kind: str, configured: str | None = None) -> dict:
     return connection_status(kind, configured)
 
 
+HISTORY_ROLES = {"user": "user", "model": "assistant"}
+
+
+def history_text(history: list[dict]) -> str:
+    """Earlier chat turns as a readable transcript ahead of this turn's packet. The CLI takes one user message per call,
+    so the turns ride in it; a JSON dump of them escaped every claim's line breaks into one long line."""
+    if not history:
+        return ""
+    turns = [f'<turn role="{HISTORY_ROLES.get(t["role"], t["role"])}">\n{t["text"].strip()}\n</turn>' for t in history]
+    return ("<conversation_history>\n이 대화의 앞선 턴이다(맥락 참고용). 이번에 답할 메시지는 이 블록 다음에 있다.\n\n"
+            + "\n\n".join(turns) + "\n</conversation_history>\n\n")
+
+
 class SubscriptionProvider:
     """Packet assembly, the permitted-tool loop and events; `_once` is the transport (one fresh-context call)."""
 
@@ -195,7 +208,7 @@ class SubscriptionProvider:
                     parts.append(f"[attached history image {len(images)}]")
             history.append({"role": turn["role"], "text": "\n".join(parts)})
         images.extend(spec.images)
-        packet = ("HISTORY (context only):\n" + json.dumps(history, ensure_ascii=False) + "\n\n" if history else "")
+        packet = history_text(history)
         packet += spec.sources_block + "\n\n" + spec.packet_text
         if spec.json_schema:
             packet += "\n\nReturn one JSON object matching this schema, without markdown:\n" + json.dumps(spec.json_schema, ensure_ascii=False)

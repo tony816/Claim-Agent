@@ -78,6 +78,8 @@ def test_pipeline_result_gets_an_answer_above_the_verbatim_report(rt, request_in
     assert result["answer"].endswith(report) and "## 후보(미검수)" in result["answer"]   # the report itself is untouched
     deliver = talk.calls[0]
     assert deliver.stage == "DELIVER" and "청구항 작성해줘" in deliver.packet_text and report in deliver.packet_text
+    # Run web-c90e0c66: with no drawings in hand the moderator called sourced limitations `근거 미확인` on its own.
+    assert not deliver.images and "스스로 판단하지 않는다" in deliver.system_instruction
     assert (rt.cfg.path("runs_dir") / result["run_id"] / "report-chat.md").read_text(encoding="utf-8") == result["answer"]
 
 

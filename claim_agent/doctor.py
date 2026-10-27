@@ -35,7 +35,7 @@ def run_doctor(rt: Runtime, live: bool = False, model: str | None = None, contra
 
         status = connection(cfg, cfg.provider.kind)
         key_present = status["connected"]
-        rows.append(("api key" if cfg.provider.kind == "openrouter" else "subscription login", "OK" if key_present else "WARN", status["message"]))
+        rows.append(("api key" if cfg.provider.kind in {"openrouter", "runpod"} else "subscription login", "OK" if key_present else "WARN", status["message"]))
     else:
         rows.append(("api key", "OK" if key_present else "WARN", f"{cfg.api_key_env} {'set' if key_present else 'not set — live calls impossible; use --replay'}"))
 

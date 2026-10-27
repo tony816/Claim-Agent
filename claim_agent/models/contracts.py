@@ -134,12 +134,36 @@ def main_tree_gate_gaps(env: RoleEnvelope) -> list[str]:
     return gaps
 
 
+def is_fallback_axis(c) -> bool:
+    """08 §4: a FALLBACK_ONLY the design numbered sits on the fallback axis after the main tree and is written."""
+    return c.classification == CandidateClass.FALLBACK_ONLY and bool(c.planned_claim_no)
+
+
+def set_candidates(env: RoleEnvelope) -> list:
+    """The candidates the set writes, by planned claim number: the main tree and the fallback axis."""
+    return [c for c in env.candidates if c.classification == CandidateClass.TECHNICAL_SOLUTION_CANDIDATE or is_fallback_axis(c)]
+
+
+def fallback_gate_gaps(env: RoleEnvelope) -> list[str]:
+    """08 §4: a fallback-axis claim needs its source and claimability at PASS; its causal and enforcement results are
+    recorded but do not keep it out (it is kept as amendment ground, not as a technical contribution)."""
+    gaps = []
+    for c in env.candidates:
+        if not is_fallback_axis(c):
+            continue
+        bad = [g for g in ("DEPENDENT_SOURCE_GATE", "CLAIMABILITY_GATE") if getattr(c, g) != GateValue.PASS]
+        if bad:
+            gaps.append(f"{c.dc_id}(FALLBACK_ONLY): {', '.join(bad)}")
+    return gaps
+
+
 def _dep_architect(env: RoleEnvelope, mode: RequestMode) -> bool:
     return (
         env.status == Status.PASS
         and _g(env, "DEPENDENT_DESIGN_GATE", {GateValue.LOCKED})
         and any(c.classification == CandidateClass.TECHNICAL_SOLUTION_CANDIDATE for c in env.candidates)
         and not main_tree_gate_gaps(env)
+        and not fallback_gate_gaps(env)
     )
 
 

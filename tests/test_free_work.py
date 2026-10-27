@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from claim_agent import free_work, runtime, web
 from claim_agent.pipeline.claimtext import parse_claim_set
@@ -51,6 +52,7 @@ def test_free_turn_answers_without_the_router_and_labels_the_draft(rt, tmp_path)
     result = free_work.free_turn(provider, rt.cfg, request)
     (call,) = provider.calls
     assert call.role == free_work.FREE_ROLE and call.model == "free-model" and call.system_instruction.startswith(free_work.FREE_SYSTEM)
+    assert call.gen.thinking_level == "HIGH"              # the bare model it is measured against drafts at full effort
     assert "프로젝트 발명 자료" in call.packet_text and "용어는 돌출부로 쓴다" in call.system_instruction
     assert result["effective_mode"] == "FREE" and result["answer"].startswith(free_work.UNREVIEWED_LABEL)
     assert result["history"][-1]["parts"][0]["text"] == DRAFT               # the agent's next turn sees its bare answer
@@ -151,13 +153,18 @@ def test_style_restyles_first_and_the_other_tools_review_its_wording(rt, tmp_pat
     _offline(rt, monkeypatch, provider)
     folder = tmp_path / "request"
     folder.mkdir()
+    drawing = tmp_path / "슬라이드2.png"
+    Image.new("RGB", (40, 30), (255, 255, 255)).save(drawing, format="PNG")
     request = _review_request("syntax-scope-reviewer")
+    request.update(files=[str(drawing)], attachments=[dict(path=str(drawing), name=drawing.name, category="drawing")])
     request["review"]["roles"] = ["syntax-scope-reviewer", "claim-style-adjuster"]       # style runs first whatever the order
     result = free_work.review_turn(provider, rt.cfg, None, request, folder)
     style, syntax = [c for c in provider.calls if c.phase == "main"]     # style may first take its corpus tool phase
     target = free_work.review_target(DRAFT)
     assert style.role == "claim-style-adjuster" and "style_change_mode: REVIEW_ONLY_INPUT" in style.packet_text and target in style.packet_text
-    assert not style.images and "DESIGN_GATE: LOCKED" not in style.packet_text
+    assert "DESIGN_GATE: LOCKED" not in style.packet_text
+    # No design contract stands in for the drawings here (run web-8b0ef48d: drawing-only terms all read as unsourced).
+    assert len(style.images) == 1 and "(이미지 파트로 첨부)" in style.packet_text
     assert syntax.role == "syntax-scope-reviewer" and STYLED in syntax.packet_text and "revision: r2" in syntax.packet_text
     assert target not in syntax.packet_text
     state = rt.store.load_state(result["run_id"])

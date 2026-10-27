@@ -47,21 +47,44 @@ HALTED_NOTE = "※ 검수가 끝까지 실행되지 않아, 끝난 검수 결과
 PROJECT_FILES_HEAD ="## 프로젝트 소스 파일 (프로젝트에 미리 등록되어 매 요청에 자동 첨부 — 사용자 제공 원자료)"
 CATEGORY_LABELS = {"invention": "발명 자료", "drawing": "도면", "prior_art": "선행기술", "spec": "정식 명세서"}
 
+# The free agent is the one place a request meets the model without gates, so it must draft at least as well as the bare
+# model does: an earlier, stricter prompt (any inference = 근거 미확인, every function clause stripped on a counterexample)
+# gave 4–6 weaker claims where the bare model gave 9 on the same slides (docs/도구사용_개선로그.md #13).
 FREE_SYSTEM = """너는 Claim-Agent의 자유 작업 에이전트다. 사용자는 한국 특허 청구항을 함께 1차 작업하는 변리사·발명자다.
-이 모드에는 설계·문체·성공조건·통사·OA·역구성 게이트가 없다. 사용자가 요청하면 청구항 초안·수정안·대안·의견을 바로 쓴다.
-- 기술 사실·구성·수치·재료·효과는 사용자가 준 자료(대화, 첨부, 프로젝트 지침·파일)에서만 가져온다. 자료에 없으면 지어내지 말고
-  `근거 미확인`으로 표시한 뒤 발명자에게 확인할 질문으로 남긴다.
-- 기능·작용·결과를 구성의 귀결로 적을 때(`…을 구비하여 …을 구속하는`, `…되면 …하는` 등)는 적힌 구성만으로 그 기능이 반드시 따라 나와야
-  한다. 쓰기 전에 문언을 모두 만족하면서 기능이 일어나지 않는 구현(반례)을 하나 떠올려 보고, 있으면 빠진 전제(간격·치수 관계, 접촉,
-  상대 위치 등)를 자료에서 찾아 구성으로 적는다. 예: `마주하는 한 쌍의 측면`만으로는 이동 구속이 따라 나오지 않는다(측면 사이가
-  대상물보다 넓을 수 있다). 자료에 전제가 없으면 지어내지 말고 `근거 미확인`과 발명자 확인 질문으로 남긴다.
+이 모드에는 설계·문체·성공조건·통사·OA·역구성 게이트가 없다. 경험 많은 변리사가 도면과 메모를 보고 바로 쓰듯, 요청받은 청구항 초안·수정안·대안·의견을 바로 쓴다.
+
+자료와 근거
+- 기술 사실은 사용자가 준 자료(대화, 첨부 도면·슬라이드, 프로젝트 지침·파일)에서 가져온다. 도면의 라벨·분해도·화살표·메모가 보여 주는
+  구성·배치·적층 순서·연결, 그리고 통상의 기술자가 거기서 명확히 읽어 내는 사항은 근거가 있는 것으로 쓴다. 예: 분해도에서 겹쳐 그려진
+  부품들은 그 순서로 적층되고, 과열 시 전원을 끊는 안전 부품이 히터와 같은 모듈에 있으면 히터 급전 경로에 놓인다. 도면에서 읽은 해석은
+  청구항 앞 설명에 한 줄로 밝힌다.
+- `근거 미확인`은 자료에 없고 명확히 도출되지도 않는 사실(수치, 자료에 없는 재료·목적·결선 방식 등)에만 붙인다. 그런 사실은 지어내지 않고,
+  그 사실 없이 쓸 수 있는 가장 넓은 문언으로 쓴 뒤 발명자 확인 질문으로 남긴다. 확인할 것이 있다는 이유로 청구항을 빼거나 약하게 하지 않는다.
+
+청구항 작성
+- 종속항을 요청받으면 대상에 대해 자료가 보여 주는 청구 가능한 특징을 빠짐없이 찾는다: 구성 부품, 적층·배치·연결 관계, 재질, 부품 종류,
+  개구·관통홀 같은 형상, 작동 상태. 기술적 의미가 큰 항을 앞에 두고, 재질·부품 종류처럼 보정 근거로 남겨 둘 항은 뒤에 둔다. 효과가 자료에
+  적혀 있지 않다는 이유만으로 개시된 구조를 빼지 않는다.
+- 기능·작용을 구성의 귀결로 적을 때(`…함으로써 …하는`, `…을 구비하여 …을 구속하는`, `…되면 …하는` 등)는 그 기능이 성립하는 데 필요한
+  전제(접촉, 간격·치수 관계, 상대 위치, 전기적 연결 등)를 자료에서 찾아 함께 적는다. 예: `마주하는 한 쌍의 측면`만으로는 이동 구속이
+  따라 나오지 않으므로 측면 사이 간격과 대상물 폭의 관계를 함께 적는다. 공지 부품을 통상 기능으로 한정할 때(써멀 퓨즈의 과열 차단,
+  단열재의 열 차단)는 그 기능이 작동하는 배치(급전 경로 상, 가열 부재와 커버 사이 등)를 자료가 보여 주거나 명확히 도출되는 대로 함께 적는다.
+  전제가 자료에 없으면 그 기능 구절 없이 구조로 쓰고 확인 질문을 남긴다.
+- 사용자가 확정한 청구항·용어·문형은 그대로 쓰고, 새 항은 그 용어를 `상기 …`로 이어 받는다. 부모항 체인이 정하지 않은 방향·기준을 새로
+  끌어오지 않고, 업계 기초지식이 있는 독자가 한 번 읽고 그릴 수 있게 쓴다.
+- 대화의 앞선 답변(게이트 run 결과 포함)은 참고 자료다. 그 항 수나 구성에 묶이지 말고 자료 전체에서 다시 후보를 찾는다.
+- 앞선 검수 결과(문체·통사·OA·성공조건·블라인드 복원 보고서)가 있고 사용자가 반영을 요청하면 그 지적을 짚어 가며 고친다. 검수 보고서는
+  원자료가 아니다. 지적이 자료와 어긋나면(예: 도면을 받지 않은 검수 역할이 도면에 있는 출처를 못 찾은 경우) 그렇다고 밝히고 따르지 않는다.
+  기능 구절의 전제가 빠졌다는 지적은 기능을 지우기보다 자료가 주는 전제를 더해 닫는다.
+
+형식
 - 청구항은 한 항마다 `【청구항 N】` 머리줄로 시작하고, 종속항은 `제N항에 있어서,`로 인용한다. 머리줄을 굵게 하거나 목록 기호를 붙이지 않는다.
   설명은 청구항 블록 앞에 쓰고, 청구항 사이와 마지막 청구항 뒤에는 설명을 섞지 않는다. 사용자는 작업 도구로 청구항 블록만 검수 역할에 넘긴다.
 - 네 답은 검수를 거치지 않은 초안이다. 게이트 통과·PASS·LOCK을 주장하지 않고, 어떤 문언도 `최종안`·`확정`이라고 부르지 않는다.
-  신규성·진보성·등록 가능성을 단정하지 않는다.
-- 대화에 앞선 검수 결과(통사·OA·성공조건·블라인드 복원 보고서)가 있으면, 사용자가 반영을 요청할 때 그 지적을 짚어 가며 고친다.
-  검수 보고서는 원자료가 아니며, 고친 문언도 다시 검수하기 전에는 미검수다.
-- 한국어로, 동료 변리사와 작업하듯 간결하게 쓴다."""
+  고친 문언도 다시 검수하기 전에는 미검수다. 신규성·진보성·등록 가능성을 단정하지 않는다.
+- 한국어로, 동료 변리사와 작업하듯 간결하게 쓴다. 설명은 항별 근거·해석 한 줄과 문언을 바꿀 확인 질문으로 줄인다."""
+# Drafting is the hardest call in the mode and the bare model it is measured against thinks at full effort.
+FREE_THINKING = "HIGH"
 
 REVIEW_REQUEST = ("자유 작업 모드에서 사용자가 작업 도구 패널에서 고른 검수({labels})다. '제공된 청구항 전문'은 게이트를 거치지 않은 초안이다. "
                   "이 역할의 기준으로 결함을 찾고, 결함마다 문제 구절·이유·고칠 방향을 적는다. 수정 문언 전문은 쓰지 않는다"
@@ -77,7 +100,9 @@ FOLLOW_UP_REQUEST = """방금 실행한 검수({labels})의 결과를 바탕으�
 - 요청이 무엇을 고치라는 것인지 먼저 정하고, 검수 지적 가운데 같은 곳이거나 자료로 고칠 수 있는 것을 함께 반영한다. 요청과 검수 지적이 어긋나면 요청을 따른다.
 - 블라인드 복원 결과가 있으면, 복원이 자료의 구조와 다르게 읽거나 정하지 못한 곳을 문언으로 닫는다.
 - 고친 문언의 기능·결과 구절마다 적힌 구성만으로 그 기능이 따라 나오는지(반례가 없는지) 다시 본다. 고치다 전제를 빼거나 약하게 하지 않는다.
-- 기술 사실은 자료(대화, 첨부, 프로젝트 지침·파일)에서만 가져온다. 자료로 고칠 수 없거나 아래 청구항 밖(부모항 등)을 고쳐야 하는 지적은 그 부분을 그대로 둔다.
+  전제가 빠졌다는 지적은 자료(도면에서 명확히 읽히는 배치·연결 포함)가 주는 전제를 더해 닫고, 전제가 자료에 없을 때만 그 기능 구절을 구조로 바꾼다.
+- 기술 사실은 자료(대화, 첨부, 프로젝트 지침·파일)와 거기서 명확히 읽히는 사항에서 가져온다. 자료로 고칠 수 없거나 아래 청구항 밖(부모항 등)을 고쳐야 하는 지적은 그 부분을 그대로 둔다.
+  도면을 받지 않은 검수 역할이 도면에 있는 출처를 못 찾았다는 지적은 따르지 않고, 못 고친 곳에 그 이유를 적는다.
 - 아래 청구항의 항 번호와 인용관계는 그대로 두고, 없는 항을 새로 쓰지 않는다.
 - 답 형식: 첫머리에 `- 바꾼 곳: …` 한두 줄(고치지 못한 지적이 있으면 `- 못 고친 곳: … (이유)` 한 줄), 그다음 고친 청구항 전문만. 검수 보고서를 옮겨 적거나 다른 설명을 붙이지 않는다.
 
@@ -138,7 +163,7 @@ def free_turn(provider: LLMProvider, cfg, request: dict) -> dict:
     message = user_message(request["text"], "", request.get("files", []))
     preset = request.get("project_attachments") or []
     sent = {"role": "user", "parts": [*_preset_parts(preset), *message["parts"]]} if preset else None
-    gen = GenParams(temperature=0.5, thinking_level="MEDIUM", max_output_tokens=cfg.model.max_output_tokens)
+    gen = GenParams(temperature=0.5, thinking_level=FREE_THINKING, max_output_tokens=cfg.model.max_output_tokens)
     result = generate_turn(provider, request["model"], request.get("history", []), message, None, request.get("instructions"),
                            sent=sent, system=FREE_SYSTEM, role=FREE_ROLE, gen=gen)
     # The label and footnote are for the reader; the history the agent sees next turn keeps its bare answer.
@@ -204,7 +229,7 @@ def review_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
     message = user_message(FOLLOW_UP_REQUEST.format(labels=labels, note=note, target=styled or target), "", [])
     preset = request.get("attachments") or []
     sent = {"role": "user", "parts": [*_preset_parts(preset), *message["parts"]]} if preset else None
-    gen = GenParams(temperature=0.3, thinking_level="MEDIUM", max_output_tokens=cfg.model.max_output_tokens)
+    gen = GenParams(temperature=0.3, thinking_level=FREE_THINKING, max_output_tokens=cfg.model.max_output_tokens)
     done = generate_turn(provider, request["model"], [*history, *reviewed], message, None, request.get("instructions"),
                          sent=sent, system=FREE_SYSTEM, role=FREE_ROLE, gen=gen)
     # The request decided the form: claim blocks mean fixed wording, anything else an answer from the findings.

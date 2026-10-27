@@ -121,7 +121,7 @@ class ClaimAgentApp(App):
             return "구독 OAuth · 웹 모델 설정에서 연결"
         if self.cfg.provider.kind == "antigravity":
             return "구독 로그인 · 터미널에서 agy로 로그인"
-        key_env = self.cfg.provider.openrouter.api_key_env if self.cfg.provider.kind == "openrouter" else self.cfg.api_key_env
+        key_env = getattr(self.cfg.provider, self.cfg.provider.kind).api_key_env if self.cfg.provider.kind in {"openrouter", "runpod"} else self.cfg.api_key_env
         key = os.environ.get(key_env) or (self.cfg.provider.kind == "gemini" and os.environ.get("GOOGLE_API_KEY"))
         return f"API 키 {'저장됨' if key else '없음 — .env에 입력 필요'}"
 

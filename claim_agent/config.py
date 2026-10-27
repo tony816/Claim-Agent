@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from .models.prior_art import PriorSearchOptions
 
 DEFAULT_CONFIG_NAME = "claim-agent.yaml"
-ProviderKind = Literal["gemini", "claude_oauth", "codex_oauth", "openrouter", "antigravity"]
+ProviderKind = Literal["gemini", "claude_oauth", "codex_oauth", "openrouter", "antigravity", "runpod"]
 
 
 class ModelConfig(BaseModel):
@@ -35,6 +35,15 @@ class OpenRouterConfig(BaseModel):
     timeout_s: int = Field(default=900, ge=10, le=3600)
 
 
+class RunPodConfig(BaseModel):
+    # The served model name on the user's own RunPod Serverless vLLM endpoint (OPENAI_SERVED_MODEL_NAME_OVERRIDE).
+    model: str = "claim-drafter"
+    endpoint_id: str | None = None
+    api_key_env: str = "RUNPOD_API_KEY"
+    max_output_tokens: int = 8192     # prompt + output must fit the endpoint's MAX_MODEL_LEN
+    timeout_s: int = Field(default=900, ge=10, le=3600)   # includes a cold start (worker pull + model load)
+
+
 class ProviderConfig(BaseModel):
     # Claude and Codex run through their official CLI on a subscription login; there is no API-key transport.
     kind: ProviderKind = "gemini"
@@ -43,6 +52,7 @@ class ProviderConfig(BaseModel):
     # Antigravity runs its official `agy` CLI on the account login that `agy` itself stores.
     antigravity: SubscriptionConfig = Field(default_factory=lambda: SubscriptionConfig(model="gemini-3.1-pro-high", timeout_s=900))
     openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)
+    runpod: RunPodConfig = Field(default_factory=RunPodConfig)
 
 
 class RoleConfig(BaseModel):

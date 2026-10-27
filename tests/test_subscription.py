@@ -71,7 +71,17 @@ def test_fresh_blind_has_no_history_or_project_path(fake_cli):
     provider.generate(spec(role="blind-claim-reconstruction-reviewer"))
     provider.generate(spec(role="blind-claim-reconstruction-reviewer"))
     assert fake_cli[0][2]["cwd"] != fake_cli[1][2]["cwd"]
-    assert all("HISTORY" not in call[2]["stdin"] for call in fake_cli)
+    assert all("conversation_history" not in call[2]["stdin"] for call in fake_cli)
+
+
+def test_history_reaches_the_cli_as_a_readable_transcript(fake_cli):
+    """Run web-385a8db4: a JSON dump of the turns escaped every line break of the earlier claims into one long line."""
+    claim = "【청구항 12】\n제1항에 있어서,\n상기 히트리드 모듈은,\n단열재를 더 포함하는,\n핵산 증폭 장치."
+    history = [{"role": "user", "parts": [{"text": "종속항 써줘"}]}, {"role": "model", "parts": [{"text": claim}]}]
+    sub.SubscriptionProvider("claude_oauth", SubscriptionConfig()).generate(spec(role="자유 작업", history=history, packet_text="다시 써줘"))
+    text = json.loads(fake_cli[0][2]["stdin"])["message"]["content"][0]["text"]
+    assert claim in text and '<turn role="user">\n종속항 써줘\n</turn>' in text and '<turn role="assistant">' in text
+    assert text.index("</conversation_history>") < text.index("다시 써줘")
 
 
 def test_tool_roundtrip_only_executes_given_callable(monkeypatch):
@@ -200,7 +210,7 @@ def test_header_switch_changes_provider_mid_chat_and_keeps_role_rows(tmp_path, m
 
 
 def test_claude_api_key_provider_is_gone_and_old_configs_move_to_the_cli(tmp_path):
-    assert "anthropic" not in PROVIDERS and set(PROVIDERS) == {"gemini", "claude_oauth", "codex_oauth", "antigravity", "openrouter"}
+    assert "anthropic" not in PROVIDERS and set(PROVIDERS) == {"gemini", "claude_oauth", "codex_oauth", "antigravity", "openrouter", "runpod"}
     workspace = Workspace(tmp_path)
     with pytest.raises(ValueError, match="제공자"):
         provider_overrides(workspace.cfg, {"provider": "anthropic"})
