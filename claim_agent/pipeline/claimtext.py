@@ -16,6 +16,7 @@ _HEAD_VARIANTS = re.compile(
     r"|청구항\s*(?P<c>\d+)\s*[.:：)]?(?=[ \t]*$)"           # 청구항 1 / 청구항 1. / 청구항 1: (line alone)
     r"|제\s*(?P<d>\d+)\s*항\s*[.:：]?(?=[ \t]*$)"        # 제1항 (line alone)
     r"|(?:Claim|CLAIM)\s*(?P<e>\d+)\s*[.:]?(?=[ \t]*$)"   # Claim 1
+    r"|[\[【]\s*제?\s*(?P<f>\d+)\s*항\s*[\]】](?=[ \t]*$)"  # [13항] / [제13항] / 【13항】 (line alone)
     r")[ \t]*",
     re.MULTILINE,
 )
@@ -113,7 +114,7 @@ def normalize_headers(text: str) -> tuple[str, bool, str]:
     styles: list[str] = []
 
     def repl(m: re.Match[str]) -> str:
-        for key, style in (("a", "canonical"), ("b", "bracket"), ("c", "plain"), ("d", "je-hang"), ("e", "english")):
+        for key, style in (("a", "canonical"), ("b", "bracket"), ("c", "plain"), ("d", "je-hang"), ("e", "english"), ("f", "bracket")):
             if m.group(key):
                 styles.append(style)
                 return f"【청구항 {int(m.group(key))}】\n"
@@ -174,13 +175,13 @@ def _parents_of(body: str) -> tuple[list[int], bool]:
 def parse_claim_set(text: str) -> list[Claim]:
     """Split a claim document into claims (order preserved).
 
-    Accepts 【청구항 N】, [청구항 N], `청구항 N.`, a lone `제N항` line and `Claim N`; non-canonical
+    Accepts 【청구항 N】, [청구항 N], `청구항 N.`, a lone `제N항` or `[N항]` line and `Claim N`; non-canonical
     spellings are normalised first, so `Claim.text` always starts with the canonical header.
     """
     text, _, _ = normalize_headers(text)
     heads = list(_CLAIM_HEAD.finditer(text))
     if not heads:
-        raise ClaimParseError("no 【청구항 N】 headers found (accepted spellings: 【청구항 N】, [청구항 N], 청구항 N., 제N항, Claim N)")
+        raise ClaimParseError("no 【청구항 N】 headers found (accepted spellings: 【청구항 N】, [청구항 N], 청구항 N., 제N항, [N항], Claim N)")
     claims: list[Claim] = []
     for i, m in enumerate(heads):
         end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
@@ -265,6 +266,31 @@ def appended_nos(claims: list[Claim], targets: set[int]) -> set[int]:
     last = max((c.claim_no for c in claims), default=0)
     new = {n for n in targets if n > last}
     return new if new == set(range(last + 1, last + 1 + len(new))) else set()
+
+
+def continue_set(base: str, pasted: list[str]) -> str | None:
+    """The set in `base` with every pasted claim block that carries on right after its end, or None when none does.
+
+    A block joins when its claims number on from the set's end without a gap and cite only claims before them
+    ('[13항]' — a further independent claim pasted under a USER_LOCK of 1~12, run web-340fbf91). Left out, the claim was
+    no parent to hang new claims on and its number was handed out again to a new claim.
+    """
+    try:
+        claims = parse_claim_set(fill_blank_headers(base))
+    except ClaimParseError:
+        return None
+    joined = []
+    for text in pasted:
+        try:
+            more = parse_claim_set(text)
+        except ClaimParseError:
+            continue
+        last = max((c.claim_no for c in claims), default=0)
+        if [c.claim_no for c in more] != list(range(last + 1, last + 1 + len(more))) or validate_parent_refs(claims + more):
+            continue
+        claims += more
+        joined += more
+    return claim_set_text(claims) if joined else None
 
 
 def ancestor_nos(claims: list[Claim], target_no: int) -> set[int]:

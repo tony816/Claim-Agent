@@ -106,7 +106,7 @@ def resolve_edit_scope(route: RouteDecision, request: dict, blocks: list[dict], 
     puts on such a set go after its end too, with edit_targets empty: the dependent design decides how many and numbers
     them on from the set's end, instead of a new dependent set renumbering over the user's claims.
     """
-    from .pipeline.claimtext import ClaimParseError, baseline_digest, exact_sha256
+    from .pipeline.claimtext import ClaimParseError, baseline_digest, continue_set, exact_sha256
 
     hint = route.authoring_scope
     targets = parse_target(route.dependent_target) if route.dependent else None
@@ -129,10 +129,16 @@ def resolve_edit_scope(route: RouteDecision, request: dict, blocks: list[dict], 
         return None
     source_id, text = found
     route.authoring_scope, route.edit_targets = "EXISTING_SET_EDIT", sorted(targets)
+    # Claims the user pasted to carry the set on ('[13항]' under a USER_LOCK of 1~12) belong to it: read-only like the rest.
+    continued = continue_set(text, [t for sid, t in sources if sid != source_id])
     try:
-        digest = baseline_digest(text)
+        digest = baseline_digest(continued or text)
     except ClaimParseError:
         digest = exact_sha256(text)        # every number blank: the engine stops on the blanks before any call
+    if continued:
+        path = folder / "intake" / f"existing-set-{hashlib.sha256(continued.encode('utf-8')).hexdigest()[:12]}.txt"
+        path.write_text(continued, encoding="utf-8", newline="")
+        return str(path), digest
     if source_id == "user_lock":
         path = folder / "intake" / f"project-user-lock-{hashlib.sha256(text.encode('utf-8')).hexdigest()[:12]}.txt"
         path.write_text(text, encoding="utf-8", newline="")

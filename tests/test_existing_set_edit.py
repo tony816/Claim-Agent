@@ -550,6 +550,39 @@ def test_a_design_numbering_an_open_append_with_a_gap_gets_one_repair_call_then_
     assert state.baseline_set.edit_targets == [] and not state.dependent.draft_set_lock
 
 
+PASTED_10 = "책상 상판에 고정되는 베이스; 및\n상기 베이스에 결합되는 홀더 본체를 포함하는 케이블 클립 홀더."
+NEW_11_ON_10 = "【청구항 11】\n제10항에 있어서,\n상기 홀더 본체는 상기 베이스에 착탈 가능하게 결합되는 케이블 클립 홀더."
+
+
+def test_a_further_independent_claim_pasted_after_the_user_lock_joins_the_set(rt, request_indep, tmp_path, monkeypatch):
+    """Run web-340fbf91: '[13항]' pasted under a USER_LOCK of 1~12 was no claim header, so the set stopped at 12. The
+    design had no root for the claims asked for and was told to number them from 13, over the user's own claim 13."""
+    monkeypatch.setattr(R, "DEP_CLAIMS", [(11, 10, "DC-01", NEW_11_ON_10)])
+    monkeypatch.setattr(R, "DEP_SET_TEXT", NEW_11_ON_10)
+    text = "하기 10항은 앞선 1~9항과는 다른 실시예의 독립항임. 핵심 특징에 대한 종속항들을 작성해줘.\n---\n[10항]\n" + PASTED_10
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "pasted-10", text=text, instructions="", user_lock=BASELINE)
+    provider = ScriptedProvider(edit_script())
+    result = run_pipeline(rt, provider, request, _append_route(blocks), blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
+    design = next(c for c in provider.calls if c.role == "dependent-claim-strategy-architect")
+    assert "제11항부터 빈 번호 없이" in design.packet_text and "【청구항 10】\n" + PASTED_10 in design.packet_text
+    base = state.baseline_set
+    assert [c.claim_no for c in base.claims] == list(range(1, 11)) and base.edit_targets == [11] and 10 in base.chain_nos
+    assert base.user_lock_released == []
+    full = edited_set_text(state)
+    assert full == BASELINE.rstrip() + "\n\n【청구항 10】\n" + PASTED_10 + "\n\n" + NEW_11_ON_10
+
+
+def test_only_pasted_claims_that_carry_the_set_on_join_it():
+    from claim_agent.pipeline.claimtext import continue_set
+
+    assert continue_set(BASELINE, ["[제10항]\n" + PASTED_10]).endswith("【청구항 10】\n" + PASTED_10)
+    assert continue_set(BASELINE, ["[11항]\n" + PASTED_10]) is None                         # a gap after claim 9
+    assert continue_set(BASELINE, ["[10항]\n제12항에 있어서,\n" + PASTED_10]) is None        # cites a claim not there
+    assert continue_set(BASELINE, ["13항은 다른 실시예다."]) is None                          # a note, not a claim
+
+
 def test_an_open_append_needs_a_set_that_already_holds_a_dependent_claim():
     from claim_agent.claim_scope import find_existing_set
 
