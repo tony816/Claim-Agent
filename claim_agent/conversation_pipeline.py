@@ -187,6 +187,24 @@ def revision_path(route: RouteDecision, request: dict, blocks: list[dict], paths
     return kind, scope
 
 
+def asks_other_edit(route: RouteDecision, previous, text: str) -> bool:
+    """Whether a message the router took as a halted edit's decision asks for other claims than the edit sealed there.
+
+    The halted run's BASELINE_SET keeps the targets it was sealed with (or none, for claims the design numbers). Resumed
+    with a request for other claims, it carries the old targets on: run web-6be7454f, sent again after the target fix,
+    resumed with new claims still inserted at 2~12 and stopped on the same contract. Such a message starts a new run,
+    as revision_path does for a follow-up. Only the message's own claim words count, so '진행해' still resumes.
+    """
+    from .claim_scope import mentions_any_claim
+    from .routing import explicit_patent_request
+
+    base = previous.baseline_set if previous else None
+    if base is None or route.authoring_scope != "EXISTING_SET_EDIT" or not (mentions_any_claim(text) or explicit_patent_request(text)):
+        return False
+    targets = sorted(parse_target(route.dependent_target) or []) if route.dependent else []
+    return not (targets == base.edit_targets or (base.numbered_by_design and not targets))
+
+
 def _new_material(request: dict, blocks: list[dict], paths: dict, previous) -> bool:
     known = {str(Path(m["path"]).resolve()) for m in previous.material_meta}
     known_sha = {m.get("sha256") for m in previous.material_meta}
@@ -256,7 +274,8 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
     authoring = route.mode in {"AUTHORING_DRAFT", "FINALIZATION"}
     baseline = None
     if authoring:
-        route.dependent, route.dependent_target = constrain_target(request["text"], route.dependent, route.dependent_target)
+        route.dependent, route.dependent_target = constrain_target(request["text"], route.dependent, route.dependent_target,
+                                                                   append=route.authoring_scope == "EXISTING_SET_EDIT")
         route.dependent, route.dependent_target = apply_ui_target(route.mode, route.dependent, route.dependent_target, request["text"], request.get("ui_hints"))
         baseline = resolve_edit_scope(route, request, blocks, folder, previous)
     source = next((b for b in blocks if b["id"] == route.claim_source_id), None)

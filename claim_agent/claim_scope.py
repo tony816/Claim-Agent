@@ -28,22 +28,32 @@ def parse_target(value: str | None) -> set[int] | None:
     return numbers
 
 
-def explicit_mentions(text: str) -> set[int] | None:
+def _mentioned_spans(text: str) -> list[tuple[int, int]]:
     # Only the current instruction, not a pasted claim set or previous messages.
     lead = text.split("\n\n", 1)[0]
-    if re.search(r"전체|모든|전부|\ball\b", lead, re.I):
-        return None
     matches = re.findall(r"(?:제)?(\d+)(?:\s*[~–—-]\s*(?:제)?(\d+))?\s*항", lead)
     matches += re.findall(r"\bclaims?\s+(\d+)(?:\s*[~–—-]\s*(\d+))?", lead, re.I)
+    spans = [(int(start), int(end or start)) for start, end in matches]
+    return [(lo, hi) for lo, hi in spans if lo <= hi <= 1000]
+
+
+def _says_where_new_claims_go(text: str) -> bool:
+    """'13항부터', '12항 뒤에', '12항에 이어' — a position after the set, not a claim to write at that number."""
+    lead = text.split("\n\n", 1)[0]
+    return bool(re.search(r"\d+\s*항\s*(?:부터|이후|뒤|다음|에\s*이어)", lead))
+
+
+def explicit_mentions(text: str) -> set[int] | None:
+    if re.search(r"전체|모든|전부|\ball\b", text.split("\n\n", 1)[0], re.I):
+        return None
     result = set()
-    for start, end in matches:
-        lo, hi = int(start), int(end or start)
-        if hi >= lo and hi <= 1000:
-            result.update(n for n in range(lo, hi + 1) if n > 1)
+    for lo, hi in _mentioned_spans(text):
+        result.update(n for n in range(lo, hi + 1) if n > 1)
     return result or None
 
 
-def constrain_target(text: str, dependent: bool, target: str | None) -> tuple[bool, str | None]:
+def constrain_target(text: str, dependent: bool, target: str | None, append: bool = False) -> tuple[bool, str | None]:
+    """`append`: the router put the dependent claims after the end of the user's numbered set (EXISTING_SET_EDIT)."""
     lead = text.split("\n\n", 1)[0]
     only = re.findall(r"(?:제)?(\d+)\s*항\s*만|\bonly\s+claim\s+(\d+)\b", lead, re.I)
     if len(only) == 1:
@@ -55,6 +65,13 @@ def constrain_target(text: str, dependent: bool, target: str | None) -> tuple[bo
     if not dependent:
         return False, None
     mentioned = explicit_mentions(text)
+    if mentioned and append and parse_target(target) is None and claim_intent(text) != "EDIT" \
+            and (any(lo == 1 for lo, _ in _mentioned_spans(text)) or _says_where_new_claims_go(text)):
+        # The router chose no number and the words name claim 1 with the others ('1~12항에서 놓친 특허 포인트를 찾아
+        # 추가 종속항을 써줘', run web-6be7454f) or say where the new claims go ('13항부터'). Claim 1 is no dependent
+        # target, so the numbers point at the set being looked at; read as targets, they made the edit write new claims
+        # at 2~12 and push the whole set back to 13~23. The design numbers the new claims on from the set's end.
+        return dependent, target
     if mentioned:
         selected = parse_target(target) if dependent else None
         # A semantic route may select a subset of mentioned claims, but never

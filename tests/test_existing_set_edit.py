@@ -521,6 +521,22 @@ def test_dependents_asked_for_without_a_number_are_counted_and_numbered_by_the_d
     assert full.count("【청구항") == 11 and full.endswith(NEW_10 + "\n\n" + NEW_11)
 
 
+def test_new_claims_asked_for_over_the_whole_set_go_after_its_end(rt, request_indep, tmp_path, monkeypatch):
+    """Run web-6be7454f: '1~12항에서 놓친 특허 포인트 … 추가 종속항' names the set to look at. Read as targets, the numbers
+    made the edit write new claims at 2~12 and push the user's whole set back."""
+    monkeypatch.setattr(R, "DEP_CLAIMS", [(10, 9, "DC-01", NEW_10)])
+    monkeypatch.setattr(R, "DEP_SET_TEXT", NEW_10)
+    text = "유지하려고 함. 1~9항에서 놓친 특허 포인트가 있는지 확인하고 추가 종속항들을 작성해줘."
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "missed-points", text=text, instructions="", user_lock=BASELINE)
+    route = _append_route(blocks)
+    result = run_pipeline(rt, ScriptedProvider(edit_script()), request, route, blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
+    base = state.baseline_set
+    assert route.edit_targets == [] and base.numbered_by_design and base.edit_targets == [10] and base.renumbered == {}
+    assert edited_set_text(state) == BASELINE.rstrip() + "\n\n" + NEW_10
+
+
 def test_a_design_numbering_an_open_append_with_a_gap_gets_one_repair_call_then_stops(rt, request_indep, tmp_path, monkeypatch):
     monkeypatch.setattr(R, "DEP_CLAIMS", [(11, 9, "DC-01", NEW_10.replace("10】", "11】"))])
     monkeypatch.setattr(R, "DEP_SET_TEXT", NEW_10.replace("10】", "11】"))

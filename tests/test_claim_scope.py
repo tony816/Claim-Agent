@@ -27,6 +27,24 @@ def test_current_question_overrides_stale_full_set_option(project_root):
     assert constrain_target("전체 청구항을 수정해줘", True, "2~8") == (True, "2~8")
 
 
+# Run web-6be7454f: the router put this on the end of the user's 1~12 set with no number, and the guard turned '1~12항'
+# into targets 2~12, so the edit wrote new claims at 2~12 and moved the whole set to 13~23.
+MISSED_POINTS = "유지하려고 함. 1~12항에서 놓친 특허 포인트가 있는지 확인하고 추가 종속항들을 작성해줘. 특허 포인트가 없으면 종속항 안 만들어도 괜찮아."
+
+
+def test_a_span_from_claim_1_names_the_set_new_claims_join_not_targets():
+    open_target = "기술기여가 확인된 후보"
+    assert constrain_target(MISSED_POINTS, True, open_target, append=True) == (True, open_target)
+    assert constrain_target("제1항~제12항을 참고해서 종속항 더 써줘", True, open_target, append=True) == (True, open_target)
+    to_12 = ",".join(map(str, range(2, 13)))
+    assert constrain_target(MISSED_POINTS, True, "2~12", append=True) == (True, to_12)              # the router's own numbers
+    assert constrain_target("1~12항을 정리해줘", True, open_target, append=True) == (True, to_12)    # an edit names its targets
+    assert constrain_target("10항을 추가해줘", True, open_target, append=True) == (True, "10")       # no claim 1: a number to write
+    assert constrain_target("13항부터 추가 종속항 써줘", True, open_target, append=True) == (True, open_target)
+    assert constrain_target("12항 뒤에 종속항을 추가해줘", True, open_target, append=True) == (True, open_target)
+    assert constrain_target(MISSED_POINTS, True, open_target) == (True, to_12)                     # not on a user's set
+
+
 def test_out_of_scope_design_cannot_issue_lock_or_call_drafter(rt, request_dep):
     request_dep.dependent_target = "2"
     script = R.happy_script()
