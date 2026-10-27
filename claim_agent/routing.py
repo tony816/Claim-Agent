@@ -168,7 +168,8 @@ def classify_request(provider: LLMProvider, root: Path, model: str, text: str,
     if route.mode in {"CHAT", "META"} and explicit_patent_request(text):
         raise ValueError("명시적인 청구항/특허 요청을 일반 대화로 분류했습니다. 하네스 경로 재분류가 필요합니다.")
     if route.mode in {"AUTHORING_DRAFT", "FINALIZATION"}:
-        route.dependent, route.dependent_target = constrain_target(text, route.dependent, route.dependent_target)
+        route.dependent, route.dependent_target = constrain_target(text, route.dependent, route.dependent_target,
+                                                                   append=route.authoring_scope == "EXISTING_SET_EDIT")
     return route
 
 

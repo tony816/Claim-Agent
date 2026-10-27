@@ -111,6 +111,38 @@ def test_message_on_a_halted_run_is_handed_back_as_its_decision(rt, request_inde
     assert result["resume_halted"] and result["run_id"] == "halted-run" and result["answer"] == ""
 
 
+def test_a_request_for_other_claims_on_a_halted_edit_starts_a_new_run(rt, request_indep, tmp_path, monkeypatch):
+    """Run web-6be7454f: sent again after the target fix, the request resumed the run sealed with new claims at 2~12."""
+    from claim_agent import conversation_pipeline
+    from claim_agent.models.state import BaselineSet
+
+    state = _halted_run(rt, request_indep)
+    state.baseline_set = BaselineSet(record_id="bl-1", source_path="", sha256="x", claims=[], edit_targets=list(range(2, 13)),
+                                     chain_nos=[1], chain_text="")
+    rt.store.save_state(state)
+    route = {"mode": "AUTHORING_DRAFT", "reason": "세트 끝에 추가", "resumes_halt": True, "dependent": True,
+             "dependent_target": "기술기여가 확인된 후보", "authoring_scope": "EXISTING_SET_EDIT"}
+    class NewRun(Exception):
+        pass
+
+    started = []
+
+    def new_run(rt_, provider, request, route, *a, **k):
+        started.append(route)
+        raise NewRun
+
+    monkeypatch.setattr(runtime, "make_provider", lambda *a, **k: None)
+    monkeypatch.setattr(conversation_pipeline, "run_pipeline", new_run)
+    request = dict(text="1~12항에서 놓친 특허 포인트가 있는지 확인하고 추가 종속항들을 작성해줘.", files=[], history=[], model="m",
+                   run_id="halted-run", ui_hints={"halted": {"stage": "DEP_ARCHITECT", "kind": "REVIEW"}})
+    with pytest.raises(NewRun):
+        chat.routed_turn(ScriptedProvider({moderator.MODERATOR: [route]}), rt.cfg, None, request, tmp_path, EventWriter(tmp_path / "events.jsonl"))
+    assert len(started) == 1 and not started[0].resumes_halt
+    proceed = dict(request, text="그 방향으로 진행해")
+    result = chat.routed_turn(ScriptedProvider({moderator.MODERATOR: [route]}), rt.cfg, None, proceed, tmp_path, EventWriter(tmp_path / "events.jsonl"))
+    assert result["resume_halted"] and len(started) == 1                 # no claim words: still the halted run's decision
+
+
 def test_question_on_a_halted_run_is_answered_and_the_run_keeps_waiting(rt, request_indep, tmp_path, monkeypatch):
     _halted_run(rt, request_indep)
     provider = ScriptedProvider({moderator.MODERATOR: [{"mode": "CONSULT", "reason": "멈춘 이유 질문"}, "역구성에서 한 가지가 달리 읽혀 멈췄습니다."]})
