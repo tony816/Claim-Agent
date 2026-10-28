@@ -11,9 +11,14 @@ from dotenv import load_dotenv
 from .config import AppConfig, apply_overrides
 from .model_catalog import gemini_models, openrouter_catalog, openrouter_models
 from .provider.subscription import KINDS, auth_home, connection_status
+from .moderator import MODERATOR
 from .roles.registry import ROLE_NAMES
 
-ROLE_LABELS = ["독립항 설계", "의미 초안 작성", "용어·스타일 조정", "성공조건 검수", "통사·범위 검수", "OA 전략 검수", "블라인드 복원", "도면·기준 비교", "종속항 전략 설계", "선행기술 검색 문장", "사전 심사"]
+# The pipeline roles plus the conversation moderator, which reads every message's intent and answers over the results:
+# it has no role file, but the user picks its model here like any other (claim-agent.yaml roles.conversation-moderator).
+SETTINGS_ROLES = [*ROLE_NAMES, MODERATOR]
+ROLE_LABELS = ["독립항 설계", "의미 초안 작성", "용어·스타일 조정", "성공조건 검수", "통사·범위 검수", "OA 전략 검수", "블라인드 복원", "도면·기준 비교", "종속항 전략 설계", "선행기술 검색 문장", "사전 심사",
+               "대화 모더레이터 (요청 분류·답변)"]
 PROVIDERS = {
     "gemini": {"label": "Gemini · API 키", "models": []},     # models.list로 채운다(model_catalog)
     # CLI가 받는 별칭 프리셋(`claude --model`, 별칭은 늘 최신판)과 최신 정확 ID. Claude CLI에는 모델 목록 명령이 없다.
@@ -99,8 +104,8 @@ def settings_overrides(cfg: AppConfig, data: dict) -> dict:
         key = "model.default" if provider == "gemini" else f"provider.{provider}.model"
         result[key] = model_name(model)
     rows = data.get("roles")
-    if not isinstance(rows, dict) or set(rows) != set(ROLE_NAMES):
-        raise ValueError(f"{len(ROLE_NAMES)}개 서브에이전트 설정을 모두 전달하세요.")
+    if not isinstance(rows, dict) or set(rows) != set(SETTINGS_ROLES):
+        raise ValueError(f"{len(SETTINGS_ROLES)}개 에이전트 설정을 모두 전달하세요.")
     for name, row in rows.items():
         if not isinstance(row, dict) or set(row) != {"provider", "model", "thinking_level"}:
             raise ValueError("에이전트에는 제공자·모델·추론 강도만 설정할 수 있습니다.")
@@ -153,4 +158,4 @@ def settings_snapshot(cfg):
     return {"provider": cfg.provider.kind, "defaults": {p: cfg.default_model_for(p) for p in PROVIDERS}, "providers": providers,
             "thinking_levels": THINKING, "roles": [{"id": name, "label": label, "provider": cfg.role(name).provider,
                 "model": cfg.role(name).model, "thinking_level": cfg.role(name).thinking_level,
-                "effective_provider": cfg.provider_for(name), "effective_model": cfg.model_for(name)} for name, label in zip(ROLE_NAMES, ROLE_LABELS, strict=True)]}
+                "effective_provider": cfg.provider_for(name), "effective_model": cfg.model_for(name)} for name, label in zip(SETTINGS_ROLES, ROLE_LABELS, strict=True)]}

@@ -167,6 +167,24 @@ def test_settings_persist_without_replacing_role_contract(tmp_path):
     assert load_config(project_root=tmp_path, overrides={"provider.kind": "gemini"}).provider.kind == "gemini"
 
 
+
+def test_the_moderator_is_set_in_the_panel_like_any_role(tmp_path):
+    """The conversation moderator has no role file, but its row is in the panel and its model drives routing."""
+    from claim_agent import moderator
+
+    workspace = Workspace(tmp_path)
+    rows = {r["id"]: r for r in workspace.model_settings()["roles"]}
+    assert rows[moderator.MODERATOR]["label"].startswith("대화 모더레이터")
+    payload = settings_payload(workspace)
+    payload["roles"][moderator.MODERATOR].update(provider="claude_oauth", model="sonnet", thinking_level="MEDIUM")
+    workspace.save_model_settings(payload)
+    cfg = load_config(project_root=tmp_path)
+    assert cfg.provider_for(moderator.MODERATOR) == "claude_oauth" and cfg.role(moderator.MODERATOR).thinking_level == "MEDIUM"
+    assert moderator.router_model(cfg, "fallback") == (moderator.MODERATOR, "sonnet")
+    del payload["roles"][moderator.MODERATOR]
+    with pytest.raises(ValueError, match="에이전트 설정을 모두"):
+        workspace.save_model_settings(payload)
+
 def test_settings_reject_invalid_inputs_and_running_save(tmp_path):
     workspace = Workspace(tmp_path)
     payload = settings_payload(workspace)
