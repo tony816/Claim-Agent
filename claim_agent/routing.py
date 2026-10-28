@@ -99,6 +99,8 @@ ui_hints에 작성 대상이 골라져 있어도 의견만 질문하면 REVIEW_O
   그 세트에 종속항을 번호 없이 더 써 달라는 요청(예: '히트리드 모듈에 대한 종속항들 작성해줘')도 EXISTING_SET_EDIT이고,
   dependent_target은 '기술기여가 확인된 후보'로 두며 번호를 지어내지 않는다. 항 수와 번호는 종속항 설계가 세트 끝 다음 번호부터 정한다.
   부모항을 흡수해 독립항으로 만들지 않는다. 새 독립항 작성은 NEW_INDEPENDENT, 새 종속항 세트 작성은 NEW_DEPENDENT_SET이다.
+  'N항의 종속항', 'N항에 종속하는', 'N항을 인용하는'의 N은 새 항의 부모항이고, 'N항의 구성을 활용해'의 N은 새 항이 가져다 쓰는 항이다.
+  둘 다 dependent_target이 아니다. 부모항이 세트에 없어도 번호를 지어내지 않는다(코드가 모델 호출 전에 원문을 요청한다).
 - 2항 이상 종속항의 작성/수정이면 dependent=true, dependent_target은 요청된 번호/범위만 쓴다.
   전체 청구항 세트를 요구하면 요청/자료에 있는 범위를 사용하고, 범위가 없으면 '기술기여가 확인된 후보'로 둔다.
   REVIEW_ONLY/META/CHAT/CONSULT는 dependent=false, dependent_target=null이다. 1항만 묻는데 첨부에 2~8항이

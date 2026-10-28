@@ -93,6 +93,12 @@ REVIEWER_ROLES = {"claim-success-reviewer", "syntax-scope-reviewer", "oa-strateg
 NON_GATING_UNVERIFIED = {"SPEC_NOT_PROVIDED", "PRIOR_ART_NOT_PROVIDED", "PRIOR_SEARCH_UNAVAILABLE"}
 
 
+def missing_parents_message(missing: list[int], where: str, keep: str) -> str:
+    named = ", ".join(f"제{n}항" for n in missing)
+    return (f"새 종속항의 부모항으로 지목한 {named}이 {where}에 없어, 모델을 호출하지 않고 멈췄습니다. {named}의 원문을 그 항이 "
+            f"인용하는 항까지 함께 요청에 붙여 넣거나 {keep}에 더한 뒤 같은 요청을 다시 보내 주세요. 같은 프로젝트의 다른 대화가 "
+            "LOCK한 세트에서도 찾지 못했습니다(LOCK 없는 자유 작업 문언은 가져오지 않습니다).")
+
 class PipelineHalt(Exception):
     def __init__(self, halt: Halt):
         super().__init__(f"{halt.kind} @ {halt.stage}: {halt.message}")
@@ -256,6 +262,9 @@ class PipelineEngine(PriorArtSteps):
         problems = validate_parent_refs(claims)
         if problems:
             halt("BASELINE_SET_INVALID", "기존 청구항 세트의 번호·인용관계가 올바르지 않아 편집 대상의 부모항 체인을 정할 수 없습니다.", problems)
+        missing = sorted(set(req.named_parents) - {c.claim_no for c in claims})
+        if missing:
+            halt("NAMED_PARENT_MISSING", missing_parents_message(missing, f"편집할 기존 청구항 세트({origin}, 제{claims[0].claim_no}~{claims[-1].claim_no}항)", origin))
         if ask:
             halt("EDIT_OR_NEW_UNCLEAR", ask, kind="USER_DECISION")
         moved: dict[int, int] = {}
@@ -332,6 +341,17 @@ class PipelineEngine(PriorArtSteps):
         if c.draft_claim_lock or c.final_claim_lock:
             return                      # this run already produced the root claim the dependent set hangs on
         text = bundle.claim_file_text()
+        if req.named_parents:
+            try:
+                have = {x.claim_no for x in parse_claim_set(text)} if text and text.strip() else set()
+            except ClaimParseError:
+                have = set()
+            missing = sorted(set(req.named_parents) - have)
+            if missing:
+                # Without them the request would author a new independent claim the user never asked for.
+                raise PipelineHalt(Halt(stage=Stage.ARCHITECT.value, role="engine", kind="BLOCK", reason_code="NAMED_PARENT_MISSING",
+                                        message=missing_parents_message(missing, "이 대화와 프로젝트에 제공된 청구항", "프로젝트 USER_LOCK"),
+                                        open_issues=[{"kind": "SCOPE", "code": "NAMED_PARENT_MISSING", "text": f"제{n}항: 원문 없음"} for n in missing]))
         if not text or not text.strip():
             return                      # authoring from raw material: claim 1 is written here first, then the set
         try:

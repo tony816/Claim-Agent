@@ -574,6 +574,82 @@ def test_a_further_independent_claim_pasted_after_the_user_lock_joins_the_set(rt
     assert full == BASELINE.rstrip() + "\n\n【청구항 10】\n" + PASTED_10 + "\n\n" + NEW_11_ON_10
 
 
+def _draw_on_route(target):
+    return RouteDecision(mode="AUTHORING_DRAFT", reason="세트에 종속항 추가", dependent=True, dependent_target=target,
+                         authoring_scope="EXISTING_SET_EDIT")
+
+
+def test_new_claims_on_parents_missing_from_the_set_stop_before_any_call(rt, request_indep, tmp_path):
+    """Run web-54630bf2: '4항 5항의 구성을 … 14OR15 항의 종속항을 추가해줘' under a USER_LOCK of 1~12. The parents 14·15 were
+    written in another conversation. Read as targets they matched no set, so the run searched prior art for a new
+    independent claim; it now stops at once and asks for the parents' wording."""
+    text = "4항 5항의 구성을 제어가 중점인 11~12항 실시예의 새로운 종속항 작성에 활용 가능해보여. 이에 관한 11OR12 항의 종속항을 추가해줘."
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "missing-parents", text=text, instructions="", user_lock=BASELINE)
+    route = _draw_on_route("4,5,11,12")
+    provider = ScriptedProvider({})
+    result = run_pipeline(rt, provider, request, route, blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert provider.calls == [] and state.halt.reason_code == "NAMED_PARENT_MISSING"
+    assert "제11항, 제12항" in state.halt.message and "제1~9항" in state.halt.message
+    assert route.authoring_scope == "EXISTING_SET_EDIT" and state.request["named_parents"] == [11, 12]
+
+
+def test_a_named_parent_with_no_set_at_all_stops_before_any_call(rt, request_indep, tmp_path):
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "no-set", text="13항의 종속항을 추가해줘", instructions="")
+    route = RouteDecision(mode="AUTHORING_DRAFT", reason="종속항", dependent=True, dependent_target="13", authoring_scope="NEW_DEPENDENT_SET")
+    provider = ScriptedProvider({})
+    result = run_pipeline(rt, provider, request, route, blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert provider.calls == [] and state.halt.reason_code == "NAMED_PARENT_MISSING" and "제13항" in state.halt.message
+
+
+def test_new_claims_on_a_pasted_parent_drawing_on_another_claim_join_the_set(rt, request_indep, tmp_path, monkeypatch):
+    monkeypatch.setattr(R, "DEP_CLAIMS", [(11, 10, "DC-01", NEW_11_ON_10)])
+    monkeypatch.setattr(R, "DEP_SET_TEXT", NEW_11_ON_10)
+    text = "4항의 구성을 활용해 10항의 종속항을 추가해줘.\n---\n[10항]\n" + PASTED_10
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "draw-on-pasted", text=text, instructions="", user_lock=BASELINE)
+    result = run_pipeline(rt, ScriptedProvider(edit_script()), request, _draw_on_route("4,10"), blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
+    assert state.baseline_set.numbered_by_design and state.baseline_set.edit_targets == [11]
+
+
+NEW_12_ON_11 = "【청구항 12】\n제11항에 있어서,\n상기 베이스는 상기 책상 상판에 나사로 고정되는 케이블 클립 홀더."
+
+
+def test_parents_written_in_another_conversation_of_the_project_are_lent(rt, request_indep, tmp_path, monkeypatch):
+    """Run web-54630bf2: 13~15항 were locked in another conversation of the project. Asked for '14OR15 항의 종속항' without
+    pasting them, the request now takes them from that conversation's locked set instead of asking for the wording."""
+    monkeypatch.setattr(R, "DEP_CLAIMS", [(11, 10, "DC-01", NEW_11_ON_10)])
+    monkeypatch.setattr(R, "DEP_SET_TEXT", NEW_11_ON_10)
+    text = "하기 10항은 앞선 1~9항과는 다른 실시예의 독립항임. 핵심 특징에 대한 종속항들을 작성해줘.\n---\n[10항]\n" + PASTED_10
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "lender", text=text, instructions="", user_lock=BASELINE)
+    lender = run_pipeline(rt, ScriptedProvider(edit_script()), request, _append_route(blocks), blocks, paths, folder)["run_id"]
+
+    monkeypatch.setattr(R, "DEP_CLAIMS", [(12, 11, "DC-01", NEW_12_ON_11)])
+    monkeypatch.setattr(R, "DEP_SET_TEXT", NEW_12_ON_11)
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "borrower", text="4항의 구성을 활용해 11항의 종속항을 추가해줘",
+                                                   instructions="", user_lock=BASELINE)
+    request["project_runs"] = ["web-unknown", lender]
+    result = run_pipeline(rt, ScriptedProvider(edit_script()), request, _draw_on_route("4,11"), blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
+    assert [c.claim_no for c in state.baseline_set.claims] == list(range(1, 12)) and state.baseline_set.edit_targets == [12]
+    assert any(lender in n and "제10~11항" in n for n in state.notes)
+    assert edited_set_text(state) == BASELINE.rstrip() + "\n\n【청구항 10】\n" + PASTED_10 + "\n\n" + NEW_11_ON_10 + "\n\n" + NEW_12_ON_11
+
+
+def test_a_lent_claim_must_cite_claims_that_read_the_same_in_both_sets():
+    from claim_agent.conversation_pipeline import lend_parents
+
+    lender = BASELINE.rstrip() + "\n\n" + NEW_11_ON_10.replace("제10항", "제9항").replace("11】", "10】")
+    joined, _, nos, missing = lend_parents(BASELINE, {10}, [("a", lender)])
+    assert nos == [10] and missing == [10] and joined.count("【청구항") == 10
+    changed = lender.replace("【청구항 9】\n제8항에 있어서,", "【청구항 9】\n제8항에 있어서, 바뀐 문언", 1)
+    assert "바뀐 문언" in changed and lend_parents(BASELINE, {10}, [("a", changed)]) is None
+    assert lend_parents(BASELINE, {9}, [("a", lender)]) is None                      # the set already holds it
+
+
 def test_only_pasted_claims_that_carry_the_set_on_join_it():
     from claim_agent.pipeline.claimtext import continue_set
 

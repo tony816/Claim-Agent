@@ -43,6 +43,42 @@ def _says_where_new_claims_go(text: str) -> bool:
     return bool(re.search(r"\d+\s*항\s*(?:부터|이후|뒤|다음|에\s*이어)", lead))
 
 
+# A run of claim numbers ('14~15', '4항 5항', '14OR15', '제3항 또는 제4') and what the user says about it right after '항'.
+_NUMBER_RUN = r"((?:제\s*)?\d+(?:(?:\s*항)?\s*(?:[,·ㆍ、~–—/-]|또는|혹은|or|및|와|과|이나)?\s*(?:제\s*)?\d+)*)\s*항"
+_PARENT_AFTER = re.compile(_NUMBER_RUN + r"\s*(?:의|에|을|를)?\s*(?:대한|관한|따른)?\s*(?:새로운|새|추가|추가적인|추가\s*)?\s*"
+                           r"(?:종속항|종속|인용|하위\s*항)", re.I)
+_SOURCE_AFTER = re.compile(_NUMBER_RUN + r"\s*(?:의|에\s*있는|에\s*나온)?\s*(?:구성|특징|내용|기재|요소|실시\s*예)", re.I)
+
+
+def _numbers_of(run: str) -> set[int]:
+    tokens = re.findall(r"\d+|[~–—]|-", run)
+    numbers: set[int] = set()
+    for i, tok in enumerate(tokens):
+        if tok.isdigit():
+            n = int(tok)
+            if i >= 2 and tokens[i - 1] in "~–—-" and tokens[i - 2].isdigit() and int(tokens[i - 2]) <= n <= 1000:
+                numbers.update(range(int(tokens[i - 2]), n + 1))
+            elif n <= 1000:
+                numbers.add(n)
+    return numbers
+
+
+def named_parents(text: str) -> set[int]:
+    """Claims the current instruction names as the parents of the claims to write: '14OR15 항의 종속항', '3항에 종속하는'."""
+    lead = text.split("\n\n", 1)[0]
+    return set().union(*(_numbers_of(m.group(1)) for m in _PARENT_AFTER.finditer(lead)))
+
+
+def cited_claims(text: str) -> set[int]:
+    """Claims the instruction names as parents of new claims or as what they draw on ('4항 5항의 구성을 활용'), not as
+    claims to write. The words that draw on a claim count only when they do not ask to rework it ('4항의 구성을 바꿔줘')."""
+    lead = text.split("\n\n", 1)[0]
+    cited = named_parents(text)
+    if claim_intent(lead) != "EDIT":
+        cited |= set().union(*(_numbers_of(m.group(1)) for m in _SOURCE_AFTER.finditer(lead)))
+    return cited
+
+
 def explicit_mentions(text: str) -> set[int] | None:
     if re.search(r"전체|모든|전부|\ball\b", text.split("\n\n", 1)[0], re.I):
         return None
@@ -65,6 +101,16 @@ def constrain_target(text: str, dependent: bool, target: str | None, append: boo
     if not dependent:
         return False, None
     mentioned = explicit_mentions(text)
+    cited = cited_claims(text) if mentioned else set()
+    if mentioned and mentioned & cited and claim_intent(text) != "EDIT":
+        # '4항 5항의 구성을 … 14OR15 항의 종속항을 추가해줘' (run web-54630bf2): the numbers are the parents and the claims
+        # drawn on, not claims to write. Read as targets, 14·15 were missing from the set and the request fell through to a
+        # new independent claim behind a prior-art search. What is left is the target; nothing left, the design numbers.
+        mentioned = mentioned - cited
+        if not mentioned:
+            return True, target if parse_target(target) is None and target else "기술기여가 확인된 후보"
+        selected = (parse_target(target) or set()) & mentioned or mentioned
+        return True, ",".join(map(str, sorted(selected)))
     if mentioned and append and parse_target(target) is None and claim_intent(text) != "EDIT" \
             and (any(lo == 1 for lo, _ in _mentioned_spans(text)) or _says_where_new_claims_go(text)):
         # The router chose no number and the words name claim 1 with the others ('1~12항에서 놓친 특허 포인트를 찾아

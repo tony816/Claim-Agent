@@ -45,6 +45,9 @@ class RunRequest(BaseModel):
     # EXISTING_SET_EDIT, for named claims that already exist in the set: EDIT rewrites them in place, NEW writes new claims
     # at those numbers and moves the set's own claims back. UNCLEAR (the user's words say neither) asks before any call.
     edit_intent: str = "EDIT"
+    # Claims the user's words name as the parents of the claims to write ('14OR15 항의 종속항'). One missing from the
+    # set the run hangs on stops it before any call, instead of the request going on without its parent.
+    named_parents: list[int] = Field(default_factory=list)
     # 08 §1.5·5.4: optional user business input (own product spec, competitor products, target implementers, roadmap).
     # It only ranks dependent candidates (BUSINESS_FIT); it is never invention material or a gate.
     business_context: str | None = None

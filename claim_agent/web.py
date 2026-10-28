@@ -322,7 +322,7 @@ class Workspace:
         """Preset inputs of the session's project for one request: instructions, USER_LOCK and categorized files."""
         pid = session.get("project_id")
         if not pid or pid not in self.projects:
-            return dict(instructions="", user_lock="", files=[], attachments=[], project=None)
+            return dict(instructions="", user_lock="", files=[], attachments=[], project=None, project_runs=[])
         folder = self.project_dir(pid)
         project = self.projects[pid]
         attachments = []
@@ -330,9 +330,14 @@ class Workspace:
             path = folder / "files" / item["id"] / item["name"]
             checked = validate_attachment(path, item.get("category", "invention"))
             attachments.append(dict(path=str(checked.path), category=checked.category, name=item["name"], project_file_id=item["id"]))
+        # Runs of the project's other conversations, newest first: a set one of them locked can lend the claims a request
+        # names as parents but this conversation never saw (13~15항 written in another conversation, run web-54630bf2).
+        others = sorted((s for s in self.sessions.values() if s.get("project_id") == pid and s["id"] != session.get("id")),
+                        key=lambda s: s.get("updated", 0), reverse=True)
+        runs = [m["pipeline_run_id"] for s in others for m in reversed(s["messages"]) if m.get("pipeline_run_id")]
         return dict(instructions=project.get("instructions", "").strip(), user_lock=project.get("user_lock", "").strip(),
                     files=[a["path"] for a in attachments], attachments=attachments,
-                    project=dict(id=pid, name=project["name"]))
+                    project=dict(id=pid, name=project["name"]), project_runs=list(dict.fromkeys(runs)))
 
     @property
     def moderated(self) -> bool:
@@ -492,6 +497,7 @@ class Workspace:
             request = dict(text=text, material=material, reference=context,
                            files=all_files, attachments=preset["attachments"], history=history, model=model, run_id=session["run_id"],
                            instructions=preset["instructions"], user_lock=preset["user_lock"], project=preset["project"],
+                           project_runs=preset["project_runs"],
                            ui_hints=dict(dependent=dependent, target=target or "", target_mode=target_mode,
                                          prior_search=bool(data.get("prior_search")),
                                          **({"halted": {k: halt.get(k) for k in ("stage", "kind", "role", "message")}} if halt else {})))

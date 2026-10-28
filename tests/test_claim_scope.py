@@ -194,3 +194,18 @@ def test_a_claim_set_with_its_root_and_plain_material_still_run(rt, request_inde
     engine.scope_guard(with_root, engine._bundle)
     from_material = engine.start(request_dep, "from-material")
     engine.scope_guard(from_material, engine._bundle)             # no claim file at all
+
+
+# Run web-54630bf2: 4·5 are what the new claims draw on and 14·15 their parents. Read as targets, 14·15 were missing
+# from the user's 1~12 set and the request fell through to a new independent claim behind a prior-art search.
+DRAW_ON = "4항 5항의 구성을 제어가 중점인 14~15항 실시예의 새로운 종속항 작성에 활용 가능해보여. 이에 관한 14OR15 항의 종속항을 추가해줘."
+
+
+def test_parents_and_claims_drawn_on_are_no_targets():
+    from claim_agent.claim_scope import cited_claims, named_parents
+
+    assert named_parents(DRAW_ON) == {14, 15} and cited_claims(DRAW_ON) == {4, 5, 14, 15}
+    assert constrain_target(DRAW_ON, True, "4,5,14,15", append=True) == (True, "기술기여가 확인된 후보")
+    assert constrain_target("제3항에 종속하는 새 항 13항을 추가해줘", True, "3,13") == (True, "13")
+    assert named_parents("제3항 또는 제4항을 인용하는 종속항 추가") == {3, 4}
+    assert constrain_target("4항의 구성을 바꿔줘", True, "4") == (True, "4")          # an edit of claim 4 itself

@@ -299,6 +299,9 @@ def test_project_presets_instructions_lock_and_files_for_every_session(workspace
         job["done"] = True
 
     monkeypatch.setattr(workspace, "execute", capture)
+    # Runs of the project's other conversations go with the request (parents they locked can be lent); never another project's.
+    workspace.sessions[first]["messages"] = [dict(id="m1", role="assistant", text="답", pipeline_run_id="web-first-run")]
+    workspace.sessions[standalone]["messages"] = [dict(id="m2", role="assistant", text="답", pipeline_run_id="web-elsewhere")]
     workspace.start(second, {"text": "독립항 작성해줘", "files": [own["id"]]})
     workspace.start(standalone, {"text": "안녕"})
     wait_for(lambda: len(commands) == 2)
@@ -306,7 +309,7 @@ def test_project_presets_instructions_lock_and_files_for_every_session(workspace
     names = [Path(p).name for p in req["files"]]
     assert names == ["발명설명.md", "선행.txt", "명세서.txt", "추가.txt"]     # project presets first, then the turn's attachment
     assert req["instructions"] == "종속항은 2~4항까지.\n청구항만 출력." and req["user_lock"] == "제1항 문언 유지"
-    assert req["project"] == dict(id=pid, name="클립 홀더 출원")
+    assert req["project"] == dict(id=pid, name="클립 홀더 출원") and req["project_runs"] == ["web-first-run"]
     categories = {a["name"]: a["category"] for a in req["attachments"]}
     assert categories == {"발명설명.md": "invention", "선행.txt": "prior_art", "명세서.txt": "spec"}
     assert all(a["project_file_id"] for a in req["attachments"]) and "추가.txt" not in categories

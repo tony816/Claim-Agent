@@ -7,7 +7,7 @@ import json
 import re
 from pathlib import Path
 
-from .claim_scope import apply_ui_target, claim_intent, constrain_target, find_existing_set, parse_target, ui_target_set
+from .claim_scope import apply_ui_target, claim_intent, constrain_target, find_existing_set, named_parents, parse_target, ui_target_set
 from .models.prior_art import PriorSearchOptions
 from .models.request import IMAGE_EXT, RunRequest
 from .pipeline.engine import Decision
@@ -111,7 +111,8 @@ def resolve_edit_scope(route: RouteDecision, request: dict, blocks: list[dict], 
     hint = route.authoring_scope
     targets = parse_target(route.dependent_target) if route.dependent else None
     route.authoring_scope, route.edit_targets = ("NEW_DEPENDENT_SET" if route.dependent else "NEW_INDEPENDENT"), []
-    append = route.dependent and not targets and hint == "EXISTING_SET_EDIT"
+    # Parents named for the new claims ('14OR15 항의 종속항') mean the user's own set, whatever the router's hint said.
+    append = route.dependent and not targets and (hint == "EXISTING_SET_EDIT" or bool(named_parents(request["text"])))
     if route.mode != "AUTHORING_DRAFT" or not (targets or append):
         return None
     own = previous.dependent.current if previous and previous.dependent and not previous.baseline_set else None
@@ -131,6 +132,13 @@ def resolve_edit_scope(route: RouteDecision, request: dict, blocks: list[dict], 
     route.authoring_scope, route.edit_targets = "EXISTING_SET_EDIT", sorted(targets)
     # Claims the user pasted to carry the set on ('[13항]' under a USER_LOCK of 1~12) belong to it: read-only like the rest.
     continued = continue_set(text, [t for sid, t in sources if sid != source_id])
+    # Parents the user names but this conversation never saw come from a set another conversation of the project locked.
+    lent = lend_parents(continued or text, named_parents(request["text"]), request.get("project_sets") or [])
+    if lent:
+        continued, lender, nos, missing = lent
+        request.setdefault("scope_notes", []).append(
+            f"지목한 부모항 {', '.join(f'제{n}항' for n in missing)}이 이 대화에 없어, 같은 프로젝트의 다른 대화가 잠근 세트({lender})의 "
+            f"제{nos[0]}~{nos[-1]}항을 원문 그대로 읽기 전용 기준 세트에 붙였습니다. 다른 문언을 쓰려면 그 항을 요청에 붙여 넣어 주세요.")
     try:
         digest = baseline_digest(continued or text)
     except ClaimParseError:
@@ -144,6 +152,66 @@ def resolve_edit_scope(route: RouteDecision, request: dict, blocks: list[dict], 
         path.write_text(text, encoding="utf-8", newline="")
         return str(path), digest
     return next(b["path"] for b in blocks if b["id"] == source_id), digest
+
+
+def lend_parents(text: str, parents: set[int], lenders: list[tuple[str, str]]) -> tuple[str, str, list[int], list[int]] | None:
+    """(joined set, lender, lent numbers, missing parents) when a lender set carries `text` on with the named parents it lacks.
+
+    Only the lender's claims after the end of `text` are taken, and only when every earlier claim they cite reads the
+    same in both sets: the user's own set stays the authority for the claims it already holds.
+    """
+    from .pipeline.claimtext import ClaimParseError, ancestor_nos, claim_set_text, continue_set, fill_blank_headers, parse_claim_set
+
+    try:
+        claims = parse_claim_set(fill_blank_headers(text))
+    except ClaimParseError:
+        return None
+    ours = {c.claim_no: " ".join(c.body.split()) for c in claims}
+    missing = parents - set(ours)
+    if not missing or not claims:
+        return None
+    last = max(ours)
+    for lender, lent in lenders:
+        try:
+            theirs = parse_claim_set(lent)
+        except ClaimParseError:
+            continue
+        tail = [c for c in theirs if c.claim_no > last]
+        tail_nos = {c.claim_no for c in tail}
+        if not missing <= tail_nos:
+            continue
+        bodies = {c.claim_no: " ".join(c.body.split()) for c in theirs}
+        try:
+            cited = set().union(*(ancestor_nos(theirs, c.claim_no) for c in tail)) - tail_nos
+        except ClaimParseError:
+            continue
+        if any(ours.get(n) != bodies.get(n) for n in cited):
+            continue
+        joined = continue_set(text, [claim_set_text(tail)])
+        if joined:
+            return joined, lender, sorted(tail_nos), sorted(missing)
+    return None
+
+
+def project_sets(cfg, run_ids: list[str] | None, limit: int = 20) -> list[tuple[str, str]]:
+    """(label, full set) of the claim sets the project's other conversations locked, newest first."""
+    from .models.state import RunState
+    from .store.report import edited_set_text
+
+    out = []
+    for rid in (run_ids or [])[:limit]:
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", rid):
+            continue
+        try:
+            state = RunState.model_validate_json((cfg.path("runs_dir") / rid / "state.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        dep = state.dependent
+        lock = dep and (dep.final_set_lock or dep.draft_set_lock)
+        text = edited_set_text(state) if lock else None
+        if text:
+            out.append((f"run {rid} · {lock}", text))
+    return out
 
 
 def revision_path(route: RouteDecision, request: dict, blocks: list[dict], paths: dict, previous,
@@ -283,6 +351,8 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
         route.dependent, route.dependent_target = constrain_target(request["text"], route.dependent, route.dependent_target,
                                                                    append=route.authoring_scope == "EXISTING_SET_EDIT")
         route.dependent, route.dependent_target = apply_ui_target(route.mode, route.dependent, route.dependent_target, request["text"], request.get("ui_hints"))
+        if request.get("project_runs") and named_parents(request["text"]):
+            request = {**request, "project_sets": project_sets(rt.cfg, request["project_runs"])}
         baseline = resolve_edit_scope(route, request, blocks, folder, previous)
     source = next((b for b in blocks if b["id"] == route.claim_source_id), None)
     if source is None and previous and authoring:
@@ -300,6 +370,7 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
         parent_claims=(request.get("review") or {}).get("parent_claims") or None,
         claim_file=baseline[0] if baseline else (source["path"] if source else None),
         authoring_scope=route.authoring_scope if authoring else None, **paths,
+        named_parents=sorted(named_parents(request["text"])) if authoring and route.dependent else [],
         # Only the user's own words of this turn decide edit or new; the engine asks when they say neither.
         edit_intent=(claim_intent(request["text"]) or "UNCLEAR") if baseline else "EDIT",
         # 선행기술 검색 체크(웹 작성 창·MCP claim_send): WIPS 검색 + Jev 선별 + 사전 심사, 나머지 값은 claim-agent.yaml prior_search
@@ -328,6 +399,7 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
                                                             feedback_text=request["text"]))
     else:
         state = engine.run(engine.start(req, folder.name))
+    state.notes.extend(request.get("scope_notes") or [])
     state.notes.append("자동 요청 분류: " + route.mode + " — " + route.reason + (f" (revision 경로: {applied})" if resume else ""))
     if turn:
         from .store.telemetry import add_usage
