@@ -9,7 +9,7 @@ model:
 # Which live provider runs the roles. Role files are provider-neutral; only transport, caching and
 # thinking mapping differ (docs/python_runtime.md → 프로바이더). Fixtures/replay work for both.
 provider:
-  kind: gemini                     # gemini | claude_oauth | codex_oauth | antigravity | openrouter (Claude·Codex·Antigravity는 공식 CLI 구독 로그인만 사용)
+  kind: gemini                     # gemini | claude_oauth | codex_oauth | antigravity | openrouter | runpod (Claude·Codex·Antigravity는 공식 CLI 구독 로그인만 사용)
   claude_oauth:
     model: sonnet                  # default | sonnet | opus | haiku | fable | claude-opus-5-5 | claude-fable-5-1 | account-accessible model ID
     timeout_s: 600
@@ -24,6 +24,11 @@ provider:
     model: deepseek/deepseek-v4.1-flash-1017   # any OpenRouter vendor/model ID
     api_key_env: OPENROUTER_API_KEY
     timeout_s: 900
+  runpod:
+    model: claim-drafter           # served name on the endpoint (vishwr/claim_drafter merged into Qwen3.5-9B)
+    endpoint_id: hfay80fd94tl4p    # RunPod serverless worker-vllm, AMPERE_48 then ADA_48_PRO, workers 0–1
+    api_key_env: RUNPOD_API_KEY
+    timeout_s: 900                 # a cold start pulls ~19 GB and loads it before the first answer
 
 roles:
   # Each role can set provider + model independently. Omitted/null values inherit defaults.
