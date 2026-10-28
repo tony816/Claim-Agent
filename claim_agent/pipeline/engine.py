@@ -11,7 +11,7 @@ from ..claim_scope import claim_intent, format_target, parse_target
 from ..config import AppConfig
 from ..graph.pipeline import GraphHooks
 from ..models.contracts import COMBINED_REVIEW, combined_contract, contract_for, fallback_gate_gaps, main_tree_gate_gaps, set_candidates
-from ..models.enums import ExecStatus, NextStep, RequestMode, Scope, Status, StyleChangeMode
+from ..models.enums import CandidateClass, ExecStatus, NextStep, RequestMode, Scope, Status, StyleChangeMode
 from ..models.envelope import OpenIssue, RoleEnvelope, envelope_schema_for
 from ..models.ids import Identifiers, bump_dependent_design_revision, bump_dependent_revision, bump_design_revision, bump_revision, input_revision_id, record_id
 from ..models.request import EXISTING_SET_EDIT, MaterialBundle, RunRequest
@@ -668,6 +668,11 @@ class PipelineEngine(PriorArtSteps):
             issued = False
         if scope_problem:
             issued = False
+        if (stage == Stage.DEP_ARCHITECT and issued and contract.passes(env, state.request_mode)
+                and not any(c.classification == CandidateClass.TECHNICAL_SOLUTION_CANDIDATE for c in env.candidates)):
+            # 사용자 결정 2026-10-28: with no technical contribution confirmed, the fallback axis alone is still written.
+            state.notes.append(f"종속항 설계: 기술기여 확인 후보 없음 — 보조 축(FALLBACK_ONLY, 구조만 청구·보정 근거용) "
+                               f"{len(set_candidates(env))}항만 잠금")
         text_for_hash = env.exact_claim_text if env.exact_claim_text else expected_exact
         ref = RecordRef(
             record_id=rid, kind=kind, role=record_role, scope=scope.value, stage=stage.value, status=env.status.value,

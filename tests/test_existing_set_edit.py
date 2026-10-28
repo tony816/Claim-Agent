@@ -592,6 +592,10 @@ def test_new_claims_on_parents_missing_from_the_set_stop_before_any_call(rt, req
     assert provider.calls == [] and state.halt.reason_code == "NAMED_PARENT_MISSING"
     assert "제11항, 제12항" in state.halt.message and "제1~9항" in state.halt.message
     assert route.authoring_scope == "EXISTING_SET_EDIT" and state.request["named_parents"] == [11, 12]
+    assert state.request["continues_request"] == text
+    # Resumed from any path (CLI, TUI, MCP) the run stops on the same check, still before any call.
+    resumed = rt.engine(provider).resume(state.run_id, Decision(text="재개"))
+    assert provider.calls == [] and resumed.halt.reason_code == "NAMED_PARENT_MISSING"
 
 
 def test_a_named_parent_with_no_set_at_all_stops_before_any_call(rt, request_indep, tmp_path):

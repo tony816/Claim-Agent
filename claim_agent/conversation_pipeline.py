@@ -279,28 +279,35 @@ def asks_other_edit(route: RouteDecision, previous, text: str) -> bool:
     return not (targets == base.edit_targets or (base.numbered_by_design and not targets))
 
 
-def rerouted_request(decision: str, earlier: list[str], run_request: str, held) -> str | None:
-    """The request a decision on a halted run goes to a new run with, or None to resume that run (logs #18·#19).
+def rerouted_request(decision: str, earlier: list[str], run_request: dict, held) -> str | None:
+    """The request a decision on a halted run goes to a new run with, or None to resume that run (logs #18~#21).
 
     A run whose set does not hold the parents the request names cannot reach them by resuming: one routed before log #18
-    took them as targets of a new design (run web-54630bf2), and one started by a bare '재개' never read them (run
-    web-741d86b2: baseline 1~12, the dependent architect stopped on 14·15 again). The request goes to a new run, where
-    the parents are found in the conversation or lent from the project. A bare decision carries no request of its own,
-    so the one it continues stands in for it: the latest user message (`earlier`, oldest first) naming parents with
-    only bare decisions after it, or else the halted run's own request.
+    took them as targets of a new design (run web-54630bf2), and one started by a bare '재개' never read them (runs
+    web-741d86b2, web-9d3c7750: baseline 1~12, the dependent architect stopped on 14·15 again). The request goes to a
+    new run, where the parents are found in the conversation or lent from the project.
+
+    A decision that names parents is that request. Otherwise the request it continues stands in for it, with the
+    decision added when it says more than '재개': the one the halted run recorded (`continues_request`), else the
+    latest user message (`earlier`, oldest first) naming parents with only bare decisions after it, else the halted
+    run's own request.
     """
-    asked = ""
-    for text in reversed([*earlier, decision]):
-        body = _decision_body(text)
-        if named_parents(body):
-            asked = body
-            break
-        if not _bare(body):
-            break
-    if not asked:
-        own = run_request.split("## 현재 요청\n\n", 1)[-1].split("\n\n## ", 1)[0].strip()
-        body = _decision_body(decision)
-        asked = own + ("" if _bare(body) or body in own else "\n\n" + body)
+    body = _decision_body(decision)
+    if named_parents(body):
+        asked = body
+    else:
+        base = run_request.get("continues_request") or ""
+        if not base and _bare(body):
+            for text in reversed(earlier):
+                earlier_body = _decision_body(text)
+                if named_parents(earlier_body):
+                    base = earlier_body
+                    break
+                if not _bare(earlier_body):
+                    break
+        if not base:
+            base = (run_request.get("request_text") or "").split("## 현재 요청\n\n", 1)[-1].split("\n\n## ", 1)[0].strip()
+        asked = base + ("" if _bare(body) or body in base else "\n\n" + body)
     return asked if named_parents(asked) - set(held) else None
 
 
@@ -410,6 +417,7 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
         claim_file=baseline[0] if baseline else (source["path"] if source else None),
         authoring_scope=route.authoring_scope if authoring else None, **paths,
         named_parents=sorted(named_parents(request["text"])) if authoring and route.dependent else [],
+        continues_request=request.get("continues_request") or (request["text"] if authoring and named_parents(request["text"]) else None),
         # Only the user's own words of this turn decide edit or new; the engine asks when they say neither.
         edit_intent=(claim_intent(request["text"]) or "UNCLEAR") if baseline else "EDIT",
         # 선행기술 검색 체크(웹 작성 창·MCP claim_send): WIPS 검색 + Jev 선별 + 사전 심사, 나머지 값은 claim-agent.yaml prior_search

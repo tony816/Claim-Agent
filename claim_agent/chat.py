@@ -107,13 +107,14 @@ def routed_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
         route.resumes_halt = False                 # only a run that is actually waiting can take the message as its decision
     if route.resumes_halt and asks_other_edit(route, previous, request["text"]):
         route.resumes_halt = False                 # its sealed edit targets are not what this message asks for: a new run
-    if route.resumes_halt:
+    if halted and route.mode in {"AUTHORING_DRAFT", "FINALIZATION"}:
+        # Whether the router took the message as the halt's decision or as a new run (run web-9d3c7750: it read CLAUDE.md
+        # and said new run, the text stayed '재개'), a run that cannot reach the parents the request names gets the request.
         held = [c.claim_no for c in previous.baseline_set.claims] if previous.baseline_set else []
-        asked = rerouted_request(request["text"], request.get("prior_requests") or [], previous.request.get("request_text") or "", held)
+        asked = rerouted_request(request["text"], request.get("prior_requests") or [], previous.request, held)
         if asked:
-            # The run cannot reach the parents the request names: a new run takes the request, not the bare decision.
             route.resumes_halt = False
-            request = {**request, "text": asked}
+            request = {**request, "text": asked, "continues_request": asked}
     if route.mode == "CONSULT" and not moderator.enabled(cfg):
         # Without the moderator no one answers a question directly; the reviewers answer it as before.
         route = RouteDecision(mode="REVIEW_ONLY", reason=route.reason, reviewers=["syntax-scope-reviewer", "oa-strategy-reviewer"],

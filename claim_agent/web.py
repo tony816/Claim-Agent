@@ -713,7 +713,7 @@ class Workspace:
             from .conversation_pipeline import rerouted_request
             held = [c["claim_no"] for c in (state.get("baseline_set") or {}).get("claims", [])]
             asked = kind == "none" and rerouted_request(text, [m["text"] for m in session["messages"] if m["role"] == "user"],
-                                                        (state.get("request") or {}).get("request_text") or "", held)
+                                                        state.get("request") or {}, held)
             if asked:
                 # Re-running the stage cannot reach the parents the request names: the request goes through routing
                 # again as a new message instead.

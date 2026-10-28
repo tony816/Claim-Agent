@@ -158,10 +158,11 @@ def fallback_gate_gaps(env: RoleEnvelope) -> list[str]:
 
 
 def _dep_architect(env: RoleEnvelope, mode: RequestMode) -> bool:
+    # 08 §5.6 (사용자 결정 2026-10-28): the set needs a claim to write, on the main tree or on the fallback axis alone.
     return (
         env.status == Status.PASS
         and _g(env, "DEPENDENT_DESIGN_GATE", {GateValue.LOCKED})
-        and any(c.classification == CandidateClass.TECHNICAL_SOLUTION_CANDIDATE for c in env.candidates)
+        and bool(set_candidates(env))
         and not main_tree_gate_gaps(env)
         and not fallback_gate_gaps(env)
     )

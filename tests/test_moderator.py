@@ -159,7 +159,7 @@ def test_a_halted_run_that_read_named_parents_as_targets_is_not_resumed(rt, requ
     started = []
 
     def new_run(rt_, provider, request, route, *a, **k):
-        started.append((route, request["text"]))
+        started.append((route, request["text"], request.get("continues_request")))
         raise NewRun
 
     monkeypatch.setattr(runtime, "make_provider", lambda *a, **k: None)
@@ -180,6 +180,23 @@ def test_a_halted_run_that_read_named_parents_as_targets_is_not_resumed(rt, requ
     later = dict(bare, prior_requests=[ask, "히트리드 모듈의 단열 구조를 종속항으로 써 줘"])   # another request since: resume
     assert chat.routed_turn(ScriptedProvider({moderator.MODERATOR: [route]}), rt.cfg, None, later, tmp_path,
                             EventWriter(tmp_path / "events.jsonl"))["resume_halted"]
+    # Run web-9d3c7750: the router itself took '재개' as a new run; the request still has to go with it.
+    new = {"mode": "AUTHORING_DRAFT", "reason": "새 run으로 다시 분류", "resumes_halt": False, "dependent": True,
+           "dependent_target": "기술기여가 확인된 후보", "authoring_scope": "EXISTING_SET_EDIT"}
+    with pytest.raises(NewRun):
+        chat.routed_turn(ScriptedProvider({moderator.MODERATOR: [new]}), rt.cfg, None, bare, tmp_path, EventWriter(tmp_path / "events.jsonl"))
+    assert started[-1][1:] == (ask, ask)
+    # The request a run recorded it continues carries the next '재개' on, with no earlier messages to search.
+    state.request.update(continues_request=ask)
+    rt.store.save_state(state)
+    with pytest.raises(NewRun):
+        chat.routed_turn(ScriptedProvider({moderator.MODERATOR: [new]}), rt.cfg, None, dict(bare, prior_requests=[]), tmp_path,
+                         EventWriter(tmp_path / "events.jsonl"))
+    assert started[-1][1] == ask
+    # A question on the halt stays a question.
+    asked = chat.routed_turn(ScriptedProvider({moderator.MODERATOR: [{"mode": "CONSULT", "reason": "질문"}, "부모항이 없어 멈췄습니다."]}),
+                             rt.cfg, None, dict(bare, text="왜 멈췄어?"), tmp_path, EventWriter(tmp_path / "events.jsonl"))
+    assert asked["effective_mode"] == "CONSULT" and len(started) == 4
 
 
 def test_question_on_a_halted_run_is_answered_and_the_run_keeps_waiting(rt, request_indep, tmp_path, monkeypatch):

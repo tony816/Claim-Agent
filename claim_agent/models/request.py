@@ -48,6 +48,9 @@ class RunRequest(BaseModel):
     # Claims the user's words name as the parents of the claims to write ('14OR15 항의 종속항'). One missing from the
     # set the run hangs on stops it before any call, instead of the request going on without its parent.
     named_parents: list[int] = Field(default_factory=list)
+    # The user's request this run carries on when its own message was a bare decision ('재개'): a later decision on this
+    # run continues the same request instead of losing it to the message's wording (logs #20·#21).
+    continues_request: str | None = None
     # 08 §1.5·5.4: optional user business input (own product spec, competitor products, target implementers, roadmap).
     # It only ranks dependent candidates (BUSINESS_FIT); it is never invention material or a gate.
     business_context: str | None = None

@@ -161,10 +161,10 @@ def picture(status: str = "PASS", return_to: str | None = None) -> Callable[[Cal
     return f
 
 
-def dep_architect(locked: bool = True, tsc: bool = True, enforcement: str = "PASS") -> Callable[[CallSpec], dict]:
+def dep_architect(locked: bool = True, tsc: bool = True, enforcement: str = "PASS", fallback: bool = False) -> Callable[[CallSpec], dict]:
     def f(spec: CallSpec) -> dict:
         scenario = lambda dc: f"{dc} 실시품 제조·판매 시 분해로 확인" if enforcement == "PASS" else None  # noqa: E731
-        cands = [{"dc_id": dc, "classification": "TECHNICAL_SOLUTION_CANDIDATE" if tsc else "DRAWING_ONLY", "DEPENDENT_SOURCE_GATE": "PASS", "CAUSAL_CONTRIBUTION_GATE": "PASS", "CLAIMABILITY_GATE": "PASS", "ENFORCEMENT_VALUE_GATE": enforcement, "enforcement_scenario": scenario(dc), "PRIOR_ART_CONTRIBUTION_GATE": "UNVERIFIED", "planned_claim_no": n, "parent_claim_no": p} for n, p, dc, _ in DEP_CLAIMS]
+        cands = [{"dc_id": dc, "classification": "FALLBACK_ONLY" if fallback else "TECHNICAL_SOLUTION_CANDIDATE" if tsc else "DRAWING_ONLY", "DEPENDENT_SOURCE_GATE": "PASS", "CAUSAL_CONTRIBUTION_GATE": "PASS", "CLAIMABILITY_GATE": "PASS", "ENFORCEMENT_VALUE_GATE": enforcement, "enforcement_scenario": scenario(dc), "PRIOR_ART_CONTRIBUTION_GATE": "UNVERIFIED", "planned_claim_no": n, "parent_claim_no": p} for n, p, dc, _ in DEP_CLAIMS]
         if not locked or not tsc:
             return _base(spec, "BLOCK", {"DEPENDENT_DESIGN_GATE": "UNLOCKED", "INVENTIVE_STEP": "UNVERIFIED"}, ["- DEPENDENT_DESIGN_GATE: UNLOCKED — NO_TECHNICAL_SOLUTION_CANDIDATE"], reason_code="NO_TECHNICAL_SOLUTION_CANDIDATE", candidates=cands, next_step="STOP")
         return _base(spec, "PASS", {"DEPENDENT_DESIGN_GATE": "LOCKED", "INVENTIVE_STEP": "UNVERIFIED"}, ["- INVENTIVE_STEP: UNVERIFIED — PRIOR_ART_NOT_PROVIDED"], candidates=cands)

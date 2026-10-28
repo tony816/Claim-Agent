@@ -191,6 +191,16 @@ def test_dependent_no_tsc_halts_without_padding(rt, request_dep):
     assert not [c for c in engine.provider.calls if c.role == "claim-drafter" and c.scope == "DEPENDENT_SET"]
 
 
+def test_dependent_fallback_axis_alone_is_locked(rt, request_dep):
+    """사용자 결정 2026-10-28 (run web-9d3c7750): with no technical contribution confirmed, the fallback axis is written."""
+    script = R.happy_script(dependent=True)
+    script["dependent-claim-strategy-architect"] = [R.dep_architect(fallback=True, enforcement="BLOCK")]
+    engine = _engine(rt, script)
+    state = engine.run(engine.start(request_dep, "run-test-fallback"))
+    assert state.dependent.draft_set_lock is not None, state.halt
+    assert any("기술기여 확인 후보 없음 — 보조 축" in n for n in state.notes)
+
+
 def test_dependent_main_tree_without_enforcement_value_halts(rt, request_dep):
     script = R.happy_script(dependent=True)
     script["dependent-claim-strategy-architect"] = [R.dep_architect(enforcement="BLOCK")]
