@@ -349,6 +349,12 @@ def test_project_presets_instructions_lock_and_files_for_every_session(workspace
     assert all(a["project_file_id"] for a in req["attachments"]) and "추가.txt" not in categories
     plain = json.loads(Path(commands[1][commands[1].index("--request") + 1]).read_text(encoding="utf-8"))
     assert plain["files"] == [] and plain["instructions"] == "" and plain["user_lock"] == "" and plain["project"] is None
+    # A free work conversation of the project gets the same instructions and USER_LOCK (web-110aa2d4 sent no lock).
+    free = workspace.create(pid, "free")["id"]
+    workspace.start(free, {"text": "[청구항 1]에 대한 종속항"})
+    wait_for(lambda: len(commands) == 3)
+    loose = json.loads(Path(commands[2][commands[2].index("--request") + 1]).read_text(encoding="utf-8"))
+    assert loose["work_mode"] == "free" and loose["instructions"] == req["instructions"] and loose["user_lock"] == "제1항 문언 유지"
     # Survives a restart; removing a file and deleting the project keep the conversations.
     restored = web.Workspace(workspace.root)
     assert restored.projects[pid]["files"][1]["name"] == "선행.txt" and restored.sessions[first]["project_id"] == pid

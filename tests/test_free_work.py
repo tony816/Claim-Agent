@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from claim_agent import free_work, runtime, web
+from claim_agent import chat, free_work, runtime, web
 from claim_agent.pipeline.claimtext import parse_claim_set
 from claim_agent.provider.scripted import ScriptedProvider
 from claim_agent.routing import RouteDecision
@@ -57,6 +57,27 @@ def test_free_turn_answers_without_the_router_and_labels_the_draft(rt, tmp_path)
     assert result["effective_mode"] == "FREE" and result["answer"].startswith(free_work.UNREVIEWED_LABEL)
     assert result["history"][-1]["parts"][0]["text"] == DRAFT               # the agent's next turn sees its bare answer
     assert "프로젝트 발명 자료" not in json.dumps(result["history"], ensure_ascii=False)   # preset files are resent, not stored
+
+
+PROJECT_LOCK = ("【청구항 1】\n본체; 및\n상기 본체에서 돌출된 복수의 돌출부;를 포함하는,\n클립 홀더.\n\n"
+                "【청구항 ?】\n클립 홀더에 착탈되는 덮개로서,\n상기 덮개를 관통하는 슬롯;을 포함하는,\n덮개.")
+
+
+def test_every_free_agent_turn_reads_the_project_user_lock(rt, tmp_path, monkeypatch):
+    # web-110aa2d4: '[청구항 ?] 에 대한 종속항' — the claim was in the project's USER_LOCK only, and the free agent never saw it.
+    provider = ScriptedProvider({free_work.FREE_ROLE: [DRAFT]})
+    free_work.free_turn(provider, rt.cfg, dict(text="[청구항 ?]에 대한 종속항", files=[], history=[], model="m", instructions="", user_lock=PROJECT_LOCK))
+    (call,) = provider.calls
+    assert chat.PROJECT_USER_LOCK_HEADER in call.system_instruction and "상기 덮개를 관통하는 슬롯" in call.system_instruction
+    # The general agent's turn after a review reads it too.
+    provider = ScriptedProvider({"syntax-scope-reviewer": [R.syntax()], free_work.FREE_ROLE: [FIXED]})
+    _offline(rt, monkeypatch, provider)
+    folder = tmp_path / "request"
+    folder.mkdir()
+    free_work.review_turn(provider, rt.cfg, None, _review_request("syntax-scope-reviewer", "고쳐 줘", user_lock=PROJECT_LOCK), folder)
+    assert "상기 덮개를 관통하는 슬롯" in _agent_calls(provider)[0].system_instruction
+    # Without a USER_LOCK the system prompt is the bare one.
+    assert chat.system_with_instructions("기본", "", "") == "기본"
 
 
 def _review_request(role: str, note: str = "", claims: str = DRAFT, history: list[dict] | None = None, user_lock: str = "") -> dict:
@@ -255,6 +276,7 @@ def test_free_conversation_sends_plainly_and_reviews_one_message(workspace, monk
     workspace.start(sid, {"text": "초안 써줘", "target_mode": "range", "target_segments": "bogus"})   # composer options do not apply
     wait_for(lambda: len(requests) == 1)
     assert requests[0]["work_mode"] == free_work.FREE and "ui_hints" not in requests[0] and "material" not in requests[0]
+    assert requests[0]["user_lock"] == ""                       # carried even when empty; a project's lock fills it
     question, answer = workspace.sessions[sid]["messages"]
     assert question["mode"] == answer["mode"] == "FREE"
     answer.update(text=DRAFT, status="complete")

@@ -54,7 +54,7 @@ FREE_SYSTEM = """너는 Claim-Agent의 자유 작업 에이전트다. 사용자�
 이 모드에는 설계·문체·성공조건·통사·OA·역구성 게이트가 없다. 경험 많은 변리사가 도면과 메모를 보고 바로 쓰듯, 요청받은 청구항 초안·수정안·대안·의견을 바로 쓴다.
 
 자료와 근거
-- 기술 사실은 사용자가 준 자료(대화, 첨부 도면·슬라이드, 프로젝트 지침·파일)에서 가져온다. 도면의 라벨·분해도·화살표·메모가 보여 주는
+- 기술 사실은 사용자가 준 자료(대화, 첨부 도면·슬라이드, 프로젝트 지침·USER_LOCK·파일)에서 가져온다. 도면의 라벨·분해도·화살표·메모가 보여 주는
   구성·배치·적층 순서·연결, 그리고 통상의 기술자가 거기서 명확히 읽어 내는 사항은 근거가 있는 것으로 쓴다. 예: 분해도에서 겹쳐 그려진
   부품들은 그 순서로 적층되고, 과열 시 전원을 끊는 안전 부품이 히터와 같은 모듈에 있으면 히터 급전 경로에 놓인다. 도면에서 읽은 해석은
   청구항 앞 설명에 한 줄로 밝힌다.
@@ -101,7 +101,7 @@ FOLLOW_UP_REQUEST = """방금 실행한 검수({labels})의 결과를 바탕으�
 - 블라인드 복원 결과가 있으면, 복원이 자료의 구조와 다르게 읽거나 정하지 못한 곳을 문언으로 닫는다.
 - 고친 문언의 기능·결과 구절마다 적힌 구성만으로 그 기능이 따라 나오는지(반례가 없는지) 다시 본다. 고치다 전제를 빼거나 약하게 하지 않는다.
   전제가 빠졌다는 지적은 자료(도면에서 명확히 읽히는 배치·연결 포함)가 주는 전제를 더해 닫고, 전제가 자료에 없을 때만 그 기능 구절을 구조로 바꾼다.
-- 기술 사실은 자료(대화, 첨부, 프로젝트 지침·파일)와 거기서 명확히 읽히는 사항에서 가져온다. 자료로 고칠 수 없거나 아래 청구항 밖(부모항 등)을 고쳐야 하는 지적은 그 부분을 그대로 둔다.
+- 기술 사실은 자료(대화, 첨부, 프로젝트 지침·USER_LOCK·파일)와 거기서 명확히 읽히는 사항에서 가져온다. 자료로 고칠 수 없거나 아래 청구항 밖(부모항 등)을 고쳐야 하는 지적은 그 부분을 그대로 둔다.
   도면을 받지 않은 검수 역할이 도면에 있는 출처를 못 찾았다는 지적은 따르지 않고, 못 고친 곳에 그 이유를 적는다.
 - 아래 청구항의 항 번호와 인용관계는 그대로 두고, 없는 항을 새로 쓰지 않는다.
 - 답 형식: 첫머리에 `- 바꾼 곳: …` 한두 줄(고치지 못한 지적이 있으면 `- 못 고친 곳: … (이유)` 한 줄), 그다음 고친 청구항 전문만. 검수 보고서를 옮겨 적거나 다른 설명을 붙이지 않는다.
@@ -165,7 +165,7 @@ def free_turn(provider: LLMProvider, cfg, request: dict) -> dict:
     sent = {"role": "user", "parts": [*_preset_parts(preset), *message["parts"]]} if preset else None
     gen = GenParams(temperature=0.5, thinking_level=FREE_THINKING, max_output_tokens=cfg.model.max_output_tokens)
     result = generate_turn(provider, request["model"], request.get("history", []), message, None, request.get("instructions"),
-                           sent=sent, system=FREE_SYSTEM, role=FREE_ROLE, gen=gen)
+                           sent=sent, system=FREE_SYSTEM, role=FREE_ROLE, gen=gen, user_lock=request.get("user_lock"))
     # The label and footnote are for the reader; the history the agent sees next turn keeps its bare answer.
     answer = UNREVIEWED_LABEL + "\n\n" + result["answer"] + "\n\n" + usage_note(provider.usage, time.time() - started)
     return {**result, "answer": answer, "effective_mode": "FREE", "status": "complete"}
@@ -231,7 +231,7 @@ def review_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
     sent = {"role": "user", "parts": [*_preset_parts(preset), *message["parts"]]} if preset else None
     gen = GenParams(temperature=0.3, thinking_level=FREE_THINKING, max_output_tokens=cfg.model.max_output_tokens)
     done = generate_turn(provider, request["model"], [*history, *reviewed], message, None, request.get("instructions"),
-                         sent=sent, system=FREE_SYSTEM, role=FREE_ROLE, gen=gen)
+                         sent=sent, system=FREE_SYSTEM, role=FREE_ROLE, gen=gen, user_lock=request.get("user_lock"))
     # The request decided the form: claim blocks mean fixed wording, anything else an answer from the findings.
     revised = review_target(done["answer"]) is not None
     usage = {k: v for k, v in turn_usage(rt.store.load_state(result["run_id"]))[0].items() if k not in ("started_at", "finished_at")}

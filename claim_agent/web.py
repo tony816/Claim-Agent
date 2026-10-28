@@ -521,7 +521,7 @@ class Workspace:
         preset = self.project_inputs(session)
         request = dict(text=text, files=[str(validate_attachment(folder / "uploads" / fid / known[fid]["name"]).path) for fid in selected],
                        project_attachments=preset["attachments"], history=(read_state(folder / "history.json") or {}).get("history", []),
-                       model=self.cfg.default_model, instructions=preset["instructions"], work_mode=FREE)
+                       model=self.cfg.default_model, instructions=preset["instructions"], user_lock=preset["user_lock"], work_mode=FREE)
         self.spawn_chat(sid, request, dict(text=text, files=[known[f] for f in selected]), "FREE", files=selected)
 
     def review(self, sid: str, data: dict) -> None:

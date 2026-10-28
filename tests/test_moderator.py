@@ -53,6 +53,18 @@ def test_consult_question_is_answered_without_any_claim_role(rt, tmp_path, monke
     assert result["history"][-1]["parts"][0]["text"].endswith("B로 6항을 다시 쓸까요?")   # no footnote in the model's history
 
 
+def test_consult_reads_the_project_user_lock_and_may_quote_it(rt, tmp_path, monkeypatch):
+    lock = "【청구항 ?】\n클립 홀더에 착탈되는 덮개로서,\n상기 덮개를 관통하는 슬롯;을 포함하는,\n덮개."
+    answer = "USER_LOCK의 항입니다.\n\n" + lock + "\n\n이 항에 슬롯 폭을 더할 수 있습니다."
+    provider = ScriptedProvider({moderator.MODERATOR: [{"mode": "CONSULT", "reason": "질문"}, answer]})
+    monkeypatch.setattr(runtime, "make_provider", lambda *a, **k: pytest.fail("질문에 파이프라인을 돌림"))
+    request = dict(text="[청구항 ?]에 적을 만한 종속항이 있을지?", material="", files=[], history=[], model="m", user_lock=lock)
+    result = chat.routed_turn(provider, rt.cfg, None, request, tmp_path, EventWriter(tmp_path / "events.jsonl"))
+    consult_call = provider.calls[1]
+    assert "## 프로젝트 USER_LOCK" in consult_call.packet_text and "상기 덮개를 관통하는 슬롯" in consult_call.packet_text
+    assert moderator.UNSEALED_LABEL not in result["answer"]          # quoting the user's own locked claim is not a new draft
+
+
 def test_consult_falls_back_to_reviewers_when_the_moderator_is_off(rt, tmp_path, monkeypatch):
     monkeypatch.setattr(rt.cfg.conversation, "moderator", "off")
     provider = ScriptedProvider({"request-router": [{"mode": "CONSULT", "reason": "질문"}],

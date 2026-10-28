@@ -35,22 +35,32 @@ def user_message(text: str, material: str, files: list[str]) -> dict:
 
 
 PROJECT_INSTRUCTIONS_HEADER = "## 프로젝트 지침 (사용자가 프로젝트 폴더에 미리 설정한 지시)"
+PROJECT_USER_LOCK_HEADER = "## 프로젝트 USER_LOCK (사용자가 프로젝트에 적어 둔 확정 청구항 문언)"
+PROJECT_USER_LOCK_NOTE = ("위 USER_LOCK은 사용자가 확정한 이 프로젝트의 청구항 세트이자 사용자 제공 자료다. 사용자가 항 번호(`【청구항 ?】`처럼 "
+                          "번호가 빈 항은 세트 안의 순서)나 내용으로 가리키는 청구항은 먼저 여기서 찾아 그 문언 그대로 쓰고, 새 항은 그 용어를 "
+                          "`상기 …`로 이어 받는다. 사용자의 명시적 재승인 없이 이 문언을 고치지 않으며, 이 문언이 검수·게이트·LOCK을 통과한 것처럼 말하지 않는다.")
 
 
-def system_with_instructions(base: str, instructions: str | None) -> str:
-    """Project instructions are standing user directives for the conversation, never invention facts or gate verdicts."""
-    text = (instructions or "").strip()
-    if not text:
-        return base
-    return (base + "\n\n" + PROJECT_INSTRUCTIONS_HEADER + "\n" + text
-            + "\n\n위 프로젝트 지침은 답변 방식·범위·우선순위에 대한 사용자 지시이자, 사용자가 직접 적은 기술 설명·청구항 자료다. 지침에 적힌 기술 내용은 사용자 제공 자료로 인용할 수 있지만, 지침을 근거로 검수·게이트·LOCK을 통과한 것처럼 말하지 않는다.")
+def system_with_instructions(base: str, instructions: str | None, user_lock: str | None = None) -> str:
+    """Project instructions are standing user directives for the conversation, never invention facts or gate verdicts.
+
+    The project's USER_LOCK rides along on every turn that has no gated run to carry it (chat, consult, free work): a
+    request that names a claim of the project's set must find it here (web-110aa2d4: the free agent never saw 【청구항 ?】).
+    """
+    text, lock = (instructions or "").strip(), (user_lock or "").strip()
+    if text:
+        base += ("\n\n" + PROJECT_INSTRUCTIONS_HEADER + "\n" + text
+                 + "\n\n위 프로젝트 지침은 답변 방식·범위·우선순위에 대한 사용자 지시이자, 사용자가 직접 적은 기술 설명·청구항 자료다. 지침에 적힌 기술 내용은 사용자 제공 자료로 인용할 수 있지만, 지침을 근거로 검수·게이트·LOCK을 통과한 것처럼 말하지 않는다.")
+    if lock:
+        base += "\n\n" + PROJECT_USER_LOCK_HEADER + "\n" + lock + "\n\n" + PROJECT_USER_LOCK_NOTE
+    return base
 
 
 CHAT_GEN = GenParams(temperature=0.7, thinking_level="LOW", max_output_tokens=8192)
 
 
 def _chat_spec(model: str, history: list[dict], message: dict, instructions: str | None = None,
-               system: str = SYSTEM, role: str = "대화", gen: GenParams = CHAT_GEN) -> CallSpec:
+               system: str = SYSTEM, role: str = "대화", gen: GenParams = CHAT_GEN, user_lock: str | None = None) -> CallSpec:
     """The current turn as a provider-neutral CallSpec: text parts become the packet, images ride along."""
     texts, images = [], []
     for part in message["parts"]:
@@ -60,7 +70,7 @@ def _chat_spec(model: str, history: list[dict], message: dict, instructions: str
             data = base64.b64decode(part["inline_data"]["data"])
             images.append(ImagePart(part["inline_data"]["mime_type"], data, "첨부 이미지", hashlib.sha256(data).hexdigest()))
     return CallSpec(
-        role=role, scope="CHAT", model=model, system_instruction=system_with_instructions(system, instructions), packet_text="\n\n".join(texts), sources_block="",
+        role=role, scope="CHAT", model=model, system_instruction=system_with_instructions(system, instructions, user_lock), packet_text="\n\n".join(texts), sources_block="",
         images=images, json_schema=None, tools=None, gen=gen,
         use_cache=False, phase="chat", stage="CHAT", run_id="", history=history,
     )
@@ -138,7 +148,7 @@ def routed_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
         context = history
         if request.get("reference"):
             context = [*history, {"role": "model", "parts": [{"text": request["reference"]}]}]
-        result = generate_turn(provider, request["model"], context, message, events, request.get("instructions"))
+        result = generate_turn(provider, request["model"], context, message, events, request.get("instructions"), user_lock=request.get("user_lock"))
         # The footnote is for the reader only; the history the model sees next turn keeps the bare answer.
         answer = result["answer"] + "\n\n" + usage_note(provider.usage, time.time() - started)
         return {**result, "answer": answer, "effective_mode": route.mode, "route": route.model_dump()}

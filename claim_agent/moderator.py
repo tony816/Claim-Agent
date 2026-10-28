@@ -200,16 +200,18 @@ def consult(provider: LLMProvider, cfg, request: dict, blocks: list[dict], paths
 
     user = [b for b in blocks if b["origin"] == "user" and not b.get("is_request")]
     material = "\n\n".join(f"### 원자료 {b['id']} ({b['category']})\n{b['text']}" for b in user) or "없음"
+    lock = str(request.get("user_lock") or "").strip()
     packet = "\n\n".join([
         "## 이번 질문\n" + request["text"],
         "## 사용자 제공 원자료 (기술 사실의 유일한 근거 · 첨부 도면은 이미지로 함께 전달)\n" + material,
+        "## 프로젝트 USER_LOCK (사용자 확정 청구항 문언 — 사용자 제공 원자료)\n" + (lock or "없음"),
         "## 이 대화의 작업 상태 (봉인 기록)\n" + seal_summary(previous),
         "## 앞선 답변 (참고 — 원자료 아님)\n" + (previous_answer(request) or "없음"),
     ])
     result = provider.generate(_spec(cfg, CONSULT_SYSTEM, packet, _images(paths.get("drawings") or []), request.get("history", []), "CONSULT"))
     if not result.text.strip():
         raise RuntimeError("모더레이터가 답을 반환하지 않았습니다.")
-    known = known_claims(*sealed_texts(previous), *(b["text"] for b in user))
+    known = known_claims(*sealed_texts(previous), *(b["text"] for b in user), lock)
     return guard(result.text.strip(), known)
 
 
