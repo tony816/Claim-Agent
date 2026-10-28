@@ -145,6 +145,32 @@ def test_a_request_for_other_claims_on_a_halted_edit_starts_a_new_run(rt, reques
     assert result["resume_halted"] and len(started) == 1                 # no claim words: still the halted run's decision
 
 
+def test_a_halted_run_that_read_named_parents_as_targets_is_not_resumed(rt, request_indep, tmp_path, monkeypatch):
+    """Run web-54630bf2: routed before log #18, its route kept 14·15 as targets of a new design however often it resumed."""
+    from claim_agent import conversation_pipeline
+
+    ask = "이에 관한 14OR15 항의 종속항을 추가해줘."
+    state = _halted_run(rt, request_indep)
+    state.request.update(request_text="## 현재 요청\n\n" + ask, dependent=True, dependent_target="14,15", named_parents=[])
+    rt.store.save_state(state)
+    class NewRun(Exception):
+        pass
+
+    started = []
+
+    def new_run(rt_, provider, request, route, *a, **k):
+        started.append(route)
+        raise NewRun
+
+    monkeypatch.setattr(runtime, "make_provider", lambda *a, **k: None)
+    monkeypatch.setattr(conversation_pipeline, "run_pipeline", new_run)
+    route = {"mode": "AUTHORING_DRAFT", "reason": "중지 사유에 대한 결정", "resumes_halt": True}
+    request = dict(text="하기 재개", files=[], history=[], model="m", run_id="halted-run", ui_hints={"halted": {"stage": "ARCHITECT", "kind": "REVIEW"}})
+    with pytest.raises(NewRun):
+        chat.routed_turn(ScriptedProvider({moderator.MODERATOR: [route]}), rt.cfg, None, request, tmp_path, EventWriter(tmp_path / "events.jsonl"))
+    assert len(started) == 1 and not started[0].resumes_halt
+
+
 def test_question_on_a_halted_run_is_answered_and_the_run_keeps_waiting(rt, request_indep, tmp_path, monkeypatch):
     _halted_run(rt, request_indep)
     provider = ScriptedProvider({moderator.MODERATOR: [{"mode": "CONSULT", "reason": "멈춘 이유 질문"}, "역구성에서 한 가지가 달리 읽혀 멈췄습니다."]})

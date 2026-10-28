@@ -267,6 +267,33 @@ def test_web_feedback_resumes_and_rechecks_same_run(rt, request_indep, tmp_path,
         workspace.close()
 
 
+def test_resuming_a_run_that_read_named_parents_as_targets_routes_its_request_again(workspace, monkeypatch):
+    """Run web-54630bf2, resumed after log #18: the stage re-ran on its old route (prior search, then the architect asked for 14·15)."""
+    ask = "4항 5항의 구성을 제어가 중점인 14~15항 실시예의 새로운 종속항 작성에 활용 가능해보여. 이에 관한 14OR15 항의 종속항을 추가해줘."
+    run = workspace.cfg.path("runs_dir") / "web-old-route"
+    run.mkdir(parents=True)
+    request = dict(request_mode="AUTHORING_DRAFT", request_text="## 현재 요청\n\n" + ask + "\n\n## 앞선 답변\n\n답",
+                   dependent=True, dependent_target="4,5,14,15", named_parents=[])
+    state = dict(run_id="web-old-route", request=request, halt=dict(stage="PRIOR_SEARCH", kind="REVIEW", message="검색 불가"),
+                 candidate={}, dependent={}, baseline_set=None)
+    (run / "state.json").write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    sid = workspace.create()["id"]
+    workspace.sessions[sid].update(run_id="web-old-route", messages=[
+        dict(id="u1", role="user", text=ask), dict(id="a1", role="assistant", text="답", status="review", pipeline_run_id="web-old-route")])
+    sent = []
+    monkeypatch.setattr(workspace, "require_connection", lambda: None)
+    monkeypatch.setattr(workspace, "spawn_chat", lambda sid_, req, user, mode, **k: sent.append(req))
+    monkeypatch.setattr(web, "resume_command", lambda *a, **k: pytest.fail("이전 분류로 같은 단계를 다시 돌림"))
+    workspace.resume(sid, dict(kind="none", text="하기 재개\n---\n\n" + ask))
+    assert [r["text"] for r in sent] == [ask]
+    request["named_parents"] = [14, 15]                  # routed since: the run is the parents' edit, so it resumes
+    (run / "state.json").write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(web, "resume_command", lambda *a, **k: ["resume"])
+    monkeypatch.setattr(workspace, "execute", lambda sid_, job, command: job.update(done=True))
+    workspace.resume(sid, dict(kind="none", text="진행해"))
+    assert len(sent) == 1
+
+
 def test_project_presets_instructions_lock_and_files_for_every_session(workspace, monkeypatch):
     project = workspace.create_project({"name": "  클립 홀더 출원  ", "instructions": "종속항은 2~4항까지.\r\n청구항만 출력.", "user_lock": "제1항 문언 유지"})
     assert project["name"] == "클립 홀더 출원" and project["instructions"] == "종속항은 2~4항까지.\n청구항만 출력."

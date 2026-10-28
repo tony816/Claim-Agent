@@ -468,7 +468,7 @@ class Workspace:
             status = self.run_status(session.get("run_id"))
             halt = status and status["halt"]
             kind = chat_resume_kind(text, halt, bool(selected))
-            if kind and (kind != "none" or not self.moderated):
+            if kind and (kind != "none" or not self.moderated) and not data.get("rerouted"):
                 # An explicit decision (documents, UNVERIFIED acceptance, new material) continues the halted run at once.
                 return self.resume(sid, dict(kind=kind, text=text, files=selected))
             # Anything else on a halted run goes to the moderator first: a decision comes back as a resume hand-off, a
@@ -710,6 +710,11 @@ class Workspace:
             state = read_state(self.cfg.path("runs_dir") / run_id / "state.json") or {}
             if kind != "accept_unverified" and self.answer_out_of_edit(session, state, text, [known[f] for f in selected]):
                 return
+            from .conversation_pipeline import parents_unread
+            if kind == "none" and parents_unread(state.get("request") or {}, bool(state.get("baseline_set"))):
+                # Its route read the named parents as targets: re-running the stage repeats that. The request it was
+                # started with goes through routing again as a new message instead.
+                return self.start(sid, dict(text=self.run_request(session, run_id) or text, files=selected, rerouted=True))
             self.require_connection()
             add = [str(validate_attachment(folder / "uploads" / fid / known[fid]["name"]).path) for fid in selected]
             scope = data.get("scope") if data.get("scope") in ("INDEPENDENT", "DEPENDENT") else None
@@ -742,6 +747,14 @@ class Workspace:
             thread = threading.Thread(target=self.execute, args=(sid, job, command), daemon=True)
             job["thread"] = thread
             thread.start()
+
+    @staticmethod
+    def run_request(session: dict, run_id: str) -> str:
+        """The user message that started `run_id` in this conversation (the one before its first answer)."""
+        messages = session["messages"]
+        first = next((i for i, m in enumerate(messages) if m.get("pipeline_run_id") == run_id), None)
+        user = next((m for m in reversed(messages[:first or 0]) if m["role"] == "user"), None)
+        return user["text"] if user else ""
 
     def answer_out_of_edit(self, session: dict, state: dict, text: str, files: list[dict]) -> bool:
         """Answer at once, without a run, when feedback on an in-place edit changes what that edit keeps read-only.

@@ -279,6 +279,20 @@ def asks_other_edit(route: RouteDecision, previous, text: str) -> bool:
     return not (targets == base.edit_targets or (base.numbered_by_design and not targets))
 
 
+def parents_unread(request: dict, has_baseline: bool) -> bool:
+    """Whether a run was routed before the parents a request names were read as parents (log #18).
+
+    Such a run took '14OR15 항의 종속항' as targets 14·15 on a new design; resuming it repeats that path (run web-54630bf2,
+    resumed after the fix: prior search, then the architect stopped on parents it never got). Its request names parents
+    but records none, since runs routed since record them, so the message goes to a new run instead.
+    """
+    text = request.get("request_text") or ""
+    head = "## 현재 요청\n\n"
+    if head in text:
+        text = text.split(head, 1)[1].split("\n\n## ", 1)[0]
+    return bool(request.get("dependent") and not has_baseline and not request.get("named_parents") and named_parents(text))
+
+
 def _new_material(request: dict, blocks: list[dict], paths: dict, previous) -> bool:
     known = {str(Path(m["path"]).resolve()) for m in previous.material_meta}
     known_sha = {m.get("sha256") for m in previous.material_meta}
