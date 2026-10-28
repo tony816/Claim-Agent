@@ -27,6 +27,7 @@ from .enums import (
     RiskLevel,
     Sketchability,
     Status,
+    StopBasis,
     normalize_reason,
 )
 
@@ -216,6 +217,7 @@ class RoleEnvelope(BaseModel):
     gate_reasons: list[GateReason] = Field(default_factory=list)
     checks: list[Check] = Field(default_factory=list)
     next_step: NextStep = NextStep.PROCEED
+    stop_basis: StopBasis | None = None
     handoff_ready: bool = False
     finalized_status: FinalizedStatus | None = None
     exact_claim_text: str | None = None
@@ -245,6 +247,11 @@ class RoleEnvelope(BaseModel):
     sources_read: list[str] = Field(default_factory=list)
     aux_source_usage: str | None = None   # NOT_ACTIVATED | USED
     report_markdown: str = ""
+
+    @field_validator("stop_basis", mode="before")
+    @classmethod
+    def _norm_stop_basis(cls, v: Any) -> str | None:
+        return v if isinstance(v, str) and v in StopBasis.__members__ else None
 
     @field_validator("reason_code", mode="before")
     @classmethod
@@ -329,6 +336,8 @@ ENVELOPE_JSON_SCHEMA: dict[str, Any] = _obj(
             )
         ),
         "next_step": _enum([n.value for n in NextStep]),
+        "stop_basis": _enum([b.value for b in StopBasis], nullable=True,
+                            desc="PASS도 RETURN_TO_*도 아닌 상태로 사용자에게 멈출 때만: 그 정지가 허용되는 사유. 그 밖에는 null"),
         "handoff_ready": {"type": "boolean", "description": "인계 가능 / syntax·OA·DRAFT 진행 가능 여부"},
         "finalized_status": _enum([f.value for f in FinalizedStatus], nullable=True),
         "exact_claim_text": _str("작성·확정·검수 대상 청구항 전문(글자 단위 그대로)", nullable=True),

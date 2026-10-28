@@ -158,7 +158,7 @@ def test_resume_style_fix_after_review_halt(rt, request_indep):
     # syntax reviewer returns REVIEW without routing -> halt; user applies style-only fix
     def syntax_review(spec):
         env = R.syntax()(spec)
-        env.update(status="REVIEW", handoff_ready=False, next_step="USER_DECISION", open_issues=[{"kind": "REVIEW", "code": "SPACING", "text": "'길이방향' 띄어쓰기"}])
+        env.update(status="REVIEW", handoff_ready=False, next_step="USER_DECISION", stop_basis="SCOPE_CHOICE_UNDETERMINED", open_issues=[{"kind": "REVIEW", "code": "SPACING", "text": "'길이방향' 띄어쓰기"}])
         env["report_markdown"] = env["report_markdown"].replace("- 상태: PASS", "- 상태: REVIEW")
         return env
     script["syntax-scope-reviewer"] = [syntax_review, R.syntax()]

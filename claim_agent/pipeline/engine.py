@@ -69,7 +69,7 @@ from .handoff import write_handoff
 from .locks import build_baseline_record, build_claim_lock, build_dependent_set_lock
 from .prior_steps import PriorArtSteps, PriorArtTools, stage_is_prior
 from .style_profile import StyleProfile, drift, render_target, target_profile
-from .transitions import LOOP_KEY, Transition, decide
+from .transitions import LOOP_KEY, Transition, decide, inadmissible_stop
 
 ROLE_BY_STAGE = {
     Stage.ARCHITECT: "claim-architect",
@@ -90,6 +90,7 @@ ROLE_BY_STAGE = {
 }
 
 REVIEWER_ROLES = {"claim-success-reviewer", "syntax-scope-reviewer", "oa-strategy-reviewer", "picture-claim-reconstruction-reviewer"}
+STOP_REWAKES = 2   # CLAUDE.md: an item still open after two supplements goes to its return stage (here: the user)
 NON_GATING_UNVERIFIED = {"SPEC_NOT_PROVIDED", "PRIOR_ART_NOT_PROVIDED", "PRIOR_SEARCH_UNAVAILABLE"}
 
 
@@ -594,6 +595,17 @@ class PipelineEngine(PriorArtSteps):
             cache_packet_text=packet.cache_text if not blind else "", cache_images=packet.cache_images and not blind, expected_reuse=expected_reuse,
         )
         env, result, repair_used, problems = self._generate_validated(spec, contract, ids, rid, expected_exact, prompt.source_paths, blind)
+        stop_rewakes: list[dict] = []
+        while not blind and len(stop_rewakes) < STOP_REWAKES and (why := inadmissible_stop(env, contract, state.request_mode, stage)):
+            # CLAUDE.md 잔존 위험 인계 금지: wake the same role to close what it may not hand to the user; not a return loop.
+            stop_rewakes.append({"problem": why, "status": env.status.value, "reason_code": env.reason_code, "report_markdown": env.report_markdown})
+            with self._lock:
+                self._account_result(spec.stage, spec.model, result)
+            spec = replace(spec, packet_text=spec.packet_text + packets.stop_rewake_section(why, len(stop_rewakes), env.report_markdown), phase="stop_rewake")
+            env, result, repair_used, problems = self._generate_validated(spec, contract, ids, rid, expected_exact, prompt.source_paths, blind)
+        if stop_rewakes:
+            state.notes.append(f"{role}: 허용되지 않은 정지를 {len(stop_rewakes)}회 보완 요청"
+                               + ("" if not inadmissible_stop(env, contract, state.request_mode, stage) else " — 보완 뒤에도 허용 사유 없이 멈춤"))
         if tool_log.calls:
             env.aux_source_usage = "USED" if tool_log.used else "NOT_ACTIVATED"
         elif use_tools:
@@ -690,7 +702,7 @@ class PipelineEngine(PriorArtSteps):
             "scope_problem": scope_problem,
             "system_sha": spec.system_sha, "sources_sha": spec.sources_sha, "packet_sha": spec.packet_sha, "packet_text": packet_text,
             "preloaded_sources": prompt.source_paths, "tool_log": tool_log.calls, "response": result.as_dict(), "repair_used": repair_used,
-            "cross_check_problems": problems, "envelope": env.model_dump(mode="json"),
+            "cross_check_problems": problems, "stop_rewakes": stop_rewakes, "envelope": env.model_dump(mode="json"),
         }
         ref.call_file = self.store.write_call(state.run_id, seq, role, scope.value, call_payload, env.report_markdown)
         record_payload = {

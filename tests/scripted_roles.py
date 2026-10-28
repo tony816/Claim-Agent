@@ -79,7 +79,7 @@ def architect(locked: bool = True) -> Callable[[CallSpec], dict]:
     def f(spec: CallSpec) -> dict:
         if locked:
             return _base(spec, "PASS", {"DESIGN_GATE": "LOCKED"}, ["- 주골격 3~5개: 베이스/조임 나사/홀더 본체/슬롯 입구 폭"])
-        return _base(spec, "REVIEW", {"DESIGN_GATE": "UNLOCKED"}, ["- LOCK 미해결 사항: 슬롯 형상 술어 주체 미확정"], next_step="USER_DECISION",
+        return _base(spec, "REVIEW", {"DESIGN_GATE": "UNLOCKED"}, ["- LOCK 미해결 사항: 슬롯 형상 술어 주체 미확정"], next_step="USER_DECISION", stop_basis="SOURCE_FACT_ABSENT",
                      open_issues=[{"kind": "REVIEW", "code": "GEOMETRY", "text": "오목 형상의 귀속 주체를 원자료로 확정해야 한다", "return_to": None}])
     return f
 

@@ -312,6 +312,17 @@ def _dependent_stable(state: RunState, store, bundle: MaterialBundle, root_lock_
     return txt, imgs
 
 
+def stop_rewake_section(problem: str, attempt: int, prior_report: str) -> str:
+    """Re-asks a role that stopped for the user without a reason CLAUDE.md allows (engine, at most twice)."""
+    return _section(f"정지 사유 보완 요청 ({attempt}회차 — 되돌림 횟수에 넣지 않음)",
+                    "직전 출력은 PASS도 되돌림도 아닌 상태로 사용자에게 멈추려 했다: " + problem + "\n\n"
+                    "사용자에게 멈출 수 있는 경우는 USER_LOCK 문언 변경, 기존 세트 편집의 부모항 체인 변경, 원자료에 없는 사실, "
+                    "잠긴 계약·USER_LOCK이 정하지 않는 권리범위 선택뿐이며, 그때는 `stop_basis`에 그 사유를 적는다. "
+                    "그 밖의 결함은 자기 권한으로 닫아 PASS로 내거나 고칠 단계로 되돌린다. 사용자에게 자료 제공·진행 방식 선택을 묻지 않고, "
+                    "원자료가 답하지 않는 고리는 발명자 확인 질문으로 보고서에 남긴다. 직전 판정을 그대로 반복하지 말고 이 요청에 맞게 다시 판정한다.\n\n"
+                    "#### 직전 출력 보고서\n\n" + prior_report)
+
+
 def dep_architect(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_design_record_id: str, root_text: str, request_text: str, redesign_goal: str | None,
                   target_nos: set[int] | None = None, scope_repair: str | None = None, business_context: str | None = None) -> Packet:
     txt, imgs = _dependent_stable(state, store, bundle, root_lock_id, root_design_record_id, ("invention", "drawing", "spec", "prior_art"))

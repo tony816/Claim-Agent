@@ -67,6 +67,15 @@ class NextStep(StrEnum):
     STOP = "STOP"
 
 
+class StopBasis(StrEnum):
+    """Why a role stops for the user instead of passing or routing a return (CLAUDE.md 검수 실패 자동 수정 루프: 사용자에게 멈추는 경우)."""
+
+    USER_LOCK_CHANGE = "USER_LOCK_CHANGE"                    # 고치려면 USER_LOCK 문언을 바꿔야 함
+    EDIT_PARENT_CHAIN_CHANGE = "EDIT_PARENT_CHAIN_CHANGE"    # EXISTING_SET_EDIT의 부모항 체인을 바꿔야 함
+    SOURCE_FACT_ABSENT = "SOURCE_FACT_ABSENT"                # 고치려면 원자료에 없는 사실이 필요함
+    SCOPE_CHOICE_UNDETERMINED = "SCOPE_CHOICE_UNDETERMINED"  # 잠긴 계약·USER_LOCK이 정하지 않는 권리범위 선택
+
+
 class FinalizedStatus(StrEnum):
     FINALIZED_FOR_SUCCESS = "FINALIZED_FOR_SUCCESS"
     NOT_FINALIZED = "NOT_FINALIZED"

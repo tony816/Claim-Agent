@@ -701,3 +701,50 @@ def test_the_routed_reading_rides_the_resume_command(tmp_path):
     command = resume_command(tmp_path, "run-1", tmp_path / "decision.txt", "none", "m", edit_intent="EDIT")
     assert command[-2:] == ["--edit-intent", "EDIT"]
     assert "--edit-intent" not in resume_command(tmp_path, "run-1", tmp_path / "decision.txt", "none", "m", edit_intent="UNCLEAR")
+
+
+def _stopping_design(basis=None, reason=None):
+    """The design of run web-2149adbd: claims it cannot close from the sources put to the user instead of to the fallback axis."""
+    def design(spec):
+        return R._base(spec, "REVIEW", {"DEPENDENT_DESIGN_GATE": "UNLOCKED", "INVENTIVE_STEP": "UNVERIFIED"},
+                       ["- 제17~19항 UNVERIFIED: 신호원·제어 규칙 원자료 없음 — 사용자 결정 요청"],
+                       next_step="USER_DECISION", handoff_ready=False, stop_basis=basis, reason_code=reason)
+    return design
+
+
+def test_a_design_stopping_for_the_user_without_an_allowed_reason_is_woken_to_close_it(rt, request_indep, tmp_path, edit_roles):
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "rewake")
+    provider = ScriptedProvider(edit_script(**{"dependent-claim-strategy-architect": [_stopping_design(), R.dep_architect()]}))
+    result = run_pipeline(rt, provider, request, _route(blocks), blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
+    first, rewake = [c for c in provider.calls if c.role == "dependent-claim-strategy-architect"]
+    assert "정지 사유 보완 요청" not in first.packet_text and "정지 사유 보완 요청 (1회차" in rewake.packet_text
+    assert "FALLBACK_ONLY" in rewake.packet_text and "사용자 결정 요청" in rewake.packet_text   # the stopped report rides along
+    assert state.dependent.loop_counts.get("DEPENDENT_ARCHITECT", 0) == 0                     # not a return loop
+
+
+def test_a_design_still_stopping_after_two_supplements_stops(rt, request_indep, tmp_path, edit_roles):
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "rewake-fails")
+    provider = ScriptedProvider(edit_script(**{"dependent-claim-strategy-architect": [_stopping_design()] * 3}))
+    result = run_pipeline(rt, provider, request, _route(blocks), blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert [c.role for c in provider.calls] == ["dependent-claim-strategy-architect"] * 3
+    assert state.halt and any("보완 뒤에도 허용 사유 없이 멈춤" in n for n in state.notes)
+
+
+@pytest.mark.parametrize("basis,calls", [("USER_LOCK_CHANGE", 1), ("SCOPE_CHOICE_UNDETERMINED", 1), ("SOURCE_FACT_ABSENT", 3)])
+def test_only_an_allowed_stop_reaches_the_user_at_once(rt, request_indep, tmp_path, edit_roles, basis, calls):
+    # The dependent design may not stop for a fact the sources lack (CLAUDE.md 제12단계): that one is woken too.
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, f"basis-{basis}")
+    provider = ScriptedProvider(edit_script(**{"dependent-claim-strategy-architect": [_stopping_design(basis)] * 3}))
+    result = run_pipeline(rt, provider, request, _route(blocks), blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert len(provider.calls) == calls and state.halt
+
+
+def test_a_design_with_no_candidate_at_all_stops_without_a_rewake(rt, request_indep, tmp_path, edit_roles):
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "no-candidate")
+    provider = ScriptedProvider(edit_script(**{"dependent-claim-strategy-architect": [_stopping_design(reason="NO_TECHNICAL_SOLUTION_CANDIDATE")]}))
+    result = run_pipeline(rt, provider, request, _route(blocks), blocks, paths, folder)
+    assert len(provider.calls) == 1 and rt.store.load_state(result["run_id"]).halt

@@ -19,7 +19,7 @@ def _rt(tmp_path):
 def _review(text: str):
     def f(spec):
         return R._base(spec, "REVIEW", {"NON_PATENT_TECHNICAL_READER_GATE": "REVIEW", "GEOMETRIC_OBJECT_GATE": "PASS"}, ["- 최종 판정: REVIEW"],
-                       next_step="USER_DECISION", open_issues=[{"kind": "USER_DECISION", "code": "SKETCH_PARTIAL", "text": text, "return_to": None}])
+                       next_step="USER_DECISION", stop_basis="SOURCE_FACT_ABSENT", open_issues=[{"kind": "USER_DECISION", "code": "SKETCH_PARTIAL", "text": text, "return_to": None}])
     return f
 
 
