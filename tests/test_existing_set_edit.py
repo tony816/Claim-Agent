@@ -75,10 +75,11 @@ def _conversation(tmp_path, request_indep, name, text=INCIDENT_TEXT, previous=No
     return request, blocks, paths, folder
 
 
-def _route(blocks, revision_kind="DESIGN", target="9"):
-    # What the router returned in the incident: the request block as claim source, and DESIGN.
+def _route(blocks, revision_kind="DESIGN", target="9", intent="EDIT"):
+    # What the router returned in the incident: the request block as claim source, and DESIGN. `intent` is the router's
+    # reading of edit or new (개선로그 #24): the incident asked to rework 9항.
     return RouteDecision(mode="AUTHORING_DRAFT", reason="9항 작성", dependent=True, dependent_target=target,
-                         claim_source_id=blocks[-1]["id"], revision_kind=revision_kind)
+                         claim_source_id=blocks[-1]["id"], revision_kind=revision_kind, edit_intent=intent)
 
 
 def _numbered_design(numbers):
@@ -362,7 +363,7 @@ def test_an_edit_that_changes_a_user_lock_claim_it_did_not_name_is_still_blocked
 
 def test_a_user_lock_set_with_blank_numbers_stops_before_any_call_and_says_what_to_fill(rt, request_indep, tmp_path):
     request, blocks, paths, folder = _conversation(tmp_path, request_indep, "blank", text=LID_REQUEST, instructions="", user_lock=LID_LOCK)
-    route = _route(blocks, target="4,5,6")
+    route = _route(blocks, target="4,5,6", intent="UNCLEAR")
     provider = ScriptedProvider({})
     result = run_pipeline(rt, provider, request, route, blocks, paths, folder)
     state = rt.store.load_state(result["run_id"])
@@ -385,7 +386,7 @@ def test_a_new_claim_request_on_a_set_whose_parent_claim_is_cut_off_stops_before
     numbered = LID_LOCK.replace("【청구항 】\n제항", "【청구항 】\n제5항")
     request, blocks, paths, folder = _conversation(tmp_path, request_indep, "unfinished", text="4항,5항,6항을 첨부 이미지로 새로 만들어줘",
                                                    instructions="", user_lock=numbered)
-    route = _route(blocks, target="4,5,6")
+    route = _route(blocks, target="4,5,6", intent="NEW")
     provider = ScriptedProvider({})
     result = run_pipeline(rt, provider, request, route, blocks, paths, folder)
     state = rt.store.load_state(result["run_id"])
@@ -398,14 +399,18 @@ AMBIGUOUS_9 = "9항이 도면을 온전하게 설명하도록"
 
 
 def test_an_ambiguous_request_asks_before_any_call_and_new_inserts_the_claim_and_moves_the_rest(rt, request_indep, tmp_path, edit_roles):
-    """User decision 2026-10-26: '4항,5항,6항이 첨부 이미지를…' meant new claims. Unclear words → ask; 새로 → insert and move back."""
+    """User decision 2026-10-26: '4항,5항,6항이 첨부 이미지를…' meant new claims. Unclear → ask; the router reads the answer 새로 → insert.
+
+    The engine never reads the answer's words itself (개선로그 #24): a decision without the router's reading keeps asking."""
     request, blocks, paths, folder = _conversation(tmp_path, request_indep, "ask", text=AMBIGUOUS_9, instructions="", user_lock=BASELINE)
     provider = ScriptedProvider(edit_script())
-    first = run_pipeline(rt, provider, request, _route(blocks), blocks, paths, folder)
+    first = run_pipeline(rt, provider, request, _route(blocks, intent="UNCLEAR"), blocks, paths, folder)
     state = rt.store.load_state(first["run_id"])
     assert provider.calls == [] and state.halt.kind == "USER_DECISION" and state.halt.reason_code == "EDIT_OR_NEW_UNCLEAR"
     assert "'수정'" in state.halt.message and "'새로'" in state.halt.message and state.request["edit_intent"] == "UNCLEAR"
     state = rt.engine(provider).resume(state.run_id, Decision(text="새로 만들어줘"))
+    assert provider.calls == [] and state.halt.reason_code == "EDIT_OR_NEW_UNCLEAR" and state.request["edit_intent"] == "UNCLEAR"
+    state = rt.engine(provider).resume(state.run_id, Decision(text="새로 만들어줘", edit_intent="NEW"))
     assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
     base = state.baseline_set
     assert state.request["edit_intent"] == "NEW" and base.renumbered == {9: 10} and base.edit_targets == [9]
@@ -420,13 +425,12 @@ def test_an_ambiguous_request_asks_before_any_call_and_new_inserts_the_claim_and
     assert any("기존 항 번호·인용을 옮김(제9항→제10항)" in n for n in state.notes)
 
 
-def test_claim_intent_reads_only_explicit_words():
-    from claim_agent.claim_scope import claim_intent
-
-    assert claim_intent(LID_REQUEST) is None and claim_intent(AMBIGUOUS_9) is None
-    assert claim_intent("4항,5항,6항을 새로 만들어줘") == "NEW" and claim_intent("10항을 추가해줘") == "NEW"
-    assert claim_intent(INCIDENT_TEXT) == "EDIT"                     # 정리되지 않은 9항…; 중간끼워맞춤 is not 끼워 넣기
-    assert claim_intent("9항은 수정하고 10항은 추가해줘") is None       # both: ask
+def test_edit_or_new_is_the_routers_reading_and_only_on_an_authoring_route():
+    """개선로그 #24 (run web-2149adbd): '15~19항 게이트 돌리고 … 개선해주길 원함' stopped to ask 수정 or 새로 because a word
+    list had no '개선'. The router's edit_intent is now the only source; a non-authoring route carries none."""
+    assert RouteDecision(mode="CONSULT", reason="질문", edit_intent="EDIT").edit_intent == "UNCLEAR"
+    assert RouteDecision(mode="AUTHORING_DRAFT", reason="편집", dependent=True, dependent_target="9", edit_intent="EDIT").edit_intent == "EDIT"
+    assert RouteDecision(mode="AUTHORING_DRAFT", reason="편집", dependent=True, dependent_target="9").edit_intent == "UNCLEAR"
 
 
 def test_inserting_claims_moves_the_set_back_and_its_citations_follow():
@@ -689,3 +693,11 @@ def test_the_router_sees_the_project_user_lock(project_root):
     provider = ScriptedProvider({"request-router": [{"mode": "AUTHORING_DRAFT", "reason": "편집", "dependent": True, "dependent_target": "9"}]})
     classify_request(provider, project_root, "test", "9항을 정리해줘", [], "lock-route", user_lock=BASELINE)
     assert '"project_user_lock": "【청구항 1】' in provider.calls[0].packet_text
+
+
+def test_the_routed_reading_rides_the_resume_command(tmp_path):
+    from claim_agent.tui_support import resume_command
+
+    command = resume_command(tmp_path, "run-1", tmp_path / "decision.txt", "none", "m", edit_intent="EDIT")
+    assert command[-2:] == ["--edit-intent", "EDIT"]
+    assert "--edit-intent" not in resume_command(tmp_path, "run-1", tmp_path / "decision.txt", "none", "m", edit_intent="UNCLEAR")

@@ -112,7 +112,8 @@ def claim_proposal_route(kind: str, text: str, scope: str | None, dependent_live
     return "redesign", scope
 
 
-def resume_command(root: Path, run_id: str, decision_path: Path, kind: str, model: str, add_sources: list[str] | None = None, scope: str | None = None) -> list[str]:
+def resume_command(root: Path, run_id: str, decision_path: Path, kind: str, model: str, add_sources: list[str] | None = None, scope: str | None = None,
+                   edit_intent: str | None = None) -> list[str]:
     if kind not in RESUME_KINDS:
         raise ValueError("지원하지 않는 재개 종류입니다.")
     command = [sys.executable, "-u", "-m", "claim_agent.cli", "--project-root", str(root), "resume", run_id, "--decision-file", str(decision_path), *RESUME_KINDS[kind], "--model", model]
@@ -120,6 +121,8 @@ def resume_command(root: Path, run_id: str, decision_path: Path, kind: str, mode
         command += ["--add-source", src]
     if scope:
         command += ["--scope", scope]
+    if edit_intent in ("EDIT", "NEW"):
+        command += ["--edit-intent", edit_intent]
     return command
 
 
@@ -143,8 +146,10 @@ def chat_resume_kind(text: str, halt: dict | None, new_material: bool = False) -
 
 
 def chat_resume_command(root: Path, folder: Path, state: dict | None, text: str, material: str,
-                        attachments: list[Attachment], model: str) -> list[str] | None:
-    """The resume command for a chat message on a halted run (same run, same USER_LOCK); None when not halted."""
+                        attachments: list[Attachment], model: str, edit_intent: str | None = None) -> list[str] | None:
+    """The resume command for a chat message on a halted run (same run, same USER_LOCK); None when not halted.
+
+    `edit_intent` is the router's reading of the message when the moderator handed it off (개선로그 #24)."""
     import hashlib
 
     if not (state or {}).get("halt"):
@@ -161,7 +166,7 @@ def chat_resume_command(root: Path, folder: Path, state: dict | None, text: str,
     kind = chat_resume_kind(text, state["halt"], bool(add))
     decision = folder / "decision.txt"
     decision.write_text(text, encoding="utf-8")
-    return resume_command(root, state["run_id"], decision, kind, model, add if kind == "restart" else None)
+    return resume_command(root, state["run_id"], decision, kind, model, add if kind == "restart" else None, edit_intent=edit_intent)
 
 
 def child_options(root: Path) -> dict:

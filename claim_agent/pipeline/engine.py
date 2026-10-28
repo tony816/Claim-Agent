@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from typing import Any
 
-from ..claim_scope import claim_intent, format_target, parse_target
+from ..claim_scope import format_target, parse_target
 from ..config import AppConfig
 from ..graph.pipeline import GraphHooks
 from ..models.contracts import COMBINED_REVIEW, combined_contract, contract_for, fallback_gate_gaps, main_tree_gate_gaps, set_candidates
@@ -134,6 +134,7 @@ class Decision:
     feedback_text: str | None = None          # the user's own words when `text` also carries project instructions
     prior_art_selection: list[str] | None = None   # select_prior_art: WIPS skeys the user picked (설계 4절)
     base_date: str | None = None              # select_prior_art: 출원 예정일 (YYYY-MM-DD)
+    edit_intent: str | None = None            # EDIT | NEW: the router's reading of a decision on an EXISTING_SET_EDIT run
 
 
 FEEDBACK_INSTRUCTION = (
@@ -233,10 +234,6 @@ class PipelineEngine(PriorArtSteps):
         targets = parse_target(req.dependent_target) or set()
         named = ", ".join(f"제{n}항" for n in sorted(targets)) or "세트 끝에 붙일 새 종속항"
         intent = req.edit_intent
-        if intent == "UNCLEAR":
-            intent = claim_intent(str((state.feedback or {}).get("text") or "")) or "UNCLEAR"
-            if intent != "UNCLEAR":
-                state.request = {**state.request, "edit_intent": intent}
         filled = fill_blank_headers(text)
         slots = claim_slots(filled)
         present = sorted(n for n in targets if n in {no or place for place, (no, _) in enumerate(slots, 1)})
@@ -474,6 +471,9 @@ class PipelineEngine(PriorArtSteps):
         # The answer to this turn must say what became of the feedback, not only redraw the claims.
         words = decision.feedback_text if decision.feedback_text is not None else decision.text
         state.feedback = dict(text=words, action=decision.action, dispositions={}) if words.strip() and decision.action != "accept_unverified" else None
+        if decision.edit_intent in ("EDIT", "NEW") and state.request.get("edit_intent") == "UNCLEAR":
+            # The answer to "수정 or 새로" comes from the router's reading of the decision, never from its words (개선로그 #24).
+            state.request = {**state.request, "edit_intent": decision.edit_intent}
         if self._resume_prior_art(state, decision, halted_stage):
             pass
         elif decision.restart_from:

@@ -38,7 +38,7 @@ def test_a_span_from_claim_1_names_the_set_new_claims_join_not_targets():
     assert constrain_target("제1항~제12항을 참고해서 종속항 더 써줘", True, open_target, append=True) == (True, open_target)
     to_12 = ",".join(map(str, range(2, 13)))
     assert constrain_target(MISSED_POINTS, True, "2~12", append=True) == (True, to_12)              # the router's own numbers
-    assert constrain_target("1~12항을 정리해줘", True, open_target, append=True) == (True, to_12)    # an edit names its targets
+    assert constrain_target("1~12항을 정리해줘", True, open_target, append=True, intent="EDIT") == (True, to_12)    # an edit names its targets
     assert constrain_target("10항을 추가해줘", True, open_target, append=True) == (True, "10")       # no claim 1: a number to write
     assert constrain_target("13항부터 추가 종속항 써줘", True, open_target, append=True) == (True, open_target)
     assert constrain_target("12항 뒤에 종속항을 추가해줘", True, open_target, append=True) == (True, open_target)
@@ -208,4 +208,4 @@ def test_parents_and_claims_drawn_on_are_no_targets():
     assert constrain_target(DRAW_ON, True, "4,5,14,15", append=True) == (True, "기술기여가 확인된 후보")
     assert constrain_target("제3항에 종속하는 새 항 13항을 추가해줘", True, "3,13") == (True, "13")
     assert named_parents("제3항 또는 제4항을 인용하는 종속항 추가") == {3, 4}
-    assert constrain_target("4항의 구성을 바꿔줘", True, "4") == (True, "4")          # an edit of claim 4 itself
+    assert constrain_target("4항의 구성을 바꿔줘", True, "4", intent="EDIT") == (True, "4")          # the router read an edit of claim 4 itself

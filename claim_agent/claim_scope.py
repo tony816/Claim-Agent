@@ -69,12 +69,13 @@ def named_parents(text: str) -> set[int]:
     return set().union(*(_numbers_of(m.group(1)) for m in _PARENT_AFTER.finditer(lead)))
 
 
-def cited_claims(text: str) -> set[int]:
+def cited_claims(text: str, intent: str = "UNCLEAR") -> set[int]:
     """Claims the instruction names as parents of new claims or as what they draw on ('4항 5항의 구성을 활용'), not as
-    claims to write. The words that draw on a claim count only when they do not ask to rework it ('4항의 구성을 바꿔줘')."""
+    claims to write. The words that draw on a claim count only when the router did not read the request as reworking the
+    named claims (`intent` EDIT: '4항의 구성을 바꿔줘')."""
     lead = text.split("\n\n", 1)[0]
     cited = named_parents(text)
-    if claim_intent(lead) != "EDIT":
+    if intent != "EDIT":
         cited |= set().union(*(_numbers_of(m.group(1)) for m in _SOURCE_AFTER.finditer(lead)))
     return cited
 
@@ -88,8 +89,10 @@ def explicit_mentions(text: str) -> set[int] | None:
     return result or None
 
 
-def constrain_target(text: str, dependent: bool, target: str | None, append: bool = False) -> tuple[bool, str | None]:
-    """`append`: the router put the dependent claims after the end of the user's numbered set (EXISTING_SET_EDIT)."""
+def constrain_target(text: str, dependent: bool, target: str | None, append: bool = False,
+                     intent: str = "UNCLEAR") -> tuple[bool, str | None]:
+    """`append`: the router put the dependent claims after the end of the user's numbered set (EXISTING_SET_EDIT).
+    `intent`: the router's edit_intent, the only reading of whether the named claims are reworked (EDIT)."""
     lead = text.split("\n\n", 1)[0]
     only = re.findall(r"(?:제)?(\d+)\s*항\s*만|\bonly\s+claim\s+(\d+)\b", lead, re.I)
     if len(only) == 1:
@@ -101,8 +104,8 @@ def constrain_target(text: str, dependent: bool, target: str | None, append: boo
     if not dependent:
         return False, None
     mentioned = explicit_mentions(text)
-    cited = cited_claims(text) if mentioned else set()
-    if mentioned and mentioned & cited and claim_intent(text) != "EDIT":
+    cited = cited_claims(text, intent) if mentioned else set()
+    if mentioned and mentioned & cited and intent != "EDIT":
         # '4항 5항의 구성을 … 14OR15 항의 종속항을 추가해줘' (run web-54630bf2): the numbers are the parents and the claims
         # drawn on, not claims to write. Read as targets, 14·15 were missing from the set and the request fell through to a
         # new independent claim behind a prior-art search. What is left is the target; nothing left, the design numbers.
@@ -111,7 +114,7 @@ def constrain_target(text: str, dependent: bool, target: str | None, append: boo
             return True, target if parse_target(target) is None and target else "기술기여가 확인된 후보"
         selected = (parse_target(target) or set()) & mentioned or mentioned
         return True, ",".join(map(str, sorted(selected)))
-    if mentioned and append and parse_target(target) is None and claim_intent(text) != "EDIT" \
+    if mentioned and append and parse_target(target) is None and intent != "EDIT" \
             and (any(lo == 1 for lo, _ in _mentioned_spans(text)) or _says_where_new_claims_go(text)):
         # The router chose no number and the words name claim 1 with the others ('1~12항에서 놓친 특허 포인트를 찾아
         # 추가 종속항을 써줘', run web-6be7454f) or say where the new claims go ('13항부터'). Claim 1 is no dependent
@@ -231,20 +234,6 @@ def find_existing_set(targets: set[int], sources: list[tuple[str, str]]) -> tupl
         if any(c.is_independent for c in claims) and all(n in new or (n in by_no and not by_no[n].is_independent) for n in targets):
             return source_id, original
     return None
-
-
-_NEW_WORDS = re.compile(r"새로|새\s*항|신규|추가|끼워\s*넣|삽입|생성")     # not 끼워 alone: 끼워맞춤 is a fit
-_EDIT_WORDS = re.compile(r"수정|고쳐|고치|고친|정리|다듬|완성|바꿔|바꾸|변경|보완|손봐|손보|다시|재작성|보정|교정")
-
-
-def claim_intent(text: str) -> str | None:
-    """Whether the user's words ask to rework the named claims (EDIT) or to write new claims at those numbers (NEW).
-
-    None when they say neither or both: '4·5·6항이 첨부 이미지를 설명하도록' can mean either, and the edit then asks
-    before any call (사용자 결정 2026-10-26) instead of guessing.
-    """
-    new, edit = bool(_NEW_WORDS.search(text)), bool(_EDIT_WORDS.search(text))
-    return "NEW" if new and not edit else "EDIT" if edit and not new else None
 
 
 def ui_target_set(ui_hints: dict | None) -> set[int] | None:

@@ -18,6 +18,7 @@ from .provider.base import CallSpec, GenParams, LLMProvider
 # claim-style-adjuster is a free work tool only (it returns restyled wording); the router never keeps it (route()).
 Reviewer = Literal["claim-style-adjuster", "syntax-scope-reviewer", "oa-strategy-reviewer", "claim-success-reviewer", "blind-claim-reconstruction-reviewer"]
 RevisionKind = Literal["NONE", "STYLE_ONLY", "MEANING", "DESIGN"]
+EditIntent = Literal["EDIT", "NEW", "UNCLEAR"]
 AuthoringScope = Literal["NEW_INDEPENDENT", "NEW_DEPENDENT_SET", "EXISTING_SET_EDIT"]
 
 
@@ -40,6 +41,10 @@ class RouteDecision(BaseModel):
     # from the parsed input (a user-provided numbered set that holds the named claims); the model's value is only a hint.
     authoring_scope: AuthoringScope = "NEW_INDEPENDENT"
     edit_targets: list[int] = Field(default_factory=list)
+    # Whether named claims that already exist in the set are rewritten (EDIT) or new claims go in at those numbers (NEW).
+    # This reading of the user's meaning is the only source of that choice: code never guesses it from words, and UNCLEAR
+    # makes the edit ask before any model call (개선로그 #24).
+    edit_intent: EditIntent = "UNCLEAR"
     # ui_hints.halted only: the message is the decision the halted run waits for, so the same run resumes.
     resumes_halt: bool = False
 
@@ -50,7 +55,7 @@ class RouteDecision(BaseModel):
         if self.resumes_halt and self.mode not in {"AUTHORING_DRAFT", "FINALIZATION"}:
             raise ValueError("중지된 작업 재개는 작성 경로에서만 쓸 수 있습니다.")
         if self.mode not in {"AUTHORING_DRAFT", "FINALIZATION"}:
-            self.authoring_scope, self.edit_targets = "NEW_INDEPENDENT", []
+            self.authoring_scope, self.edit_targets, self.edit_intent = "NEW_INDEPENDENT", [], "UNCLEAR"
         if self.mode == "REVIEW_ONLY" and not self.reviewers:
             raise ValueError("의견 검토에는 검수 역할이 필요합니다.")
         if self.dependent and not self.dependent_target:
@@ -95,7 +100,11 @@ ui_hints에 작성 대상이 골라져 있어도 의견만 질문하면 REVIEW_O
   아니라 그 항의 편집이다. authoring_scope=EXISTING_SET_EDIT, edit_targets와 dependent_target은 그 항 번호만 쓴다.
   그 세트 끝에 바로 이어지는 새 번호의 종속항을 추가해 달라는 요청(예: 1~2항 세트에 3항 추가)도 같은 EXISTING_SET_EDIT다.
   이미 있는 번호에 새 항을 만들어 달라는 요청(예: '4~6항을 새로 만들어줘')도 같은 EXISTING_SET_EDIT이고 dependent_target은 그 번호다.
-  수정인지 새 항인지는 코드가 사용자의 말로 정하고, 말에 없으면 모델 호출 전에 묻는다.
+  요청한 번호가 세트에 이미 있으면 edit_intent를 요청의 뜻으로 정한다. 그 항을 고치거나 다듬거나 완성하거나 게이트로 검수해
+  개선하라는 뜻이면 EDIT('15~19항 게이트 돌리고 연역 오류를 개선해줘', '9항 정리해줘'), 그 번호에 새 항을 만들어 끼우라는 뜻이면
+  NEW('4~6항을 새로 만들어줘', '10항을 추가해줘'). 한 메시지가 어떤 항은 고치고 어떤 항은 새로 만들라고 하거나, 뜻이 정말 둘 다로
+  읽힐 때만 UNCLEAR이며 코드가 모델 호출 전에 묻는다. 멈춘 작업이 수정인지 새 항인지 물었고 지금 메시지가 그 답('수정', '새로')이면
+  그 값이다. 세트 끝 다음 번호에 붙이는 요청과 번호 없는 요청은 NEW다. 작성 경로가 아니면 UNCLEAR다.
   그 세트에 종속항을 번호 없이 더 써 달라는 요청(예: '히트리드 모듈에 대한 종속항들 작성해줘')도 EXISTING_SET_EDIT이고,
   dependent_target은 '기술기여가 확인된 후보'로 두며 번호를 지어내지 않는다. 항 수와 번호는 종속항 설계가 세트 끝 다음 번호부터 정한다.
   부모항을 흡수해 독립항으로 만들지 않는다. 새 독립항 작성은 NEW_INDEPENDENT, 새 종속항 세트 작성은 NEW_DEPENDENT_SET이다.
@@ -171,7 +180,8 @@ def classify_request(provider: LLMProvider, root: Path, model: str, text: str,
         raise ValueError("명시적인 청구항/특허 요청을 일반 대화로 분류했습니다. 하네스 경로 재분류가 필요합니다.")
     if route.mode in {"AUTHORING_DRAFT", "FINALIZATION"}:
         route.dependent, route.dependent_target = constrain_target(text, route.dependent, route.dependent_target,
-                                                                   append=route.authoring_scope == "EXISTING_SET_EDIT")
+                                                                   append=route.authoring_scope == "EXISTING_SET_EDIT",
+                                                                   intent=route.edit_intent)
     return route
 
 

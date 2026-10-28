@@ -389,10 +389,11 @@ class ClaimAgentApp(App):
             # With the moderator on, a halted run's message is read first (CLAUDE.md 대화 모더레이터): only an explicit
             # decision resumes at once; a question is answered and a plain decision comes back as a resume hand-off.
             handed_off, self.pending_resume = getattr(self, "pending_resume", False), False
+            intent, self.pending_intent = getattr(self, "pending_intent", None), None
             moderate_first = (bool(halt) and not handed_off and self.cfg.conversation.moderator == "on"
                               and chat_resume_kind(request_text, halt, bool(self.attachments)) == "none")
             resume = chat_resume_command(self.root, self.root / ".tui" / "requests" / run_id, halted, request_text,
-                                         self.query_one("#material", Composer).text, self.attachments, model) if halted and request_text and not moderate_first else None
+                                         self.query_one("#material", Composer).text, self.attachments, model, intent) if halted and request_text and not moderate_first else None
             if resume:
                 # A halted run waits for a decision: this chat message is that decision on the same run.
                 self.active_mode = "RESUME"
@@ -548,6 +549,7 @@ class ClaimAgentApp(App):
             if response and response.get("resume_halted") and not self.stop_requested:
                 # The moderator read the message as the halted run's decision: send the same message down the resume path.
                 self.pending_resume = True
+                self.pending_intent = (response.get("route") or {}).get("edit_intent")
                 self.add_log("모더레이터: 중지된 작업에 대한 결정으로 보고 같은 작업을 재개합니다.")
                 return
             if response and not self.stop_requested:

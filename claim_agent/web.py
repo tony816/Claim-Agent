@@ -718,6 +718,10 @@ class Workspace:
                 # Re-running the stage cannot reach the parents the request names: the request goes through routing
                 # again as a new message instead.
                 return self.start(sid, dict(text=asked, files=selected, rerouted=True))
+            if kind == "none" and "edit_intent" not in data and (status["halt"] or {}).get("reason_code") == "EDIT_OR_NEW_UNCLEAR":
+                # Whether the answer means 수정 or 새로 is the router's reading, not a word list (개선로그 #24): a decision that
+                # did not come through routing goes there first and comes back as a hand-off that carries it.
+                return self.start(sid, dict(text=text, files=selected, rerouted=True))
             self.require_connection()
             add = [str(validate_attachment(folder / "uploads" / fid / known[fid]["name"]).path) for fid in selected]
             scope = data.get("scope") if data.get("scope") in ("INDEPENDENT", "DEPENDENT") else None
@@ -729,7 +733,7 @@ class Workspace:
             job_dir.mkdir(parents=True)
             decision = job_dir / "decision.txt"
             decision.write_text(text or "비게이팅 UNVERIFIED 수용", encoding="utf-8")
-            command = resume_command(self.root, run_id, decision, kind, self.cfg.default_model, add, scope)
+            command = resume_command(self.root, run_id, decision, kind, self.cfg.default_model, add, scope, data.get("edit_intent"))
             if self.config:
                 command += ["--config", str(self.config)]
             if self.moderated and kind != "select_prior_art":
@@ -852,7 +856,8 @@ class Workspace:
                     # the run's own resume path (scope rules, edit guard, labels) take the same message after this job.
                     index = session["messages"].index(message)
                     del session["messages"][index - 1:index + 1]
-                    job["handoff"] = dict(kind="none", text=job["text"], files=job["files"])
+                    routed = (read_state(job["folder"] / "response.json") or {}).get("route") or {}
+                    job["handoff"] = dict(kind="none", text=job["text"], files=job["files"], edit_intent=routed.get("edit_intent", "UNCLEAR"))
                 elif job["mode"] == "CHAT":
                     result = read_state(job["folder"] / "response.json")
                     if process.returncode != 0 or not result:

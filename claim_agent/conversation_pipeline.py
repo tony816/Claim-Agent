@@ -7,7 +7,7 @@ import json
 import re
 from pathlib import Path
 
-from .claim_scope import apply_ui_target, claim_intent, constrain_target, find_existing_set, named_parents, parse_target, ui_target_set
+from .claim_scope import apply_ui_target, constrain_target, find_existing_set, named_parents, parse_target, ui_target_set
 from .models.prior_art import PriorSearchOptions
 from .models.request import IMAGE_EXT, RunRequest
 from .pipeline.engine import Decision
@@ -395,7 +395,8 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
     baseline = None
     if authoring:
         route.dependent, route.dependent_target = constrain_target(request["text"], route.dependent, route.dependent_target,
-                                                                   append=route.authoring_scope == "EXISTING_SET_EDIT")
+                                                                   append=route.authoring_scope == "EXISTING_SET_EDIT",
+                                                                   intent=route.edit_intent)
         route.dependent, route.dependent_target = apply_ui_target(route.mode, route.dependent, route.dependent_target, request["text"], request.get("ui_hints"))
         if request.get("project_runs") and named_parents(request["text"]):
             request = {**request, "project_sets": project_sets(rt.cfg, request["project_runs"])}
@@ -418,8 +419,8 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
         authoring_scope=route.authoring_scope if authoring else None, **paths,
         named_parents=sorted(named_parents(request["text"])) if authoring and route.dependent else [],
         continues_request=request.get("continues_request") or (request["text"] if authoring and named_parents(request["text"]) else None),
-        # Only the user's own words of this turn decide edit or new; the engine asks when they say neither.
-        edit_intent=(claim_intent(request["text"]) or "UNCLEAR") if baseline else "EDIT",
+        # The router's reading of this turn decides edit or new (개선로그 #24); the engine asks when it is UNCLEAR.
+        edit_intent=route.edit_intent if baseline else "EDIT",
         # 선행기술 검색 체크(웹 작성 창·MCP claim_send): WIPS 검색 + Jev 선별 + 사전 심사, 나머지 값은 claim-agent.yaml prior_search
         prior_search=PriorSearchOptions(enabled=True) if (request.get("ui_hints") or {}).get("prior_search") and authoring and not previous else None,
     )
