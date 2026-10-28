@@ -279,18 +279,43 @@ def asks_other_edit(route: RouteDecision, previous, text: str) -> bool:
     return not (targets == base.edit_targets or (base.numbered_by_design and not targets))
 
 
-def parents_unread(request: dict, has_baseline: bool) -> bool:
-    """Whether a run was routed before the parents a request names were read as parents (log #18).
+def rerouted_request(decision: str, earlier: list[str], run_request: str, held) -> str | None:
+    """The request a decision on a halted run goes to a new run with, or None to resume that run (logs #18·#19).
 
-    Such a run took '14OR15 항의 종속항' as targets 14·15 on a new design; resuming it repeats that path (run web-54630bf2,
-    resumed after the fix: prior search, then the architect stopped on parents it never got). Its request names parents
-    but records none, since runs routed since record them, so the message goes to a new run instead.
+    A run whose set does not hold the parents the request names cannot reach them by resuming: one routed before log #18
+    took them as targets of a new design (run web-54630bf2), and one started by a bare '재개' never read them (run
+    web-741d86b2: baseline 1~12, the dependent architect stopped on 14·15 again). The request goes to a new run, where
+    the parents are found in the conversation or lent from the project. A bare decision carries no request of its own,
+    so the one it continues stands in for it: the latest user message (`earlier`, oldest first) naming parents with
+    only bare decisions after it, or else the halted run's own request.
     """
-    text = request.get("request_text") or ""
-    head = "## 현재 요청\n\n"
-    if head in text:
-        text = text.split(head, 1)[1].split("\n\n## ", 1)[0]
-    return bool(request.get("dependent") and not has_baseline and not request.get("named_parents") and named_parents(text))
+    asked = ""
+    for text in reversed([*earlier, decision]):
+        body = _decision_body(text)
+        if named_parents(body):
+            asked = body
+            break
+        if not _bare(body):
+            break
+    if not asked:
+        own = run_request.split("## 현재 요청\n\n", 1)[-1].split("\n\n## ", 1)[0].strip()
+        body = _decision_body(decision)
+        asked = own + ("" if _bare(body) or body in own else "\n\n" + body)
+    return asked if named_parents(asked) - set(held) else None
+
+
+def _decision_body(text: str) -> str:
+    """A decision without the web's '[재개 · …]' label; of '하기 재개 / --- / <request>', the request below the rule."""
+    text = re.sub(r"^\[재개[^\]\n]*\]\s*", "", text.strip())
+    head, sep, rest = text.partition("\n---\n")
+    return rest.strip() if sep and len(head) <= 20 else text
+
+
+def _bare(text: str) -> bool:
+    """A decision with no request in it: '재개', '진행해', '그대로 해줘'."""
+    from .claim_scope import mentions_any_claim
+
+    return len(text) <= 15 and not mentions_any_claim(text)
 
 
 def _new_material(request: dict, blocks: list[dict], paths: dict, previous) -> bool:

@@ -159,16 +159,27 @@ def test_a_halted_run_that_read_named_parents_as_targets_is_not_resumed(rt, requ
     started = []
 
     def new_run(rt_, provider, request, route, *a, **k):
-        started.append(route)
+        started.append((route, request["text"]))
         raise NewRun
 
     monkeypatch.setattr(runtime, "make_provider", lambda *a, **k: None)
     monkeypatch.setattr(conversation_pipeline, "run_pipeline", new_run)
     route = {"mode": "AUTHORING_DRAFT", "reason": "중지 사유에 대한 결정", "resumes_halt": True}
-    request = dict(text="하기 재개", files=[], history=[], model="m", run_id="halted-run", ui_hints={"halted": {"stage": "ARCHITECT", "kind": "REVIEW"}})
+    request = dict(text="하기 재개\n---\n\n" + ask, files=[], history=[], model="m", run_id="halted-run",
+                   ui_hints={"halted": {"stage": "ARCHITECT", "kind": "REVIEW"}})
     with pytest.raises(NewRun):
         chat.routed_turn(ScriptedProvider({moderator.MODERATOR: [route]}), rt.cfg, None, request, tmp_path, EventWriter(tmp_path / "events.jsonl"))
-    assert len(started) == 1 and not started[0].resumes_halt
+    assert len(started) == 1 and not started[0][0].resumes_halt and started[0][1] == ask
+    # Run web-741d86b2: a bare '재개' carries the request it continues, so the new run reads the parents it names.
+    state.request.update(request_text="## 현재 요청\n\n재개", named_parents=[])
+    rt.store.save_state(state)
+    bare = dict(request, text="재개", prior_requests=["다른 질문", ask, "[재개 · 같은 단계 재실행] 하기 재개"])
+    with pytest.raises(NewRun):
+        chat.routed_turn(ScriptedProvider({moderator.MODERATOR: [route]}), rt.cfg, None, bare, tmp_path, EventWriter(tmp_path / "events.jsonl"))
+    assert started[1][1] == ask
+    later = dict(bare, prior_requests=[ask, "히트리드 모듈의 단열 구조를 종속항으로 써 줘"])   # another request since: resume
+    assert chat.routed_turn(ScriptedProvider({moderator.MODERATOR: [route]}), rt.cfg, None, later, tmp_path,
+                            EventWriter(tmp_path / "events.jsonl"))["resume_halted"]
 
 
 def test_question_on_a_halted_run_is_answered_and_the_run_keeps_waiting(rt, request_indep, tmp_path, monkeypatch):

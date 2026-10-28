@@ -286,12 +286,19 @@ def test_resuming_a_run_that_read_named_parents_as_targets_routes_its_request_ag
     monkeypatch.setattr(web, "resume_command", lambda *a, **k: pytest.fail("이전 분류로 같은 단계를 다시 돌림"))
     workspace.resume(sid, dict(kind="none", text="하기 재개\n---\n\n" + ask))
     assert [r["text"] for r in sent] == [ask]
-    request["named_parents"] = [14, 15]                  # routed since: the run is the parents' edit, so it resumes
+    # Run web-741d86b2: the bare '재개' started a run on 1~12 only; resumed again, the request it continues goes on.
+    request["request_text"] = "## 현재 요청\n\n재개"
+    state["baseline_set"] = dict(claims=[dict(claim_no=n, body="본문") for n in range(1, 13)], edit_targets=[])
+    (run / "state.json").write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    workspace.sessions[sid]["messages"] += [dict(id="u2", role="user", text="재개")]
+    workspace.resume(sid, dict(kind="none", text="재개"))
+    assert [r["text"] for r in sent] == [ask, ask]
+    state["baseline_set"] = dict(claims=[dict(claim_no=n, body="본문") for n in range(1, 16)], edit_targets=[])   # the set holds the parents: it resumes
     (run / "state.json").write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
     monkeypatch.setattr(web, "resume_command", lambda *a, **k: ["resume"])
     monkeypatch.setattr(workspace, "execute", lambda sid_, job, command: job.update(done=True))
     workspace.resume(sid, dict(kind="none", text="진행해"))
-    assert len(sent) == 1
+    assert len(sent) == 2
 
 
 def test_project_presets_instructions_lock_and_files_for_every_session(workspace, monkeypatch):

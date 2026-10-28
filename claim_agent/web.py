@@ -494,7 +494,7 @@ class Workspace:
             preset = self.project_inputs(session)
             session_files = [str(validate_attachment(folder / "uploads" / fid / known[fid]["name"]).path) for fid in dict.fromkeys([*earlier_files, *selected])]
             all_files = list(dict.fromkeys([*preset["files"], *session_files]))
-            request = dict(text=text, material=material, reference=context,
+            request = dict(text=text, material=material, reference=context, prior_requests=[m["text"] for m in prior_users],
                            files=all_files, attachments=preset["attachments"], history=history, model=model, run_id=session["run_id"],
                            instructions=preset["instructions"], user_lock=preset["user_lock"], project=preset["project"],
                            project_runs=preset["project_runs"],
@@ -710,11 +710,14 @@ class Workspace:
             state = read_state(self.cfg.path("runs_dir") / run_id / "state.json") or {}
             if kind != "accept_unverified" and self.answer_out_of_edit(session, state, text, [known[f] for f in selected]):
                 return
-            from .conversation_pipeline import parents_unread
-            if kind == "none" and parents_unread(state.get("request") or {}, bool(state.get("baseline_set"))):
-                # Its route read the named parents as targets: re-running the stage repeats that. The request it was
-                # started with goes through routing again as a new message instead.
-                return self.start(sid, dict(text=self.run_request(session, run_id) or text, files=selected, rerouted=True))
+            from .conversation_pipeline import rerouted_request
+            held = [c["claim_no"] for c in (state.get("baseline_set") or {}).get("claims", [])]
+            asked = kind == "none" and rerouted_request(text, [m["text"] for m in session["messages"] if m["role"] == "user"],
+                                                        (state.get("request") or {}).get("request_text") or "", held)
+            if asked:
+                # Re-running the stage cannot reach the parents the request names: the request goes through routing
+                # again as a new message instead.
+                return self.start(sid, dict(text=asked, files=selected, rerouted=True))
             self.require_connection()
             add = [str(validate_attachment(folder / "uploads" / fid / known[fid]["name"]).path) for fid in selected]
             scope = data.get("scope") if data.get("scope") in ("INDEPENDENT", "DEPENDENT") else None
@@ -747,14 +750,6 @@ class Workspace:
             thread = threading.Thread(target=self.execute, args=(sid, job, command), daemon=True)
             job["thread"] = thread
             thread.start()
-
-    @staticmethod
-    def run_request(session: dict, run_id: str) -> str:
-        """The user message that started `run_id` in this conversation (the one before its first answer)."""
-        messages = session["messages"]
-        first = next((i for i, m in enumerate(messages) if m.get("pipeline_run_id") == run_id), None)
-        user = next((m for m in reversed(messages[:first or 0]) if m["role"] == "user"), None)
-        return user["text"] if user else ""
 
     def answer_out_of_edit(self, session: dict, state: dict, text: str, files: list[dict]) -> bool:
         """Answer at once, without a run, when feedback on an in-place edit changes what that edit keeps read-only.

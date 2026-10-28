@@ -89,7 +89,7 @@ CONVERSATION_MAX_TOTAL_TOKENS = 1_000_000
 def routed_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: Path, events: EventWriter) -> dict:
     """`provider` is the configured live provider (routing + plain chat); the pipeline builds its own from the runtime."""
     from . import moderator
-    from .conversation_pipeline import asks_other_edit, intake, parents_unread, previous_state, run_pipeline
+    from .conversation_pipeline import asks_other_edit, intake, previous_state, rerouted_request, run_pipeline
     from .routing import RouteDecision, classify_request
     from .runtime import build_runtime, make_provider
     from .store.report import usage_note
@@ -107,8 +107,13 @@ def routed_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
         route.resumes_halt = False                 # only a run that is actually waiting can take the message as its decision
     if route.resumes_halt and asks_other_edit(route, previous, request["text"]):
         route.resumes_halt = False                 # its sealed edit targets are not what this message asks for: a new run
-    if route.resumes_halt and parents_unread(previous.request, previous.baseline_set is not None):
-        route.resumes_halt = False                 # routed before named parents were parents: resuming repeats that path
+    if route.resumes_halt:
+        held = [c.claim_no for c in previous.baseline_set.claims] if previous.baseline_set else []
+        asked = rerouted_request(request["text"], request.get("prior_requests") or [], previous.request.get("request_text") or "", held)
+        if asked:
+            # The run cannot reach the parents the request names: a new run takes the request, not the bare decision.
+            route.resumes_halt = False
+            request = {**request, "text": asked}
     if route.mode == "CONSULT" and not moderator.enabled(cfg):
         # Without the moderator no one answers a question directly; the reviewers answer it as before.
         route = RouteDecision(mode="REVIEW_ONLY", reason=route.reason, reviewers=["syntax-scope-reviewer", "oa-strategy-reviewer"],
