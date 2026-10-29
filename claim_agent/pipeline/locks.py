@@ -112,6 +112,9 @@ def build_baseline_record(state: RunState) -> tuple[dict[str, Any], str]:
         "edit_targets": [f"제{n}항" for n in base.edit_targets],
         "parent_chain_nos": [f"제{n}항" for n in base.chain_nos],
         "renumbered": {f"제{o}항": f"제{n}항" for o, n in sorted(base.renumbered.items())},
+        # 사용자 결정 2026-10-29: blank citations the dependent design filled — its assumption, for the user to confirm
+        "citations_by_design": [f"제{n}항" for n in base.cites_by_design],
+        "citations_filled": {f"제{n}항": f"제{p}항 (설계자 가정 — 사용자 확인 필요)" for n, p in sorted(base.cites_filled.items())},
         "rules": [
             "부모항 체인은 읽기 전용 비교 입력이다. 흡수·병합·재작성하지 않는다.",
             "편집 대상 항의 번호와 인용관계를 유지한다. 새 항으로 끼운 번호가 있으면 기존 항은 renumbered 대응으로 옮긴 번호·인용 그대로다.",

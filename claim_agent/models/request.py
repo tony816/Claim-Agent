@@ -39,6 +39,9 @@ class RunRequest(BaseModel):
     # REVIEW_ONLY blind: claims the reviewed dependent claims may cite (the free work conversation's drafts), searched
     # after the reviewed wording and before USER_LOCK for each exact parent chain. Never material for other roles.
     parent_claims: str | None = None
+    # REVIEW_ONLY blind in free work: blank citations (제항, 제?항) on those chains that the general agent filled as an
+    # assumption, claim → parent (사용자 결정 2026-10-29); reported as such, never a gate's finding.
+    citation_fills: dict[int, int] = Field(default_factory=dict)
     # EXISTING_SET_EDIT rewrites only the dependent claims in dependent_target inside the numbered set in claim_file;
     # the rest of that set is a read-only baseline. NEW_INDEPENDENT / NEW_DEPENDENT_SET (or None) keep the authoring paths.
     authoring_scope: str | None = None

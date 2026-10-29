@@ -260,6 +260,20 @@ def _excluded_note(state: RunState) -> str:
             + "은(는) 사용자가 아직 마무리하지 않은 항이라 부모항으로 쓰지 않으며, USER_LOCK에 있어도 그 선행 용어를 근거로 삼지 않는다.")
 
 
+def _fill_contract(base, target_nos: set[int]) -> str:
+    """사용자 결정 2026-10-29: the set's blank citations on the way to an edit target are the dependent design's to fill."""
+    if not base.cites_by_design or base.cites_filled:
+        return ""
+    blank = ", ".join(f"제{n}항" for n in base.cites_by_design)
+    own = [n for n in base.cites_by_design if n in target_nos]
+    return (f" 기존 세트의 {blank}은(는) 인용항 번호가 비어 있다(제항·제?항). 사용자가 번호를 정하지 않은 채 진행하라고 했으므로 종속항 설계가 "
+            "정한다: 각 항의 부모항은 그 항의 '상기' 용어가 모두 선행 기재되는 앞 번호 항 가운데 그 용어를 처음 도입하는 항으로 정하고, "
+            "부모항 체인 전문에 있는 항에서만 고른다. "
+            + (f"편집 대상인 {', '.join(f'제{n}항' for n in own)}은(는) 후보의 `parent_claim_no`로, " if own else "")
+            + "나머지는 `citation_fills`에 `{claim_no, parent_claim_no, basis}`(basis: 근거가 된 '상기' 용어와 그 항)로 하나씩 적는다. "
+            "빈 번호를 남기지 않으며, 정한 번호는 보고에 '설계자 가정 — 사용자 확인 필요'로 표시된다. 그 밖의 문언·번호는 바꾸지 않는다.")
+
+
 def _number_contract(state: RunState, target_nos: set[int] | None) -> str:
     base = state.baseline_set
     if not target_nos and base and base.numbered_by_design:
@@ -276,7 +290,8 @@ def _number_contract(state: RunState, target_nos: set[int] | None) -> str:
             "일치해야 하며(주된 트리 후보로 먼저 채운다) 임의 발번·범위 확대·누락은 계약 위반이다. 해당 번호로 낼 기술기여 후보가 없으면 후보를 만들지 말고 `status: REVIEW`로 사유를 보고한다.")
     if state.baseline_set:
         parents = {c.claim_no: c.parent_nos for c in state.baseline_set.claims}
-        fixed = "; ".join(f"제{n}항의 부모항 제{', '.join(map(str, parents[n]))}항" for n in sorted(target_nos) if n in parents)
+        fixed = "; ".join(f"제{n}항의 부모항 제{', '.join(map(str, parents[n]))}항" for n in sorted(target_nos) if parents.get(n))
+        text += _fill_contract(state.baseline_set, target_nos)
         if fixed:
             text += f" EXISTING_SET_EDIT이므로 기존 인용관계({fixed})를 `parent_claim_no`로 유지하고, 부모항 체인을 흡수·병합해 독립항으로 설계하지 않는다."
         last = max(parents, default=0)

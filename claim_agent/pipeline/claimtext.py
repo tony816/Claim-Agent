@@ -303,7 +303,9 @@ def baseline_digest(text: str) -> str:
     return exact_sha256(claim_set_text(parse_claim_set(text.replace("\r\n", "\n"))))
 
 
-_UNNUMBERED_HEAD = re.compile(r"【\s*청구항\s*】")
+# A number the user has not decided yet: left out (【청구항 】, 제항) or held by a mark (【청구항 ?】, 제?항, 제OO항).
+_HOLD = r"[?？○◯□*＊OoＯㅇXx]*"
+_UNNUMBERED_HEAD = re.compile(rf"【\s*청구항\s*{_HOLD}\s*】")
 
 
 def numbered_claims(text: str) -> dict[int, Claim]:
@@ -322,7 +324,7 @@ def numbered_claims(text: str) -> dict[int, Claim]:
     return out
 
 
-_ANY_HEAD = re.compile(r"【\s*청구항\s*(\d*)\s*】")
+_ANY_HEAD = re.compile(rf"【\s*청구항\s*(?:(\d+)|{_HOLD})\s*】")
 
 
 def claim_slots(text: str) -> list[tuple[int | None, str]]:
@@ -378,11 +380,14 @@ def insert_claims(claims: list[Claim], inserted: set[int]) -> tuple[list[Claim],
     return [_renumber_claim(c, mapping) for c in claims], {o: n for o, n in mapping.items() if o != n}
 
 
-def renumber_text(text: str, mapping: dict[int, int]) -> str:
+def renumber_text(text: str, mapping: dict[int, int], fills: dict[int, int] | None = None) -> str:
     """A claim set's text read as an edit reads its baseline: blank headers numbered by place, claims moved by
-    `mapping`. Text that is not a claim set, or cannot be moved, comes back as is."""
+    `mapping`, blank citations filled as the dependent design filled them (`fills`, at the moved numbers). Text that is
+    not a claim set, or cannot be moved, comes back as is."""
+    fills = fills or {}
     try:
-        return "\n\n".join(_renumber_claim(c, mapping).text for c in parse_claim_set(fill_blank_headers(text)))
+        moved = (_renumber_claim(c, mapping) for c in parse_claim_set(fill_blank_headers(text)))
+        return "\n\n".join((fill_citation(c, fills[c.claim_no]) if c.claim_no in fills else c).text for c in moved)
     except ClaimParseError:
         return text
 
@@ -398,10 +403,10 @@ def merged_set_text(base: list[tuple[int, str]], edits: dict[int, str]) -> str:
 
 
 def _blank_citation(body: str) -> bool:
-    """'제항에 있어서': a dependent preamble whose cited number was left blank."""
+    """'제항에 있어서' / '제?항에 있어서': a dependent preamble whose cited number was left blank or held by a mark."""
     head = body[:_PREAMBLE_WINDOW]
     cut = head.find("있어서")
-    return cut >= 0 and bool(re.search(r"제\s*항", head[:cut]))
+    return cut >= 0 and bool(re.search(rf"제\s*{_HOLD}\s*항", head[:cut]))
 
 
 def _gist(body: str) -> str:
@@ -428,13 +433,60 @@ def unfinished(body: str) -> bool:
     return body.rstrip().endswith((",", ";"))
 
 
-def unusable_parents(claims: list[Claim]) -> dict[int, str]:
+def blank_cited(claims: list[Claim]) -> set[int]:
+    """Claims whose citation is blank (제항, 제?항); they parse as independent claims until the number is filled."""
+    return {c.claim_no for c in claims if _blank_citation(c.body)}
+
+
+def fill_citation(c: Claim, parent: int) -> Claim:
+    """The claim with its blank citation (제항, 제?항) filled in as 제{parent}항; a claim without one comes back as is."""
+    if not _blank_citation(c.body):
+        return c
+    cut = c.body.find("있어서")
+    body = re.sub(rf"제\s*{_HOLD}\s*항", f"제{parent}항", c.body[:cut], count=1) + c.body[cut:]
+    return Claim(c.claim_no, f"【청구항 {c.claim_no}】\n{body}", body, [parent], False)
+
+
+def review_claims(claim_text: str, parent_claims: str | None, user_lock: str | None, fills: dict[int, int] | None = None) -> list[Claim]:
+    """The claims a reviewed dependent claim may cite, by number: the reviewed wording first, then the conversation's
+    drafts, then USER_LOCK; the drafts and the USER_LOCK count blank headers by place, as the user does. Blank citations
+    filled as an assumption (`fills`) read with their numbers. A claim citing itself or a later number has no chain and
+    is left out."""
+    fills = fills or {}
+    known: dict[int, Claim] = {}
+    for text in (claim_text, fill_blank_headers(parent_claims or ""), fill_blank_headers(user_lock or "")):
+        for no, claim in numbered_claims(text or "").items():
+            known.setdefault(no, fill_citation(claim, fills[no]) if no in fills else claim)
+    return sorted((c for c in known.values() if all(p < c.claim_no for p in c.parent_nos)), key=lambda c: c.claim_no)
+
+
+def blanks_on_chains(claims: list[Claim], targets: list[Claim]) -> list[int]:
+    """The blank citations to fill before the dependent `targets` can be read after a whole parent chain: every blank
+    citation up to the last target, once some target or its chain meets one (any earlier claim may turn out a parent)."""
+    blank = blank_cited(claims) | blank_cited(targets)
+    by_no = {c.claim_no: c for c in claims}
+    reach: set[int] = set()
+    for t in targets:
+        stack = [t.claim_no] if t.claim_no in blank else list(t.parent_nos)
+        while stack:
+            n = stack.pop()
+            if n in reach or n not in by_no:
+                continue
+            reach.add(n)
+            stack += by_no[n].parent_nos
+    hit = reach & blank or {t.claim_no for t in targets} & blank
+    last = max((t.claim_no for t in targets), default=0)
+    return sorted(n for n in blank if n <= last) if hit else []
+
+
+def unusable_parents(claims: list[Claim], to_fill: frozenset[int] | set[int] = frozenset()) -> dict[int, str]:
     """Claims a new claim must not cite, by number with why: a blank citation (제항), a body cut off mid-sentence, or a
-    citation, direct or not, of such a claim. An edit keeps them in the set as the user wrote them."""
+    citation, direct or not, of such a claim. An edit keeps them in the set as the user wrote them. Blank citations
+    the dependent design is to fill (`to_fill`) do not count."""
     out: dict[int, str] = {}
     for c in sorted(claims, key=lambda c: c.claim_no):
         broken = [p for p in c.parent_nos if p in out]
-        if _blank_citation(c.body):
+        if _blank_citation(c.body) and c.claim_no not in to_fill:
             out[c.claim_no] = "인용항 번호(제항)가 비어 있음"
         elif unfinished(c.body):
             out[c.claim_no] = "종결부 없이 끝남"

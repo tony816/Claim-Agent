@@ -296,6 +296,9 @@ def _edit_section(state: RunState) -> list[str]:
             out += [f"### 전체 청구항 세트 ({nos}을 새 항으로 끼움 · 기존 항은 번호·인용만 옮김: {renumber_line(base.renumbered)} · {tag})", "", full, ""]
         else:
             out += [f"### 전체 청구항 세트 ({nos}만 교체 · 나머지 항은 제공된 원문 그대로 · {tag})", "", full, ""]
+    if base.cites_filled:
+        out += ["빈 인용항 번호는 종속항 설계가 선행 기재로 정했습니다(설계자 가정 — 확인 필요): "
+                + ", ".join(f"제{n}항 → 제{p}항에 있어서" for n, p in sorted(base.cites_filled.items())), ""]
     return out
 
 

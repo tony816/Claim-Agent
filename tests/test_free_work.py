@@ -256,6 +256,59 @@ def test_blind_finds_parents_in_the_conversation_and_user_lock_and_never_guesses
     assert "#### 제7항" in report and "자기 자신" in report                  # a self-citing draft has no chain (and no loop)
 
 
+HELD_LOCK = ("【청구항 1】\n안착부를 포함하는,\n핵산 증폭 장치.\n\n【청구항 ?】\n베이스 부재를 포함하는,\n히트리드 모듈.\n\n"
+             "【청구항 】\n제2항에 있어서,\n상기 베이스 부재는 복수의 레일부를 포함하는,\n히트리드 모듈.\n\n"
+             "【청구항 】\n제?항에 있어서,\n상기 베이스 부재를 덮는 커버를 더 포함하는,\n히트리드 모듈.")
+HELD_CLAIMS = ("【청구항 5】\n제3항에 있어서,\n상기 복수의 레일부는 슬라이드되는,\n히트리드 모듈.\n\n"
+               "【청구항 6】\n제4항에 있어서,\n상기 커버는 절곡되는,\n히트리드 모듈.")
+
+
+def _chain(call) -> str:
+    return call.packet_text.split("parent_chain_text:\n")[1].split("\ntarget_claim_text:\n")[0]
+
+
+def test_blind_counts_the_user_locks_unnumbered_claims_by_place_and_reads_assumed_citations(rt, tmp_path, monkeypatch):
+    """Run web-92007d3d: 제23항 cited the USER_LOCK's 22nd claim, headed 【청구항 】 after a 【청구항 ?】; the lookup dropped
+    every unnumbered claim and said 부모 제22항 없음. Its chain also met a 제?항: the general agent now fills that number
+    from the antecedents as an assumption (사용자 결정 2026-10-29), the blind reads the filled chain, the answer says so."""
+    provider = ScriptedProvider({free_work.FREE_ROLE: ["제4항 → 제2항: 상기 베이스 부재"], "blind-claim-reconstruction-reviewer": [R.blind(), R.blind()]})
+    _offline(rt, monkeypatch, provider)
+    folder = tmp_path / "request"
+    folder.mkdir()
+    result = free_work.review_turn(provider, rt.cfg, None, _review_request("blind-claim-reconstruction-reviewer", claims=HELD_CLAIMS, history=[], user_lock=HELD_LOCK), folder)
+    (fill,) = _agent_calls(provider)
+    assert "제4항" in fill.packet_text and "【청구항 3】\n제2항에 있어서" in fill.packet_text and "상기 커버는 절곡되는" in fill.packet_text
+    five, six = _blind_calls(provider, "target_claim_id: 5", "target_claim_id: 6")
+    assert _chain(five).startswith("【청구항 2】\n베이스 부재를") and "【청구항 3】\n제2항에 있어서" in _chain(five) and "커버" not in _chain(five)
+    assert _chain(six) == "【청구항 2】\n베이스 부재를 포함하는,\n히트리드 모듈.\n\n【청구항 4】\n제2항에 있어서,\n상기 베이스 부재를 덮는 커버를 더 포함하는,\n히트리드 모듈."
+    assert "가정" not in six.packet_text                                    # the blind reads wording only
+    answer = result["answer"]
+    assert "일반 에이전트가 부모항 체인의 빈 인용항 번호를" in answer and "제4항 → 제2항에 있어서" in answer
+    assert "인용 번호 가정 제4항 → 제2항" in answer and "인용 번호 가정 호출(일반 에이전트)" in answer
+
+
+@pytest.mark.parametrize("reply", ["제4항 → 없음: 선행 기재 불명", "제4항 → 제7항: 상기 커버", "모르겠습니다"])
+def test_a_blank_citation_the_agent_cannot_fill_is_still_reported_not_guessed(rt, tmp_path, monkeypatch, reply):
+    provider = ScriptedProvider({free_work.FREE_ROLE: [reply], "blind-claim-reconstruction-reviewer": [R.blind()]})
+    _offline(rt, monkeypatch, provider)
+    folder = tmp_path / "request"
+    folder.mkdir()
+    result = free_work.review_turn(provider, rt.cfg, None, _review_request("blind-claim-reconstruction-reviewer", claims=HELD_CLAIMS, history=[], user_lock=HELD_LOCK), folder)
+    (five,) = _blind_calls(provider, "target_claim_id: 5")                  # a later number (제7항) is refused by the code
+    assert "#### 제6항" in result["answer"] and "제4항은 인용항 번호가 비어 있어" in result["answer"]
+    assert "일반 에이전트가 부모항 체인의 빈 인용항 번호를" not in result["answer"]
+
+
+def test_no_blank_on_any_chain_makes_no_fill_call(rt, tmp_path, monkeypatch):
+    provider = ScriptedProvider({"blind-claim-reconstruction-reviewer": [R.blind()]})
+    _offline(rt, monkeypatch, provider)
+    folder = tmp_path / "request"
+    folder.mkdir()
+    claims = HELD_CLAIMS.split("\n\n【청구항 6】")[0]
+    result = free_work.review_turn(provider, rt.cfg, None, _review_request("blind-claim-reconstruction-reviewer", claims=claims, history=[], user_lock=HELD_LOCK), folder)
+    assert not _agent_calls(provider) and "인용 번호 가정" not in result["answer"]
+
+
 @pytest.fixture
 def workspace(tmp_path, monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "offline-web-secret")

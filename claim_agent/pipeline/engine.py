@@ -44,11 +44,13 @@ from .claimtext import (
     appended_nos,
     as_claim_set,
     baseline_digest,
+    blank_cited,
     claim_set_text,
     claim_slots,
     contains_user_lock,
     exact_sha256,
     fill_blank_headers,
+    fill_citation,
     insert_claims,
     merged_set_text,
     numbered_claims,
@@ -59,6 +61,7 @@ from .claimtext import (
     parse_claim_set,
     renumber_line,
     renumber_text,
+    review_claims,
     unfinished,
     unusable_parents,
     user_lock_kept,
@@ -99,6 +102,43 @@ def missing_parents_message(missing: list[int], where: str, keep: str) -> str:
     return (f"새 종속항의 부모항으로 지목한 {named}이 {where}에 없어, 모델을 호출하지 않고 멈췄습니다. {named}의 원문을 그 항이 "
             f"인용하는 항까지 함께 요청에 붙여 넣거나 {keep}에 더한 뒤 같은 요청을 다시 보내 주세요. 같은 프로젝트의 다른 대화가 "
             "LOCK한 세트에서도 찾지 못했습니다(LOCK 없는 자유 작업 문언은 가져오지 않습니다).")
+
+def design_fills(base: BaselineSet, env: RoleEnvelope) -> tuple[dict[int, int], list[str]]:
+    """The parents a dependent design gave the set's blank citations (`citation_fills`, and a target's own through its
+    candidate's parent_claim_no), with what keeps them from being sealed: a blank left open, a claim that has a
+    citation, a parent that is not an earlier claim of the chain, or a target chain running into a claim left out."""
+    want = set(base.cites_by_design)
+    fills: dict[int, int] = {}
+    problems: list[str] = []
+    for f in env.citation_fills:
+        if f.claim_no not in want:
+            problems.append(f"제{f.claim_no}항: 인용항 번호가 빈 항이 아님")
+        fills[f.claim_no] = f.parent_claim_no
+    for x in set_candidates(env):
+        if x.planned_claim_no in want and x.parent_claim_no is not None:
+            if fills.setdefault(x.planned_claim_no, x.parent_claim_no) != x.parent_claim_no:
+                problems.append(f"{x.dc_id} 제{x.planned_claim_no}항: 후보의 부모 제{x.parent_claim_no}항과 citation_fills의 제{fills[x.planned_claim_no]}항이 다름")
+    problems += [f"제{n}항: 인용항 번호를 정하지 않음" for n in sorted(want - set(fills))]
+    allowed = set(base.chain_nos) | set(base.edit_targets)
+    problems += [f"제{n}항의 부모 제{p}항: 부모항 체인({', '.join(f'제{m}항' for m in base.chain_nos)})의 앞 번호 항이 아님"
+                 for n, p in sorted(fills.items()) if n in want and not (p < n and p in allowed)]
+    if problems:
+        return fills, problems
+    claims = [fill_citation(c, fills[c.claim_no]) if c.claim_no in fills else c for c in parse_claim_set(claim_set_text_of(base))]
+    for n in base.edit_targets:
+        if n in {c.claim_no for c in claims}:
+            out = sorted(ancestor_nos(claims, n) - allowed)
+            problems += [f"제{n}항의 부모항 체인이 제{m}항({base.excluded.get(m, '체인 밖')})에 닿음" for m in out]
+    return fills, problems
+
+
+def fills_line(fills: dict[int, int]) -> str:
+    return ", ".join(f"제{n}항 → 제{p}항에 있어서" for n, p in sorted(fills.items()))
+
+
+def claim_set_text_of(base: BaselineSet) -> str:
+    return "\n\n".join(c.text for c in base.claims)
+
 
 class PipelineHalt(Exception):
     def __init__(self, halt: Halt):
@@ -242,11 +282,12 @@ class PipelineEngine(PriorArtSteps):
                "만들어 끼우고 기존 항을 뒤로 밀려면 '새로'라고 답하거나, 그 말을 넣어 같은 요청을 다시 보내 주세요.") if intent == "UNCLEAR" and present else None
         # New claims only after the end of the set (or no number yet): a claim the user left cut off or with a blank
         # citation cannot be their parent, so it stays out of the chain, as written, instead of stopping the edit
-        # (사용자 결정 2026-10-26). Blank headers that cannot be numbered by place still stop it.
+        # (사용자 결정 2026-10-26). On the way to an edited claim, blank citations are filled by the dependent design
+        # (사용자 결정 2026-10-29, run web-a1d30e62). Blank headers that cannot be numbered by place still stop it.
         end = max((no or place for place, (no, _) in enumerate(slots, 1)), default=0)
         append = all(n > end for n in targets)
         blanks = numbering_blanks(filled)
-        if blanks and (not append or any(no is None for no, _ in slots)):
+        if blanks and any(no is None for no, _ in slots):
             # Parsed as is, a blank citation reads as an independent claim, and blank headers out of place fold claims together.
             loose = [f"{place}번째 항: 종결부 없이 '…{' '.join(body.split())[-12:]}'로 끝남" for place, (_, body) in enumerate(slots, 1)
                      if place not in targets and unfinished(body)]
@@ -274,16 +315,22 @@ class PipelineEngine(PriorArtSteps):
                                                   "그 범위 인용을 고치거나, 새 항을 세트 끝에 붙여 달라고 요청해 주세요.", [str(exc)])
         by_no = {c.claim_no: c for c in claims}
         last = max(by_no, default=0)
-        excluded = unusable_parents(claims) if append else {}
+        beyond = {n for n in targets if n > last}
+        # New claims: inserted ones (their numbers were left free) and ones right after the end of the set.
+        new = (targets - set(by_no) - beyond if moved else set()) | appended_nos(claims, beyond)
+        # An edit whose target or chain meets a blank citation: every blank citation up to the last target is the
+        # dependent design's to fill, since any claim before a target may turn out to be in its chain.
+        blank = blank_cited(claims)
+        reach = set().union(*(ancestor_nos(claims, n) | {n} for n in targets - new if n in by_no)) | ({n for n in by_no if n < max(new)} if new else set())
+        to_fill = {n for n in blank if n <= max(targets)} if not append and reach & blank else set()
+        excluded = unusable_parents(claims) if append else {n: why for n, why in unusable_parents(claims, to_fill).items()
+                                                            if n < max(targets) and n not in targets} if to_fill else {}
         kept = [f"제{n}항: {why} — 새 항의 부모항으로 쓰지 않고 원문 그대로 둠" for n, why in sorted(excluded.items())]
         if append and len(excluded) == len(claims):
             halt("BASELINE_SET_UNFINISHED", f"편집할 기존 청구항 세트({origin})에 새 항이 인용할 수 있는 끝맺어진 항이 없습니다. "
                                             f"{origin}에서 고친 뒤 같은 요청을 다시 보내 주세요.", kept)
-        beyond = {n for n in targets if n > last}
-        # New claims: inserted ones (their numbers were left free) and ones right after the end of the set.
-        new = (targets - set(by_no) - beyond if moved else set()) | appended_nos(claims, beyond)
         wrong = [f"제{n}항: 세트에 없음" for n in sorted(targets) if n not in by_no and n not in new]
-        wrong += [f"제{n}항: 독립항" for n in sorted(targets) if n in by_no and by_no[n].is_independent]
+        wrong += [f"제{n}항: 독립항" for n in sorted(targets) if n in by_no and by_no[n].is_independent and n not in to_fill]
         if wrong:
             halt("EDIT_TARGET_INVALID", "편집 대상은 제공된 세트에 있는 종속항 번호이거나 세트 끝에 바로 이어지는 새 번호여야 합니다.", wrong)
         try:
@@ -295,6 +342,8 @@ class PipelineEngine(PriorArtSteps):
         # A new claim's parent is chosen by the dependent design, so every claim before it stays available as its chain;
         # with no number named, that is the whole set.
         cited = set().union(*(ancestor_nos(claims, n) for n in targets - new)) | ({n for n in by_no if n < max(new)} if new else set(by_no) if not targets else set())
+        if to_fill:
+            cited |= {n for n in by_no if n < max(targets)}      # until the design fills the blanks, as for a new claim
         chain = sorted(cited - targets - set(excluded))
         loose = [f"제{n}항: 종결부 없이 '…{' '.join(by_no[n].body.split())[-12:]}'로 끝남" for n in chain if unfinished(by_no[n].body)]
         if loose:
@@ -310,6 +359,7 @@ class PipelineEngine(PriorArtSteps):
             claims=[BaselineClaim(claim_no=c.claim_no, parent_nos=c.parent_nos, text=c.text) for c in claims],
             edit_targets=sorted(targets), chain_nos=chain, chain_text=claim_set_text([by_no[n] for n in chain]),
             user_lock_released=released, renumbered=moved, excluded=excluded, numbered_by_design=not targets,
+            cites_by_design=sorted(to_fill),
         )
         record, md = build_baseline_record(state)
         self.store.write_record(state.run_id, rid, {**record, "report_markdown": md}, md)
@@ -319,7 +369,28 @@ class PipelineEngine(PriorArtSteps):
                            f"{', '.join(f'제{n}항' for n in chain)}은 읽기 전용(BASELINE_SET {rid}, 미검증)"
                            + (f"; USER_LOCK 중 {', '.join(f'제{n}항' for n in released)}은 이번 요청이 편집 대상으로 지정해 잠금 해제" if released else "")
                            + (f"; {named}을 새 항으로 끼우며 기존 항 번호·인용을 옮김({renumber_line(moved)})" if moved else "")
-                           + (f"; 부모항으로 쓰지 않고 원문 그대로 둔 항: {', '.join(f'제{n}항({why})' for n, why in sorted(excluded.items()))}" if excluded else ""))
+                           + (f"; 부모항으로 쓰지 않고 원문 그대로 둔 항: {', '.join(f'제{n}항({why})' for n, why in sorted(excluded.items()))}" if excluded else "")
+                           + (f"; 인용항 번호가 빈 {', '.join(f'제{n}항' for n in sorted(to_fill))}은 종속항 설계가 선행 기재로 정함" if to_fill else ""))
+
+    def _seal_design_fills(self, state: RunState, env: RoleEnvelope) -> None:
+        """Seal the blank citations the dependent design filled (checked in _call) as the set's own, so the chain the
+        drafter, the reviewers and every blind snapshot read has numbers. Reported as the design's assumption."""
+        base = state.baseline_set
+        assert base is not None
+        fills, _ = design_fills(base, env)
+        fills = {n: fills[n] for n in base.cites_by_design}
+        claims = [fill_citation(c, fills[c.claim_no]) if c.claim_no in fills else c for c in parse_claim_set(claim_set_text_of(base))]
+        by_no = {c.claim_no: c for c in claims}
+        cited = set().union(*(ancestor_nos(claims, n) for n in base.edit_targets if n in by_no))
+        if any(n not in by_no for n in base.edit_targets):
+            cited |= set(base.chain_nos)                      # a new claim may still cite any claim before it
+        chain = sorted(cited - set(base.edit_targets) - set(base.excluded))
+        base.claims = [BaselineClaim(claim_no=c.claim_no, parent_nos=c.parent_nos, text=c.text) for c in claims]
+        base.cites_filled, base.chain_nos, base.chain_text = fills, chain, claim_set_text([by_no[n] for n in chain])
+        record, md = build_baseline_record(state)
+        self.store.write_record(state.run_id, base.record_id, {**record, "report_markdown": md}, md)
+        state.notes.append(f"종속항 설계가 빈 인용항 번호를 정함(설계자 가정 — 사용자 확인 필요): {fills_line(fills)}; "
+                           f"부모항 체인 {', '.join(f'제{n}항' for n in chain)}")
 
     def scope_guard(self, state: RunState, bundle: MaterialBundle) -> None:
         """Refuse a dependent-claim request that has no independent claim to hang it on — before any model call.
@@ -610,6 +681,8 @@ class PipelineEngine(PriorArtSteps):
         base_parents = {b.claim_no: b.parent_nos for b in state.baseline_set.claims} if state.baseline_set else {}
         moved: list[str] = []
         outside: list[str] = []         # a new claim citing a claim outside the chain (e.g. one left cut off) or a later one
+        base = state.baseline_set
+        open_cites = set(base.cites_by_design) if base and stage == Stage.DEP_ARCHITECT and not base.cites_filled else set()
         if (stage == Stage.DEP_ARCHITECT and state.baseline_set and state.baseline_set.numbered_by_design
                 and env.status in (Status.PASS, Status.PASS_RANGE)):
             # No number asked for: the design's own numbers are the targets, if they go on from the set's end without a gap.
@@ -632,7 +705,8 @@ class PipelineEngine(PriorArtSteps):
                 if len(planned) != len(actual):
                     scope_problem = "종속항 설계 번호가 중복되었습니다."
                 moved = [f"{x.dc_id} 제{x.planned_claim_no}항의 부모 제{x.parent_claim_no}항 (기존 제{', '.join(map(str, base_parents[x.planned_claim_no]))}항)"
-                         for x in written if x.planned_claim_no in base_parents and x.parent_claim_no is not None and x.parent_claim_no not in base_parents[x.planned_claim_no]]
+                         for x in written if x.planned_claim_no in base_parents and x.parent_claim_no is not None
+                         and x.parent_claim_no not in base_parents[x.planned_claim_no] and x.planned_claim_no not in open_cites]
                 outside = [f"{x.dc_id} 제{x.planned_claim_no}항의 부모 제{x.parent_claim_no}항" for x in written
                            if state.baseline_set and x.planned_claim_no is not None and x.planned_claim_no not in base_parents
                            and x.parent_claim_no is not None and x.parent_claim_no not in allowed(x.planned_claim_no)]
@@ -657,6 +731,11 @@ class PipelineEngine(PriorArtSteps):
             elif outside and not scope_problem:
                 chain = ", ".join(f"제{n}항" for n in state.baseline_set.chain_nos) if state.baseline_set else ""
                 scope_problem = f"기존 세트 편집의 새 항은 부모항 체인({chain})이나 그보다 앞의 새 항만 인용할 수 있습니다: " + "; ".join(outside)
+        if open_cites and env.status in (Status.PASS, Status.PASS_RANGE) and not scope_problem:
+            _, fill_problems = design_fills(base, env)          # type: ignore[arg-type]
+            if fill_problems:
+                scope_problem = ("기존 세트의 빈 인용항 번호(" + ", ".join(f"제{n}항" for n in sorted(open_cites)) + ")를 `citation_fills`와 "
+                                 "편집 대상 후보의 `parent_claim_no`로 모두 정해야 합니다: " + "; ".join(fill_problems))
         issued = contract.passes(env, state.request_mode) if role in REVIEWER_ROLES or role == "blind-claim-reconstruction-reviewer" else env.status in (Status.PASS, Status.PASS_RANGE)
         evidence_problem = None
         unconfirmed = env.unconfirmed_evidence()
@@ -1291,6 +1370,8 @@ class PipelineEngine(PriorArtSteps):
             if tr.kind == "RETURN":
                 self._apply_return(state, tr, env, rid, dependent=True)
                 return
+            if base and base.cites_by_design and not base.cites_filled:
+                self._seal_design_fills(state, env)
             planned = sorted(x.planned_claim_no for x in set_candidates(env) if x.planned_claim_no)
             if by_design and planned:
                 base.edit_targets = planned                      # type: ignore[union-attr]
@@ -1348,7 +1429,7 @@ class PipelineEngine(PriorArtSteps):
                 # read at the numbers the set's claims moved to.
                 base = state.baseline_set
                 lock_text = merged_set_text([(b.claim_no, b.text) for b in base.claims], {cl.claim_no: cl.text for cl in all_claims if cl.claim_no in set_nos})
-                lock = renumber_text(lock, base.renumbered) if lock else lock
+                lock = renumber_text(lock, base.renumbered, base.cites_filled) if lock else lock
                 released = set(base.user_lock_released)
             if not user_lock_kept(lock_text, lock, released):
                 raise PipelineHalt(Halt(stage=st.value, role="engine", kind="BLOCK", reason_code="USER_LOCK_NOT_PRESERVED", message="USER_LOCK 문언 미보존", record_id=rid))
@@ -1585,17 +1666,14 @@ class PipelineEngine(PriorArtSteps):
         or other reports) — an independent claim by itself, a dependent claim after its exact parent chain.
 
         A cited claim is looked up in the reviewed wording, then `parent_claims` (the conversation's drafts), then
-        USER_LOCK. A claim whose chain cannot be built is reported, not guessed. Without a DESIGN_GATE there is nothing to
-        compare a snapshot to, so picture does not follow.
+        USER_LOCK. Blank citations on a chain are read as the general agent filled them (`citation_fills`, an assumption
+        the label says); a claim whose chain still cannot be built is reported, not guessed. Without a DESIGN_GATE there
+        is nothing to compare a snapshot to, so picture does not follow.
         """
         role = "blind-claim-reconstruction-reviewer"
-        targets = list(numbered_claims(claim_text).values())
-        known: dict[int, Any] = {}
-        for text in (claim_text, req.parent_claims, req.user_lock):
-            for no, claim in numbered_claims(text or "").items():
-                known.setdefault(no, claim)
-        # A draft claim citing itself or a later number has no chain (and would loop), so it is left out of the lookup.
-        claims = sorted((c for c in known.values() if all(p < c.claim_no for p in c.parent_nos)), key=lambda c: c.claim_no)
+        fills = req.citation_fills
+        targets = [fill_citation(c, fills[n]) if n in fills else c for n, c in numbered_claims(claim_text).items()]
+        claims = review_claims(claim_text, req.parent_claims, req.user_lock, fills)
         jobs: list[tuple[str, Scope, str, BlindPacket, Identifiers]] = []     # (label, scope, record kind, packet, ids)
         skipped: list[str] = []
         if not targets:
@@ -1606,6 +1684,9 @@ class PipelineEngine(PriorArtSteps):
                                                                      record_id=record_id("blind", ids), claim_text=claim_text.strip()), ids))
         for claim in targets:
             label = f"제{claim.claim_no}항"
+            if blank_cited([claim]):
+                skipped.append(f"#### {label}\n\n블라인드 복원을 하지 않았습니다: 이 항의 인용항 번호가 비어 있고(제항·제?항) 가정으로도 정하지 못했습니다.")
+                continue
             if claim.is_independent:
                 rid = record_id("blind", ids, sum(1 for j in jobs if j[2] == "blind") + 1)
                 jobs.append((label, Scope.INDEPENDENT, "blind", BlindPacket(claim_scope="INDEPENDENT", candidate_id=ids.candidate_id, revision="r1",
@@ -1619,11 +1700,21 @@ class PipelineEngine(PriorArtSteps):
             except ClaimParseError as exc:
                 skipped.append(f"#### {label}\n\n블라인드 복원을 하지 않았습니다: {exc}. 부모항 문언을 대화에 붙여 넣거나 프로젝트 지침에 두면 체인을 만들 수 있습니다.")
                 continue
+            # A blank citation (제항, 제?항) in the chain reads as an independent claim; its parent is not known, so not guessed.
+            blank = sorted({c.claim_no for chain in chains for c in chain} & blank_cited(claims))
+            if blank:
+                nos = ", ".join(f"제{n}항" for n in blank)
+                skipped.append(f"#### {label}\n\n블라인드 복원을 하지 않았습니다: 부모항 체인의 {nos}은 인용항 번호가 비어 있어(제항·제?항) 체인을 "
+                               "끝까지 만들 수 없습니다. 일반 에이전트도 그 번호를 가정으로 정하지 못했습니다. 그 번호를 USER_LOCK이나 붙여 넣은 문언에 "
+                               "채우면 복원합니다.")
+                continue
             for k, chain in enumerate(chains):
                 tid = str(claim.claim_no) if len(chains) == 1 else f"{claim.claim_no}-alt{k + 1}"
                 dids = replace(ids, dependent_set_id=f"{ids.candidate_id}-review", dependent_design_revision="N/A", dependent_revision="r1", target_claim_id=tid)
                 cited = "→".join(str(c.claim_no) for c in chain)
-                jobs.append((f"{label} (부모항 체인 제{cited}항)", Scope.DEPENDENT_SINGLE, "dependent_blind", BlindPacket(
+                assumed = [f"제{c.claim_no}항 → 제{fills[c.claim_no]}항" for c in [*chain, claim] if c.claim_no in fills]
+                note = f"; 인용 번호 가정 {', '.join(assumed)}" if assumed else ""
+                jobs.append((f"{label} (부모항 체인 제{cited}항{note})", Scope.DEPENDENT_SINGLE, "dependent_blind", BlindPacket(
                     claim_scope="DEPENDENT_SINGLE", candidate_id=ids.candidate_id, revision="r1", design_revision="N/A", record_id=record_id("dependent_blind", dids),
                     dependent_set_id=dids.dependent_set_id, dependent_design_revision="N/A", dependent_revision="r1", target_claim_id=tid,
                     parent_chain_text=parent_chain_text(chain), target_claim_text=claim.text), dids))

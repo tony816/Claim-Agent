@@ -43,7 +43,15 @@ STYLE_NOTE = ("※ 문체 조정은 고른 문언을 고쳐 냅니다(스타일�
               "함께 고른 다른 검수는 그 문언을 읽었습니다. 이 문언은 다음 검수 대상으로 고를 수 있습니다.")
 STYLE_UNCHANGED_NOTE = "※ 문체 조정이 고칠 곳을 찾지 못했거나 문언을 내지 않아, 다른 검수는 고른 문언 그대로를 읽었습니다."
 BLIND_NOTE_TEXT = "※ 입력한 요청은 블라인드 복원에 보내지 않았습니다(블라인드는 청구항 문언만 받는 새 context). 다른 검수와 요청을 처리하는 단계에만 반영했습니다."
-HALTED_NOTE = "※ 검수가 끝까지 실행되지 않아, 끝난 검수 결과로만 요청을 처리했습니다. 중지 원인은 작업 로그와 전체 보고서에 있습니다."
+FILL_NOTE = ("※ 블라인드 복원 전에 일반 에이전트가 부모항 체인의 빈 인용항 번호를 '상기' 선행 기재로 정했습니다(가정 — 확인 필요): {fills}. "
+             "블라인드는 그 번호를 채운 체인을 읽었습니다. 이 번호는 게이트 판단이 아니며 USER_LOCK·대화 문언은 바뀌지 않았습니다.")
+FILL_REQUEST = """블라인드 복원에 넘길 부모항 체인에 인용항 번호가 빈 항(제항·제?항)이 있다: {nos}.
+아래 청구항만 읽고 각 항의 부모항 번호를 정하라. 부모항은 그 항의 '상기' 용어가 모두 선행 기재되는 앞 번호 항 가운데 그 용어를 처음 도입하는 항이다.
+한 줄에 하나씩 `제N항 → 제M항: 근거가 된 '상기' 용어` 형식으로만 답하고, 정할 수 없으면 `제N항 → 없음: 이유`로 적는다. 다른 설명이나 청구항 문언은 쓰지 않는다.
+
+{claims}"""
+_FILL_LINE = re.compile(r"제\s*(\d+)\s*항\s*(?:→|->|=>)\s*제\s*(\d+)\s*항")
+HALTED_NOTE ="※ 검수가 끝까지 실행되지 않아, 끝난 검수 결과로만 요청을 처리했습니다. 중지 원인은 작업 로그와 전체 보고서에 있습니다."
 PROJECT_FILES_HEAD ="## 프로젝트 소스 파일 (프로젝트에 미리 등록되어 매 요청에 자동 첨부 — 사용자 제공 원자료)"
 CATEGORY_LABELS = {"invention": "발명 자료", "drawing": "도면", "prior_art": "선행기술", "spec": "정식 명세서"}
 
@@ -220,8 +228,12 @@ def review_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
     if not target:
         raise ValueError("검수할 청구항 문언이 없습니다.")
     history = request.get("history", [])
+    provider = UsageMeter(provider, cfg.telemetry.pricing)
     # The blind reader needs each dependent claim's exact parent chain; the conversation's drafts are where it is.
-    request = {**request, "review": {**review, "parent_claims": parent_claims_text(history)}}
+    parents = parent_claims_text(history)
+    fills = assume_citations(provider, request, target, parents) if "blind-claim-reconstruction-reviewer" in roles else {}
+    fill_seconds = time.time() - started
+    request = {**request, "review": {**review, "parent_claims": parents, "citation_fills": fills}}
     blocks, paths = intake(request, folder)
     # The click's request text is the program's, not user material; the reviewed wording is the review target only.
     asked = {b["path"] for b in blocks if b.get("is_request")}
@@ -243,7 +255,11 @@ def review_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
     # Style hands back restyled wording; the other chosen roles read it, and it can be the next review target.
     styled = result.get("styled_text") if "claim-style-adjuster" in roles else None
     style_notes = [STYLE_NOTE if styled else STYLE_UNCHANGED_NOTE] if "claim-style-adjuster" in roles else []
-    reports = "\n".join([REVIEW_NOTE] + style_notes + ([BLIND_NOTE] if blind else [])) + "\n\n" + result["answer"]
+    fill_notes = [FILL_NOTE.format(fills=", ".join(f"제{n}항 → 제{p}항에 있어서" for n, p in sorted(fills.items())))] if fills else []
+    reports = "\n".join([REVIEW_NOTE] + style_notes + ([BLIND_NOTE] if blind else []) + fill_notes) + "\n\n" + result["answer"]
+    if provider.usage.get("calls") and not note:
+        # The pipeline's footnote counts the reviewers only; the general agent's fill call is counted here.
+        reports += "\n\n※ 인용 번호 가정 호출(일반 에이전트) — " + usage_note(provider.usage, fill_seconds)
     # The history holds what happened, in order: the reviews asked and answered, then the request asked and answered.
     reviewed = [{"role": "user", "parts": [{"text": review_asked_text(roles, note, target)}]}, {"role": "model", "parts": [{"text": reports}]}]
     if not note:
@@ -251,7 +267,6 @@ def review_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
         rt.store.write_chat_report(result["run_id"], reports)
         return {**result, "answer": reports, "history": [*history, *reviewed], "effective_mode": "REVIEW_ONLY", "revised": bool(styled),
                 "claim_text": styled}
-    provider = UsageMeter(provider, cfg.telemetry.pricing)
     message = user_message(FOLLOW_UP_REQUEST.format(labels=labels, note=note, target=styled or target), "", [])
     preset = request.get("attachments") or []
     sent = {"role": "user", "parts": [*_preset_parts(preset), *message["parts"]]} if preset else None
@@ -261,7 +276,7 @@ def review_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
     # The request decided the form: claim blocks mean fixed wording, anything else an answer from the findings.
     revised = review_target(done["answer"]) is not None
     usage = {k: v for k, v in turn_usage(rt.store.load_state(result["run_id"]))[0].items() if k not in ("started_at", "finished_at")}
-    notes = [(REVISED_LABEL if revised else ANSWERED_LABEL).format(labels=labels)] + ([BLIND_NOTE] if blind else []) + ([BLIND_NOTE_TEXT] if blind else [])
+    notes = [(REVISED_LABEL if revised else ANSWERED_LABEL).format(labels=labels)] + ([BLIND_NOTE] if blind else []) + ([BLIND_NOTE_TEXT] if blind else []) + fill_notes
     notes += [HALTED_NOTE] if result["status"] != "complete" else []
     body = done["answer"]
     if styled and not revised:
@@ -272,6 +287,31 @@ def review_turn(provider: LLMProvider, cfg, config_path, request: dict, folder: 
     rt.store.write_chat_report(result["run_id"], answer)
     return {**result, "answer": answer, "history": done["history"], "effective_mode": "REVIEW_ONLY", "finish_reason": done["finish_reason"],
             "revised": revised or bool(styled), "claim_text": None if revised else styled}
+
+
+def assume_citations(provider: LLMProvider, request: dict, target: str, parents: str) -> dict[int, int]:
+    """Blank citations (제항, 제?항) on the reviewed claims' parent chains, filled by the general agent from the claims'
+    antecedents as an assumption (사용자 결정 2026-10-29), so the blind can read a whole chain. One small call, only when
+    a chain meets a blank; the code keeps a number only if it names an earlier claim it knows. Nothing to fill, or a
+    failed call, leaves the blind to report the blank as before."""
+    from .chat import generate_turn, user_message
+    from .pipeline.claimtext import blanks_on_chains, numbered_claims, review_claims
+
+    claims = review_claims(target, parents, request.get("user_lock"))
+    targets = list(numbered_claims(target).values())
+    need = blanks_on_chains(claims, targets)
+    if not need:
+        return {}
+    last = max(t.claim_no for t in targets)
+    shown = "\n\n".join(c.text for c in claims if c.claim_no <= last)
+    prompt = FILL_REQUEST.format(nos=", ".join(f"제{n}항" for n in need), claims=shown)
+    gen = GenParams(temperature=0.0, thinking_level="LOW", max_output_tokens=2048)
+    try:
+        done = generate_turn(provider, request["model"], [], user_message(prompt, "", []), None, None, system=FREE_SYSTEM, role=FREE_ROLE, gen=gen)
+    except Exception:          # noqa: BLE001 — the blind still runs and reports the blank
+        return {}
+    have = {c.claim_no for c in claims}
+    return {n: p for n, p in ((int(a), int(b)) for a, b in _FILL_LINE.findall(done["answer"])) if n in need and p < n and p in have}
 
 
 def parent_claims_text(history: list[dict]) -> str:

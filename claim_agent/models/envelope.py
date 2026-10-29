@@ -131,6 +131,14 @@ class CandidateItem(BaseModel):
     exam_pattern_basis: str | None = None
 
 
+class CitationFill(BaseModel):
+    """A blank citation (제항, 제?항) in the user's set that the dependent design filled, with the antecedents it read."""
+    model_config = ConfigDict(extra="ignore")
+    claim_no: int
+    parent_claim_no: int
+    basis: str | None = None
+
+
 class DesignElement(BaseModel):
     """One unit of the design contract that PRE_EXAM compares and the spec handoff table lists (설계 5·14.4)."""
     model_config = ConfigDict(extra="ignore")
@@ -225,6 +233,7 @@ class RoleEnvelope(BaseModel):
     per_claim_gates: list[PerClaimGate] = Field(default_factory=list)
     invention_type: InventionType | None = None
     candidates: list[CandidateItem] = Field(default_factory=list)
+    citation_fills: list[CitationFill] = Field(default_factory=list)   # dependent-claim-strategy-architect, BASELINE_SET blanks only
     sketchability: Sketchability | None = None
     open_issues: list[OpenIssue] = Field(default_factory=list)
     limitation_evidence: list[LimitationEvidence] = Field(default_factory=list)
@@ -390,6 +399,16 @@ ENVELOPE_JSON_SCHEMA: dict[str, Any] = _obj(
                 ["dc_id", "classification"],
             )
         ),
+        "citation_fills": _arr(
+            _obj(
+                {
+                    "claim_no": _int(),
+                    "parent_claim_no": _int(),
+                    "basis": _str("그 항의 '상기' 용어와 그 선행 기재가 처음 나오는 항", nullable=True),
+                },
+                ["claim_no", "parent_claim_no"],
+            )
+        ),
         "design_elements": _arr(
             _obj(
                 {
@@ -476,6 +495,7 @@ ENVELOPE_JSON_SCHEMA: dict[str, Any] = _obj(
 # (400 INVALID_ARGUMENT on the live run), so each role receives the shared fields plus its own.
 ROLE_EXTRA_FIELDS: dict[str, tuple[str, ...]] = {
     "claim-architect": ("design_elements",),
+    "dependent-claim-strategy-architect": ("citation_fills",),
     "prior-art-searcher": ("queries_ko", "queries_en", "provisional_elements", "problem", "screened"),
     "prior-art-pre-examiner": ("preexam_rows", "doc_published", "doc_field", "doc_summary", "novelty", "inventive_primary_doc",
                                "inventive_risk", "inventive_reason", "remaining_differences"),

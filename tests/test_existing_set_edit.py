@@ -355,25 +355,115 @@ def test_an_edit_that_changes_a_user_lock_claim_it_did_not_name_is_still_blocked
     assert user_lock_kept(full, "책상 가장자리에 걸리는 클램프부", {9})          # a phrase lock is never released by a claim number
 
 
-def test_a_user_lock_set_with_blank_numbers_stops_before_any_call_and_says_what_to_fill(rt, request_indep, tmp_path):
-    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "blank", text=LID_REQUEST, instructions="", user_lock=LID_LOCK)
+def test_a_user_lock_set_with_blank_headers_out_of_place_stops_before_any_call_and_says_what_to_fill(rt, request_indep, tmp_path):
+    shuffled = LID_LOCK.replace("【청구항 4】", "【청구항 9】")             # numbers out of place: blank headers cannot be counted
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "blank", text=LID_REQUEST, instructions="", user_lock=shuffled)
     route = _route(blocks, target="4,5,6", intent="UNCLEAR")
     provider = ScriptedProvider({})
     result = run_pipeline(rt, provider, request, route, blocks, paths, folder)
     state = rt.store.load_state(result["run_id"])
     assert route.authoring_scope == "EXISTING_SET_EDIT" and provider.calls == []
     assert state.halt.reason_code == "BASELINE_SET_UNNUMBERED" and "프로젝트 USER_LOCK 확정 문언" in state.halt.message
-    # Blank headers take their place numbers (5, 6) as the user counts them; a blank citation cannot be guessed.
     issues = [i["text"] for i in state.halt.open_issues]
-    assert issues[:2] == [
-        "제6항(상기 복수의 돌출부는, 서로 인접하는 상기 …): 인용항 번호(제항)가 비어 있음",
+    assert issues[:3] == [
+        "5번째 항(상기 리드 지지부는, 바디와, 상기 바디로부…): 항 번호(【청구항 】)가 비어 있음",
+        "6번째 항(상기 복수의 돌출부는, 서로 인접하는 상기 …): 항 번호(【청구항 】)와 인용항 번호(제항)가 비어 있음",
         "3번째 항: 종결부 없이 '…하우징; 을 포함하고,'로 끝남",
     ]
     # The request names claims the set already has without saying edit or new, so the same stop asks that too.
-    assert issues[2].startswith("요청한 제4항, 제5항, 제6항은 세트에 이미 있는 번호입니다.") and len(issues) == 3
+    assert issues[3].startswith("요청한 제5항, 제6항은 세트에 이미 있는 번호입니다.") and len(issues) == 4   # 제4항 is numbered 9 here
     # Stopped before the set was sealed, it still reports as a set edit (run web-f09a88a6 said 독립항 LOCK 없음).
     chat = render_chat_report(state)
     assert "기존 세트 편집" in chat and "독립항 LOCK 없음" not in chat and "독립항 문언 없음" not in chat and "미실행: ARCHITECT" not in chat
+
+
+def test_a_blank_citation_alone_no_longer_stops_an_unclear_request_from_asking_edit_or_new(rt, request_indep, tmp_path):
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "blank-ask", text=LID_REQUEST, instructions="", user_lock=LID_LOCK)
+    provider = ScriptedProvider({})
+    result = run_pipeline(rt, provider, request, _route(blocks, target="4,5,6", intent="UNCLEAR"), blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert provider.calls == [] and state.halt.reason_code == "EDIT_OR_NEW_UNCLEAR" and state.halt.kind == "USER_DECISION"
+
+
+# Run web-a1d30e62 (사용자 결정 2026-10-29): the 히트리드 모듈 claims of the USER_LOCK were headed 【청구항 ?】/【청구항 】 and cited
+# 제?항/제항. Asked to complete the rail claim, the run stopped twice with no call; the user wants the gates to run, and the
+# dependent design to fill the blank citations from the claims' antecedents, reported as its assumption.
+HELD_LOCK = """【청구항 1】
+반응 용기가 안착되는 안착부;
+상기 안착부의 상부에 위치하는 리드 지지부; 및
+상기 리드 지지부에 착탈 가능하게 결합되는 히트리드 모듈을 포함하는 핵산 증폭 장치.
+
+【청구항 2】
+제1항에 있어서,
+상기 히트리드 모듈에 포고 핀이 포함되는 핵산 증폭 장치.
+
+【청구항 ?】
+리드 지지부에 착탈 가능하게 결합되는 히트리드 모듈로서,
+상기 리드 지지부에 착탈 가능하게 결합되는 베이스 부재; 및
+상기 베이스 부재에 지지되고, 반응 용기의 상부를 가열하는 가열 부재;
+를 포함하는,
+히트리드 모듈.
+
+【청구항 】
+제?항에 있어서,
+상기 베이스 부재는, 상기 리드 지지부에 결합되는 결합 방향을 따라 연장되는 복수의 레일부를 포함하는,
+히트리드 모듈.
+
+【청구항 】
+제항에 있어서,
+상기 복수의 레일부는,
+, 상기 리드 지지부에 의해 상기 반응 용기를 향하는 방향으로 지지되는,
+히트리드 모듈.
+
+【청구항 】
+제?항에 있어서,
+상기 가열 부재의 상측을 덮는 커버를 더 포함하는,
+히트리드 모듈."""
+EDITED_5 = "【청구항 5】\n제4항에 있어서,\n상기 복수의 레일부는 상기 리드 지지부에 얹혀 상기 반응 용기를 향하는 방향으로 지지되는,\n히트리드 모듈."   # the set's own form
+
+
+def _filling_design(fills, parent=4):
+    def design(spec):
+        env = R.dep_architect()(spec)
+        env["candidates"] = [dict(env["candidates"][0], planned_claim_no=5, parent_claim_no=parent)]
+        env["citation_fills"] = [{"claim_no": n, "parent_claim_no": p, "basis": "상기 베이스 부재"} for n, p in fills.items()]
+        return env
+    return design
+
+
+def test_blank_citations_on_the_way_to_the_edited_claim_are_filled_by_the_design_and_the_gates_run(rt, request_indep, tmp_path, monkeypatch):
+    monkeypatch.setattr(R, "DEP_CLAIMS", [(5, 4, "DC-01", EDITED_5)])
+    monkeypatch.setattr(R, "DEP_SET_TEXT", EDITED_5)
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "held", text="하기 기능을 가진 청구항을 추가해야 하는데 연역적 오류 없는 구성을 선정해서 명시해줘",
+                                                   instructions="", user_lock=HELD_LOCK)
+    provider = ScriptedProvider(edit_script(**{"dependent-claim-strategy-architect": [_filling_design({4: 3})]}))
+    result = run_pipeline(rt, provider, request, _route(blocks, target="5"), blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
+    base = state.baseline_set
+    # 【청구항 ?】 is claim 3 by place, not the tail of claim 2; the rail claim is claim 5.
+    assert base.edit_targets == [5] and base.cites_by_design == [4, 5] and base.cites_filled == {4: 3, 5: 4}
+    assert base.chain_nos == [3, 4] and base.chain_text.startswith("【청구항 3】\n리드 지지부에") and "【청구항 4】\n제3항에 있어서" in base.chain_text
+    design = next(c for c in provider.calls if c.role == "dependent-claim-strategy-architect")
+    assert "제4항, 제5항은(는) 인용항 번호가 비어 있다" in design.packet_text and "`citation_fills`" in design.packet_text
+    blind = [c for c in provider.calls if c.role == "blind-claim-reconstruction-reviewer"]
+    assert blind and "제3항에 있어서" in blind[0].packet_text and "제?항" not in blind[0].packet_text
+    full = edited_set_text(state)
+    assert EDITED_5 in full and "【청구항 4】\n제3항에 있어서" in full and "【청구항 6】\n제?항에 있어서" in full
+    assert any("설계자 가정 — 사용자 확인 필요): 제4항 → 제3항에 있어서, 제5항 → 제4항에 있어서" in n for n in state.notes)
+    assert "설계자 가정 — 확인 필요" in render_chat_report(state)
+
+
+def test_a_design_that_leaves_a_blank_citation_open_gets_one_repair_call_then_stops(rt, request_indep, tmp_path, monkeypatch):
+    monkeypatch.setattr(R, "DEP_CLAIMS", [(5, 4, "DC-01", EDITED_5)])
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "held-open", text="레일부 항 완성", instructions="", user_lock=HELD_LOCK)
+    provider = ScriptedProvider(edit_script(**{"dependent-claim-strategy-architect": [_filling_design({}), _filling_design({4: 5})]}))
+    result = run_pipeline(rt, provider, request, _route(blocks, target="5"), blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert [c.role for c in provider.calls] == ["dependent-claim-strategy-architect"] * 2
+    assert state.halt.message.startswith("REQUEST_SCOPE_MISMATCH: 기존 세트의 빈 인용항 번호(제4항, 제5항)")
+    assert "제4항: 인용항 번호를 정하지 않음" in provider.calls[1].packet_text
+    assert "제4항의 부모 제5항" in state.halt.message and state.baseline_set.cites_filled == {}
 
 
 def test_a_new_claim_request_on_a_set_whose_parent_claim_is_cut_off_stops_before_any_call(rt, request_indep, tmp_path):
@@ -445,6 +535,22 @@ def test_inserting_claims_moves_the_set_back_and_its_citations_follow():
     assert "【청구항 7】\n제3항에 있어서" in renumber_text(LID_LOCK.replace("【청구항 4】", "【청구항 】"), {4: 7})
     shuffled = "【청구항 1】\nA.\n\n【청구항 3】\n제1항에 있어서, B.\n\n【청구항 】\n제1항에 있어서, C."
     assert fill_blank_headers(shuffled) == shuffled                           # numbers out of place: not guessed
+
+
+def test_a_number_held_by_a_mark_is_a_blank_number():
+    """Run web-a1d30e62: the USER_LOCK's 히트리드 모듈 independent claim was headed 【청구항 ?】 and its dependents cited 제?항.
+    The '?' header was not read as a header, so that claim ran into the body of 제19항, every 제?항 claim parsed as an
+    independent claim, and the router's 제23항 (the rail claim, by place) pointed the engine at the next claim."""
+    from claim_agent.pipeline.claimtext import fill_blank_headers, numbered_claims, numbering_blanks, unusable_parents
+
+    held = ("【청구항 1】\nA를 포함하는 장치.\n\n【청구항 ?】\nB를 포함하는 모듈.\n\n【청구항 】\n제?항에 있어서, C를 더 포함하는 모듈.\n\n"
+            "【청구항 】\n제OO항에 있어서, D를 더 포함하는 모듈.")
+    claims = parse_claim_set(fill_blank_headers(held))
+    assert [c.claim_no for c in claims] == [1, 2, 3, 4] and claims[0].body == "A를 포함하는 장치."
+    assert claims[1].body == "B를 포함하는 모듈." and claims[1].is_independent
+    assert [b[:3] for b in numbering_blanks(fill_blank_headers(held))] == ["제3항", "제4항"]
+    assert sorted(unusable_parents(claims)) == [3, 4]
+    assert sorted(numbered_claims(held)) == [1]                              # a held header ends the claim before it
 
 
 # Run web-b013b034: the router kept '히트리드 모듈에 대한 종속항들 작성해줘' on the USER_LOCK set with a description for a
@@ -669,7 +775,8 @@ def test_an_open_append_needs_a_set_that_already_holds_a_dependent_claim():
 
 
 def test_a_fixed_user_lock_sent_again_starts_a_new_run_on_the_fixed_set(rt, request_indep, tmp_path, edit_roles):
-    blank = BASELINE.replace("【청구항 9】\n제8항", "【청구항 9】\n제항")
+    # A blank header among numbers out of place cannot be counted (a blank citation alone now goes to the design).
+    blank = BASELINE.replace("【청구항 9】", "【청구항 】").replace("【청구항 2】", "【청구항 12】")
     request, blocks, paths, folder = _conversation(tmp_path, request_indep, "before-fix", instructions="", user_lock=blank)
     first = run_pipeline(rt, ScriptedProvider({}), request, _route(blocks), blocks, paths, folder)
     previous = rt.store.load_state(first["run_id"])

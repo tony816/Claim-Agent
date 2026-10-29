@@ -167,6 +167,11 @@ class BaselineSet(BaseModel):
     # Claims asked for with no number: every dependent design decides how many and numbers them on from the set's end,
     # and edit_targets follow its latest design.
     numbered_by_design: bool = False
+    # Claims whose citation the user left blank (제항, 제?항) on the way to an edit target: the dependent design fills
+    # them from the claims' antecedents (사용자 결정 2026-10-29) and the engine checks and seals its numbers in
+    # `cites_filled` (claim → parent), reported as the design's assumption for the user to confirm.
+    cites_by_design: list[int] = Field(default_factory=list)
+    cites_filled: dict[int, int] = Field(default_factory=dict)
 
     def targets_label(self) -> str:
         """The edit targets as reports say them. Empty until the dependent design numbers claims asked for without one."""

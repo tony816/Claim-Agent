@@ -415,6 +415,7 @@ def run_pipeline(rt, provider, request: dict, route: RouteDecision, blocks: list
         dependent_set_id=previous.request.get("dependent_set_id") if previous else None,
         reviewers=list(dict.fromkeys(route.reviewers)), review_scope=route.review_scope,
         parent_claims=(request.get("review") or {}).get("parent_claims") or None,
+        citation_fills={int(k): int(v) for k, v in ((request.get("review") or {}).get("citation_fills") or {}).items()},
         claim_file=baseline[0] if baseline else (source["path"] if source else None),
         authoring_scope=route.authoring_scope if authoring else None, **paths,
         named_parents=sorted(named_parents(request["text"])) if authoring and route.dependent else [],
