@@ -92,11 +92,30 @@ class Workspace:
                 text = text.replace(value, "[API KEY]")
         return text
 
-    def model_settings(self) -> dict:
+    def model_settings(self, sid: str | None = None) -> dict:
+        """The panel's settings, or with `sid` what that conversation's next request runs on (the header)."""
         from .model_settings import settings_snapshot
 
         with self.lock:
-            return {**settings_snapshot(self.cfg), "busy": bool(self.running_count())}
+            cfg = self.session_cfg(self.sessions[sid]) if sid and self.directory(sid) else self.cfg
+            return {**settings_snapshot(cfg), "busy": bool(self.running_count())}
+
+    def session_overrides(self, session: dict | None) -> dict:
+        """The header choice a conversation keeps (provider and its default models) over the panel's settings.
+
+        A role the panel gave its own model while following the default provider keeps the provider that model was
+        picked for, so switching a conversation to another provider never sends it a model ID of the old one.
+        """
+        choice = dict((session or {}).get("model_choice") or {})
+        if choice.get("provider.kind", self.cfg.provider.kind) != self.cfg.provider.kind:
+            for name, role in self.cfg.roles.items():
+                if role.model and not role.provider:
+                    choice[f"roles.{name}.provider"] = self.cfg.provider.kind
+        return choice
+
+    def session_cfg(self, session: dict | None):
+        overrides = self.session_overrides(session)
+        return load_config(self.config, self.root, overrides) if overrides else self.cfg
 
     def save_model_settings(self, data: dict) -> dict:
         from .model_settings import settings_overrides
@@ -109,14 +128,23 @@ class Workspace:
             return self.model_settings()
 
     def switch_provider(self, data: dict) -> dict:
-        """Header switch: change the live provider (and its default model) mid-conversation, leaving role rows as they are."""
+        """Header switch: one conversation's provider (and its default model) from its next request, leaving role rows
+        and every other conversation as they are. Without a conversation it changes the panel's default, as before."""
         from .model_settings import connection, merge_settings_file, provider_overrides
 
         with self.lock:
-            merge_settings_file(self.root, provider_overrides(self.cfg, data))
-            self.cfg = load_config(self.config, self.root)
-            snapshot = self.model_settings()
-        return {**snapshot, "connection": connection(self.cfg, self.cfg.provider.kind)}
+            sid = data.get("id")
+            if sid:
+                self.directory(sid)
+                session = self.sessions[sid]
+                session["model_choice"] = {**(session.get("model_choice") or {}), **provider_overrides(self.session_cfg(session), data)}
+                self.persist(session)
+            else:
+                merge_settings_file(self.root, provider_overrides(self.cfg, data))
+                self.cfg = load_config(self.config, self.root)
+            snapshot = self.model_settings(sid or None)
+            cfg = self.session_cfg(self.sessions[sid]) if sid else self.cfg
+        return {**snapshot, "connection": connection(cfg, cfg.provider.kind)}
 
     def auth_status(self) -> dict:
         from .model_settings import PROVIDERS, connection
@@ -154,12 +182,13 @@ class Workspace:
             threading.Thread(target=work, daemon=True).start()
             return {"ok": True}
 
-    def require_connection(self):
+    def require_connection(self, session: dict | None = None):
         from .model_settings import connection
 
         if any(job.get("pending") for job in self.auth_jobs.values()):
             raise ValueError("계정 로그인이 진행 중입니다. 로그인 완료 후 요청을 보내세요.")
-        status = connection(self.cfg, self.cfg.provider.kind)
+        cfg = self.session_cfg(session)
+        status = connection(cfg, cfg.provider.kind)
         if not status["connected"]:
             raise ValueError("모델 설정에서 연결을 확인하세요. " + status["message"])
 
@@ -197,11 +226,13 @@ class Workspace:
             self.persist(session)
             return dict(id=sid, work_mode=mode)
 
-    def pin_settings(self, job_dir: Path) -> Path:
-        """Copy the model settings a job starts with into its folder (caller holds the lock, as saves do)."""
+    def pin_settings(self, job_dir: Path, session: dict | None = None) -> Path:
+        """Copy the model settings a job starts with, the conversation's header choice over the panel's, into its
+        folder (caller holds the lock, as saves do)."""
         source = self.root / ".tui" / "model-settings.json"
+        stored = json.loads(source.read_text(encoding="utf-8")) if source.exists() else {}
         pinned = job_dir / "model-settings.json"
-        pinned.write_text(source.read_text(encoding="utf-8") if source.exists() else "{}", encoding="utf-8")
+        pinned.write_text(json.dumps({**stored, **self.session_overrides(session)}, ensure_ascii=False), encoding="utf-8")
         return pinned
 
     def running_count(self) -> int:
@@ -477,7 +508,7 @@ class Workspace:
                 return self.resume(sid, dict(kind=kind, text=text, files=selected))
             # Anything else on a halted run goes to the moderator first: a decision comes back as a resume hand-off, a
             # question about the halt gets answered and the run keeps waiting (CLAUDE.md 대화 모더레이터).
-            self.require_connection()
+            self.require_connection(session)
             if not isinstance(selected, list) or any(not isinstance(x, str) for x in selected):
                 raise ValueError("첨부 파일 목록을 확인하세요.")
             known = {item["id"]: item for item in session["files"]}
@@ -486,7 +517,7 @@ class Workspace:
             # 작성 대상: 독립항만 / 특정 항 1개 / 종속항 범위 — validated here, then a hint for the router and a
             # deterministic narrowing in conversation_pipeline (the request text still has precedence).
             dependent, target, target_mode = resolve_claim_target(data)
-            model = self.cfg.default_model
+            model = self.session_cfg(session).default_model
             # Every web request is classified from its text; the composer has no chat/authoring switch. The claim
             # picker is a hint, never a bypass around interpretation of the user's current question.
             history = (read_state(folder / "history.json") or {}).get("history", [])
@@ -517,7 +548,7 @@ class Workspace:
         """
         folder = self.directory(sid)
         session = self.sessions[sid]
-        self.require_connection()
+        self.require_connection(session)
         known = {item["id"]: item for item in session["files"]}
         if not isinstance(selected, list) or any(not isinstance(x, str) or x not in known for x in selected):
             raise ValueError("이 대화에 첨부된 파일만 사용할 수 있습니다.")
@@ -525,7 +556,7 @@ class Workspace:
         preset = self.project_inputs(session)
         request = dict(text=text, files=[str(validate_attachment(folder / "uploads" / fid / known[fid]["name"]).path) for fid in selected],
                        project_attachments=preset["attachments"], history=(read_state(folder / "history.json") or {}).get("history", []),
-                       model=self.cfg.default_model, instructions=preset["instructions"], user_lock=preset["user_lock"], work_mode=FREE)
+                       model=self.session_cfg(session).default_model, instructions=preset["instructions"], user_lock=preset["user_lock"], work_mode=FREE)
         self.spawn_chat(sid, request, dict(text=text, files=[known[f] for f in selected]), "FREE", files=selected)
 
     def review(self, sid: str, data: dict) -> None:
@@ -556,11 +587,11 @@ class Workspace:
             target = (fixed and source["review"].get("claim_text")) or review_target(source["text"])
             if not target:
                 raise ValueError("이 메시지에는 검수할 청구항(【청구항 N】으로 시작하는 문언)이 없습니다.")
-            self.require_connection()
+            self.require_connection(session)
             # The conversation's own uploads are in the history already; the project's files travel as material.
             preset = self.project_inputs(session)
             request = dict(text=review_request_text(roles, note), files=preset["files"], attachments=preset["attachments"],
-                           history=(read_state(folder / "history.json") or {}).get("history", []), model=self.cfg.default_model,
+                           history=(read_state(folder / "history.json") or {}).get("history", []), model=self.session_cfg(session).default_model,
                            instructions=preset["instructions"], user_lock=preset["user_lock"], project=preset["project"],
                            review=dict(roles=roles, claim_text=target, message_id=source["id"], note=note))
             # `revise` turns true once the answer comes back as fixed wording (execute reads it from the result).
@@ -605,7 +636,7 @@ class Workspace:
         session["title"] = session["messages"][0]["text"][:36]
         session["updated"] = time.time()
         self.persist(session)
-        job = dict(done=False, stopped=False, process=None, log="", log_base=0, mid=mid, folder=job_dir, settings=self.pin_settings(job_dir),
+        job = dict(done=False, stopped=False, process=None, log="", log_base=0, mid=mid, folder=job_dir, settings=self.pin_settings(job_dir, session),
                    mode="CHAT", run_id=None, previous_report=0, text=request["text"], files=files or [])
         self.jobs[sid] = job
         thread = threading.Thread(target=self.execute, args=(sid, job, command), daemon=True)
@@ -726,7 +757,7 @@ class Workspace:
                 # Whether the answer means 수정 or 새로 is the router's reading, not a word list (개선로그 #24): a decision that
                 # did not come through routing goes there first and comes back as a hand-off that carries it.
                 return self.start(sid, dict(text=text, files=selected, rerouted=True))
-            self.require_connection()
+            self.require_connection(session)
             add = [str(validate_attachment(folder / "uploads" / fid / known[fid]["name"]).path) for fid in selected]
             scope = data.get("scope") if data.get("scope") in ("INDEPENDENT", "DEPENDENT") else None
             dep = state.get("dependent") or {}
@@ -737,7 +768,7 @@ class Workspace:
             job_dir.mkdir(parents=True)
             decision = job_dir / "decision.txt"
             decision.write_text(text or "비게이팅 UNVERIFIED 수용", encoding="utf-8")
-            command = resume_command(self.root, run_id, decision, kind, self.cfg.default_model, add, scope, data.get("edit_intent"))
+            command = resume_command(self.root, run_id, decision, kind, self.session_cfg(session).default_model, add, scope, data.get("edit_intent"))
             if self.config:
                 command += ["--config", str(self.config)]
             if self.moderated and kind != "select_prior_art":
@@ -752,7 +783,7 @@ class Workspace:
             ])
             session["updated"] = time.time()
             self.persist(session)
-            job = dict(done=False, stopped=False, process=None, log="", log_base=0, mid=mid, folder=job_dir, settings=self.pin_settings(job_dir),
+            job = dict(done=False, stopped=False, process=None, log="", log_base=0, mid=mid, folder=job_dir, settings=self.pin_settings(job_dir, session),
                        mode="RESUME", run_id=run_id, previous_report=report.stat().st_mtime_ns if report.exists() else 0)
             self.jobs[sid] = job
             thread = threading.Thread(target=self.execute, args=(sid, job, command), daemon=True)
@@ -1021,7 +1052,7 @@ class Handler(BaseHTTPRequestHandler):
                 name, mime = {"/": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"), "/style.css": ("style.css", "text/css")}[url.path]
                 self.send(200, (ASSETS / name).read_bytes(), mime + "; charset=utf-8")
             elif url.path == "/api/model-settings":
-                self.json(workspace.model_settings())
+                self.json(workspace.model_settings(query.get("id", [""])[0] or None))
             elif url.path == "/api/phrases":
                 self.json(workspace.phrases())
             elif url.path == "/api/auth/status":

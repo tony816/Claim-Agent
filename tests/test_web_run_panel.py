@@ -82,7 +82,7 @@ def test_run_panel_endpoints(rt, request_indep, tmp_path, monkeypatch):
         assert workspace.jobs.get(sid3) is None
         # Moderator on: a plain message on a halted run is read first, with the halt attached; the run keeps waiting.
         started = []
-        monkeypatch.setattr(workspace, "require_connection", lambda: None)
+        monkeypatch.setattr(workspace, "require_connection", lambda *a: None)
         monkeypatch.setattr(workspace, "execute", lambda s, job, command: (started.append(job), job.update(done=True)))
         workspace.start(sid3, {"text": "왜 멈췄어?", "files": []})
         workspace.jobs[sid3]["thread"].join()

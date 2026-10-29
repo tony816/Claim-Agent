@@ -281,7 +281,7 @@ def test_resuming_a_run_that_read_named_parents_as_targets_routes_its_request_ag
     workspace.sessions[sid].update(run_id="web-old-route", messages=[
         dict(id="u1", role="user", text=ask), dict(id="a1", role="assistant", text="답", status="review", pipeline_run_id="web-old-route")])
     sent = []
-    monkeypatch.setattr(workspace, "require_connection", lambda: None)
+    monkeypatch.setattr(workspace, "require_connection", lambda *a: None)
     monkeypatch.setattr(workspace, "spawn_chat", lambda sid_, req, user, mode, **k: sent.append(req))
     monkeypatch.setattr(web, "resume_command", lambda *a, **k: pytest.fail("이전 분류로 같은 단계를 다시 돌림"))
     workspace.resume(sid, dict(kind="none", text="하기 재개\n---\n\n" + ask))

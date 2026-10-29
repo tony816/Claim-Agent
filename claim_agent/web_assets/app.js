@@ -91,12 +91,13 @@ $("model-settings-form").onsubmit=async event=>{
   try{
     const roles=Object.fromEntries(modelSettings.roles.map(r=>[r.id,{provider:r.provider,model:r.model,thinking_level:r.thinking_level}]));
     modelSettings=await api("/api/model-settings",{provider:modelSettings.provider,defaults:modelSettings.defaults,roles});renderModelSettings();
-    providerInfo=modelSettings;renderProviderSwitch();
-    $("model-settings-saved").textContent="저장됨 · 다음 요청부터 적용됩니다";await list();
+    await loadProviderSwitch();
+    $("model-settings-saved").textContent="저장됨 · 다음 요청부터 적용됩니다 (헤더에서 연결 방식·모델을 따로 고른 대화는 그 선택을 유지합니다)";await list();
   }catch(e){settingsError(e.message);}finally{$("model-settings-save").disabled=false;}
 };
-// 헤더의 연결 방식·모델 선택: 대화 도중에도 바꾸며, 서브에이전트별 개별 지정은 그대로 둔다.
-let providerInfo=null;
+// 헤더의 연결 방식·모델 선택: 열린 대화 하나에만 기억되어 그 대화의 다음 요청부터 적용되고, 다른 대화와
+// 모델 설정 패널의 기본값, 서브에이전트별 개별 지정은 그대로 둔다.
+let providerInfo=null,providerFor=null;
 function fillSelect(select,options,value){
   select.replaceChildren();
   for(const [id,title] of options){const option=el("option","",title);option.value=id;option.title=title;select.append(option);}
@@ -104,10 +105,10 @@ function fillSelect(select,options,value){
 }
 function providerLock(){    // 목록을 다시 만들지 않는 잠금 갱신: 열려 있는 선택 상자를 건드리지 않는다.
   const kinds=$("provider-kind"),models=$("provider-model");
-  const running=!!state.data?.running,fixed=providerInfo?providerInfo.roles.filter(r=>r.provider).length:0;
-  kinds.disabled=models.disabled=running||!providerInfo;
+  const running=!!state.data?.running,fixed=providerInfo?providerInfo.roles.filter(r=>r.provider||r.model).length:0;
+  kinds.disabled=models.disabled=running||!providerInfo||!state.id;
   const search=document.querySelector(".provider-switch .model-search");if(search)search.disabled=models.disabled;
-  const note=!providerInfo?"":running?"응답이 끝난 뒤 바꿀 수 있습니다":fixed?`다음 요청부터 적용 · 서브에이전트 ${fixed}개는 개별 지정`:"다음 요청부터 적용됩니다";
+  const note=!providerInfo?"":!state.id?"대화를 열면 바꿀 수 있습니다":running?"응답이 끝난 뒤 바꿀 수 있습니다":fixed?`이 대화의 다음 요청부터 적용 · 서브에이전트 ${fixed}개는 개별 지정`:"이 대화의 다음 요청부터 적용됩니다";
   $("provider-note").textContent=note;kinds.title=models.title=note;
 }
 function renderProviderSwitch(){
@@ -122,11 +123,14 @@ function renderProviderSwitch(){
   }
   providerLock();
 }
-async function loadProviderSwitch(){providerInfo=await api("/api/model-settings");renderProviderSwitch();}
+async function loadProviderSwitch(){
+  const id=state.id,data=await api("/api/model-settings"+(id?"?id="+encodeURIComponent(id):""));
+  if(id===state.id){providerInfo=data;providerFor=id;renderProviderSwitch();}
+}
 async function switchProvider(body){
   const previous=providerInfo;
   try{
-    providerInfo=await api("/api/provider",body);renderProviderSwitch();
+    providerInfo=await api("/api/provider",{...body,id:state.id});providerFor=state.id;renderProviderSwitch();
     const status=providerInfo.connection;
     error(status&&!status.connected?"연결 방식을 바꿨지만 아직 사용할 수 없습니다. "+status.message:"");
   }catch(e){providerInfo=previous;renderProviderSwitch();error(e.message);}
@@ -252,7 +256,7 @@ async function fetchSession(id, incremental){
 }
 async function list(){
   const data=await api("/api/sessions");
-  if(!providerInfo||providerInfo.defaults[providerInfo.provider]!==data.model)await loadProviderSwitch();
+  if(!providerInfo||providerFor!==state.id)await loadProviderSwitch();
   const names=new Map(data.projects.map(p=>[p.id,p.name]));
   if(state.project&&!names.has(state.project))state.project=null;
   const projects=$("projects");projects.replaceChildren();

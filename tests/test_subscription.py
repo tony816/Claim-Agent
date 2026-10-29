@@ -221,6 +221,38 @@ def test_saving_while_a_job_runs_leaves_that_job_on_its_pinned_settings(tmp_path
     assert cfg.provider.kind == "codex_oauth" and cfg.model_for("claim-drafter") == "opus"
 
 
+def test_header_choice_stays_with_its_conversation(tmp_path, monkeypatch):
+    """The header switch in one conversation changes only that conversation's next requests; the panel and others stay."""
+    from claim_agent.config import SETTINGS_ENV
+
+    monkeypatch.setattr("claim_agent.model_settings.connection_status", lambda *a, **k: {"installed": True, "connected": True, "message": "ok"})
+    workspace = Workspace(tmp_path)
+    payload = settings_payload(workspace)          # codex_oauth by default; the style adjuster has its own model only
+    payload["roles"]["claim-style-adjuster"].update(provider=None, model="gpt-5.6-luna")
+    payload["roles"]["claim-drafter"].update(provider="claude_oauth", model="opus")
+    workspace.save_model_settings(payload)
+    first, other = workspace.create(), workspace.create()
+
+    snapshot = workspace.switch_provider({"id": first["id"], "provider": "claude_oauth", "model": "sonnet"})
+    assert snapshot["provider"] == "claude_oauth" and snapshot["defaults"]["claude_oauth"] == "sonnet"
+    assert workspace.model_settings(first["id"])["provider"] == "claude_oauth"
+    assert workspace.model_settings(other["id"])["provider"] == "codex_oauth" == workspace.model_settings()["provider"]
+    assert load_config(project_root=tmp_path).provider.kind == "codex_oauth"                 # the panel's file is unchanged
+    assert Workspace(tmp_path).sessions[first["id"]]["model_choice"]["provider.kind"] == "claude_oauth"   # kept across restarts
+
+    cfg = workspace.session_cfg(workspace.sessions[first["id"]])
+    assert cfg.default_model == "sonnet" and cfg.model_for("claim-architect") == "sonnet"
+    assert (cfg.provider_for("claim-style-adjuster"), cfg.model_for("claim-style-adjuster")) == ("codex_oauth", "gpt-5.6-luna")
+    assert (cfg.provider_for("claim-drafter"), cfg.model_for("claim-drafter")) == ("claude_oauth", "opus")
+    assert workspace.session_cfg(workspace.sessions[other["id"]]).default_model == workspace.cfg.default_model
+
+    for session, kind in ((first, "claude_oauth"), (other, "codex_oauth")):
+        job_dir = tmp_path / ".tui" / "requests" / session["id"]
+        job_dir.mkdir(parents=True)
+        monkeypatch.setenv(SETTINGS_ENV, str(workspace.pin_settings(job_dir, workspace.sessions[session["id"]])))
+        assert load_config(project_root=tmp_path).provider.kind == kind                      # what each job's process reads
+
+
 def test_header_switch_changes_provider_mid_chat_and_keeps_role_rows(tmp_path, monkeypatch):
     monkeypatch.setattr("claim_agent.model_settings.connection_status", lambda *a, **k: {"installed": True, "connected": False, "message": "구독 계정 로그인이 필요합니다."})
     workspace = Workspace(tmp_path)
