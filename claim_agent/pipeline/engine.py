@@ -10,7 +10,7 @@ from typing import Any
 from ..claim_scope import format_target, parse_target
 from ..config import AppConfig
 from ..graph.pipeline import GraphHooks
-from ..models.contracts import COMBINED_REVIEW, combined_contract, contract_for, fallback_gate_gaps, main_tree_gate_gaps, set_candidates
+from ..models.contracts import contract_for, fallback_gate_gaps, main_tree_gate_gaps, set_candidates
 from ..models.enums import CandidateClass, ExecStatus, NextStep, RequestMode, Scope, Status, StyleChangeMode
 from ..models.envelope import OpenIssue, RoleEnvelope, envelope_schema_for
 from ..models.ids import Identifiers, bump_dependent_design_revision, bump_dependent_revision, bump_design_revision, bump_revision, input_revision_id, record_id
@@ -550,20 +550,13 @@ class PipelineEngine(PriorArtSteps):
         blind: bool = False,
         loop_index: int = 0,
         expected_reuse: int = 1,
-        combined: tuple[str, ...] = (),
     ) -> tuple[RoleEnvelope, RecordRef]:
         spec_role = self.roles.get(role)
         rc = self.cfg.role(role)
-        if combined:
-            # One call applying several role files in order; model, provider and reasoning follow `role`'s settings.
-            prompt = self.assembler.assemble_combined([self.roles.get(r) for r in combined], scope, packets.COMBINED_REVIEW_HEADER)
-            contract = combined_contract(combined, scope)
-        else:
-            prompt = self.assembler.assemble(spec_role, scope)
-            contract = contract_for(role, scope)
-            if role in ("claim-style-adjuster", "syntax-scope-reviewer", "oa-strategy-reviewer") and stage != Stage.REVIEW_ONLY:
-                packet = packets.text_only(packet)   # wording checks use the design's geometry contract, not the drawings
-        record_role = "+".join(combined) if combined else role
+        prompt = self.assembler.assemble(spec_role, scope)
+        contract = contract_for(role, scope)
+        if role in ("claim-style-adjuster", "syntax-scope-reviewer", "oa-strategy-reviewer") and stage != Stage.REVIEW_ONLY:
+            packet = packets.text_only(packet)   # wording checks use the design's geometry contract, not the drawings
         self._guard_budget(state, stage)
         with self._lock:
             state.call_seq += 1
@@ -687,7 +680,7 @@ class PipelineEngine(PriorArtSteps):
                                f"{len(set_candidates(env))}항만 잠금")
         text_for_hash = env.exact_claim_text if env.exact_claim_text else expected_exact
         ref = RecordRef(
-            record_id=rid, kind=kind, role=record_role, scope=scope.value, stage=stage.value, status=env.status.value,
+            record_id=rid, kind=kind, role=role, scope=scope.value, stage=stage.value, status=env.status.value,
             execution_status=env.execution_status.value, gates=env.gates.present(), issued=issued,
             text_sha256=exact_sha256(text_for_hash.strip()) if text_for_hash else None, ids=ids.as_dict(), source_set_id=state.source_set_id,
             invention_primary=env.invention_type.primary.value if env.invention_type else None,
@@ -1373,58 +1366,8 @@ class PipelineEngine(PriorArtSteps):
             return
 
         set_text = cur.exact_text or ""
-        if st == Stage.DEP_SUCCESS and state.baseline_set:
-            # A single-claim edit is reviewed once: the success, syntax and OA role files applied in order in one call.
-            rid = record_id("dependent_success", ids)
-            baseline = self._dep_prior_text(state) if cur.style_change_mode != StyleChangeMode.INITIAL_FROM_DRAFTER else cur.meaning_draft_text
-            pk = packets.review_dependent_combined(state, self.store, bundle, ids, rid, d.root_lock_id, root_text, d.design_record_id or "", cur.records.get("dependent_meaning_draft"),
-                                                   cur.records.get("dependent_style", ""), set_text, self._corpus_fragments(cur.records.get("dependent_style")), baseline, cur.style_change_mode)
-            env, ref = self._call(state, "claim-success-reviewer", Scope.DEPENDENT_SET, st, "dependent_success", pk, ids, rid, expected_exact=set_text, combined=COMBINED_REVIEW)
-            tr = self._decide(state, env, "claim-success-reviewer", Scope.DEPENDENT_SET, st, rid, d.loop_counts, combined_contract(COMBINED_REVIEW, Scope.DEPENDENT_SET))
-            if tr.kind == "RETURN":
-                self._apply_return(state, tr, env, rid, dependent=True)
-                return
-            for kind in ("dependent_success", "dependent_syntax", "dependent_oa"):
-                cur.records[kind] = rid
-            state.stage = Stage.DEP_RECON
-            return
-
-        if st == Stage.DEP_SUCCESS:
-            rid = record_id("dependent_success", ids)
-            pk = packets.success_dependent(state, self.store, bundle, ids, rid, d.root_lock_id, root_text, d.design_record_id or "", cur.records.get("dependent_meaning_draft"), cur.records.get("dependent_style", ""), set_text, self._corpus_fragments(cur.records.get("dependent_style")))
-            env, ref = self._call(state, "claim-success-reviewer", Scope.DEPENDENT_SET, st, "dependent_success", pk, ids, rid, expected_exact=set_text)
-            tr = self._decide(state, env, "claim-success-reviewer", Scope.DEPENDENT_SET, st, rid, d.loop_counts)
-            if tr.kind == "RETURN":
-                self._apply_return(state, tr, env, rid, dependent=True)
-                return
-            cur.records["dependent_success"] = rid
-            state.stage = Stage.DEP_SYNTAX
-            return
-
-        if st == Stage.DEP_SYNTAX:
-            rid = record_id("dependent_syntax", ids)
-            baseline = self._dep_prior_text(state) if cur.style_change_mode != StyleChangeMode.INITIAL_FROM_DRAFTER else cur.meaning_draft_text
-            pk = packets.syntax_dependent(state, self.store, bundle, ids, rid, d.root_lock_id, root_text, d.design_record_id or "", cur.records.get("dependent_style", ""), cur.records.get("dependent_success", ""), set_text, baseline, cur.style_change_mode)
-            env, ref = self._call(state, "syntax-scope-reviewer", Scope.DEPENDENT_SET, st, "dependent_syntax", pk, ids, rid, expected_exact=set_text)
-            tr = self._decide(state, env, "syntax-scope-reviewer", Scope.DEPENDENT_SET, st, rid, d.loop_counts)
-            if tr.kind == "RETURN":
-                self._apply_return(state, tr, env, rid, dependent=True)
-                return
-            cur.records["dependent_syntax"] = rid
-            state.stage = Stage.DEP_OA
-            return
-
-        if st == Stage.DEP_OA:
-            rid = record_id("dependent_oa", ids)
-            pk = packets.oa_dependent(state, self.store, bundle, ids, rid, d.root_lock_id, root_text, d.design_record_id or "", cur.records.get("dependent_style", ""), cur.records.get("dependent_success", ""), cur.records.get("dependent_syntax", ""), set_text)
-            pk.text = self.graph_hooks.oa_packet(state, pk.text, set_text)
-            env, ref = self._call(state, "oa-strategy-reviewer", Scope.DEPENDENT_SET, st, "dependent_oa", pk, ids, rid, expected_exact=set_text)
-            tr = self._decide(state, env, "oa-strategy-reviewer", Scope.DEPENDENT_SET, st, rid, d.loop_counts)
-            if tr.kind == "RETURN":
-                self._apply_return(state, tr, env, rid, dependent=True)
-                return
-            cur.records["dependent_oa"] = rid
-            state.stage = Stage.DEP_RECON
+        if st in (Stage.DEP_SUCCESS, Stage.DEP_SYNTAX, Stage.DEP_OA):
+            self._dependent_review(state, bundle, d, cur, root_text, set_text)
             return
 
         if st == Stage.DEP_RECON:
@@ -1452,6 +1395,55 @@ class PipelineEngine(PriorArtSteps):
             root = "BASELINE_SET+" if state.baseline_set else ("FINAL_CLAIM_LOCK+" if c.final_claim_lock else "DRAFT_CLAIM_LOCK+")
             state.outcome = root + ("FINAL_DEPENDENT_SET_LOCK" if final else "DRAFT_DEPENDENT_SET_LOCK")
             return
+
+    def _dependent_review(self, state: RunState, bundle: MaterialBundle, d: DependentSetState, cur: DependentRevisionState, root_text: str, set_text: str) -> None:
+        """success·syntax·OA on the same exact set in one go (CLAUDE.md 동시 검수 하드 규칙), adopted in that order.
+
+        syntax and OA run as `review_mode: PARALLEL`: the success record (and for OA the syntax report) does not exist yet,
+        so they get the style record instead. The earliest failing reviewer picks the return; the others' findings ride along.
+        """
+        ids = self._ids(state)
+        rids = {kind: record_id(kind, ids) for kind in ("dependent_success", "dependent_syntax", "dependent_oa")}
+        style_rid = cur.records.get("dependent_style", "")
+        baseline = self._dep_prior_text(state) if cur.style_change_mode != StyleChangeMode.INITIAL_FROM_DRAFTER else cur.meaning_draft_text
+        success_pk = packets.success_dependent(state, self.store, bundle, ids, rids["dependent_success"], d.root_lock_id, root_text, d.design_record_id or "",
+                                               cur.records.get("dependent_meaning_draft"), style_rid, set_text, self._corpus_fragments(style_rid))
+        syntax_pk = packets.parallel_review(packets.syntax_dependent(state, self.store, bundle, ids, rids["dependent_syntax"], d.root_lock_id, root_text, d.design_record_id or "",
+                                                                     style_rid, None, set_text, baseline, cur.style_change_mode), ["dependent success record"])
+        oa_pk = packets.oa_dependent(state, self.store, bundle, ids, rids["dependent_oa"], d.root_lock_id, root_text, d.design_record_id or "", style_rid, None, None, set_text)
+        oa_pk.text = self.graph_hooks.oa_packet(state, oa_pk.text, set_text)
+        oa_pk = packets.parallel_review(oa_pk, ["dependent success record", "dependent syntax 보고서"])
+        jobs = [("claim-success-reviewer", "dependent_success", success_pk), ("syntax-scope-reviewer", "dependent_syntax", syntax_pk), ("oa-strategy-reviewer", "dependent_oa", oa_pk)]
+
+        def one(job: tuple[str, str, packets.Packet]) -> RoleEnvelope:
+            role, kind, pk = job
+            env, _ = self._call(state, role, Scope.DEPENDENT_SET, state.stage, kind, pk, self._ids(state), rids[kind], expected_exact=set_text)
+            return env
+
+        if self.cfg.pipeline.max_concurrency > 1:
+            with ThreadPoolExecutor(max_workers=min(3, self.cfg.pipeline.max_concurrency)) as ex:
+                envs = list(ex.map(one, jobs))
+        else:
+            envs = [one(j) for j in jobs]
+        verdicts = [(role, kind, env, decide(env, contract_for(role, Scope.DEPENDENT_SET), state.request_mode, d.loop_counts, self.cfg.pipeline.max_return_loops))
+                    for (role, kind, _), env in zip(jobs, envs)]
+        failed = [v for v in verdicts if v[3].kind != "PROCEED"]
+        if not failed:
+            for _, kind, _, _ in verdicts:
+                cur.records[kind] = rids[kind]
+            state.stage = Stage.DEP_RECON
+            return
+        role, kind, env, tr = failed[0]
+        stage = {"dependent_success": Stage.DEP_SUCCESS, "dependent_syntax": Stage.DEP_SYNTAX, "dependent_oa": Stage.DEP_OA}[kind]
+        if len(failed) > 1:
+            # One revision fixes every reviewer's findings on this text; a passed report is never reused for the next one.
+            issues = [o for _, _, e, _ in failed for o in e.open_issues]
+            report = "\n\n".join(f"### {r} 보고서 ({rids[k]})\n\n{e.report_markdown}" for r, k, e, _ in failed)
+            env = env.model_copy(update={"open_issues": issues, "report_markdown": report})
+        if tr.kind == "RETURN":
+            self._apply_return(state, tr, env, rids[kind], dependent=True)
+            return
+        self._halt(state, stage, role, tr, env, rids[kind])
 
     def _dependent_reconstruction(self, state: RunState, bundle: MaterialBundle, d: DependentSetState, cur: DependentRevisionState, root_text: str, set_text: str) -> None:
         st = Stage.DEP_RECON

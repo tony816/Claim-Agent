@@ -85,18 +85,6 @@ class PromptAssembler:
         block, paths = self._render_pack(pack) if pack is not None else self._render_sources(keys)
         return block, keys, paths
 
-    def assemble_combined(self, roles: list[RoleSpec], scope: Scope, header: str) -> AssembledPrompt:
-        """One call that applies several role files in order (EXISTING_SET_EDIT review); sources are their whitelists' union."""
-        parts = [self.preamble, "\n---\n\n", header.rstrip(), "\n"]
-        for role in roles:
-            parts += ["\n---\n\n", f"## 역할 파일: {role.name}\n\n", role.body]
-            lesson = self.lessons.get(role.name)
-            if lesson:
-                parts += ["\n## 승인된 프로젝트 교훈 (절차·표현 주의사항; 기술내용 근거 아님)\n\n", lesson.rstrip(), "\n"]
-        keys = list(dict.fromkeys(k for role in roles for k in sources_for(role.name, scope)))
-        block, paths = self._render_sources(keys)
-        return AssembledPrompt("".join(parts), block, keys, paths)
-
     def sources_subset(self, role: RoleSpec, scope: Scope, keys: list[str]) -> str:
         """A smaller pre-loaded block (only `keys`, all of which must be whitelisted for the role/scope)."""
         allowed = sources_for(role.name, scope)

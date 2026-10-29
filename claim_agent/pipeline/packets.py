@@ -312,6 +312,17 @@ def _dependent_stable(state: RunState, store, bundle: MaterialBundle, root_lock_
     return txt, imgs
 
 
+def parallel_review(packet: Packet, pending: list[str]) -> Packet:
+    """Marks a reviewer called alongside the ones it would follow (CLAUDE.md 동시 검수 하드 규칙)."""
+    note = _section("review_mode: PARALLEL",
+                    "이 검수는 같은 exact 문언의 다른 검수와 동시에 호출되었다. 아직 없는 상위 기록(" + ", ".join(pending) + ")은 "
+                    "`upstream: PENDING`으로 적고, 그 대신 dependent style record와 그 독자·기하 게이트를 입력으로 판정한다. "
+                    "상위 기록이 없다는 이유만으로 UNVERIFIED·REVIEW를 내지 않는다. 채택은 오케스트레이터가 success → syntax → OA 순으로 한다.")
+    i = packet.text.rfind("### 출력 계약")
+    text = packet.text[:i] + note + packet.text[i:] if i >= 0 else packet.text + note
+    return Packet(text, packet.images, cache_text=packet.cache_text, cache_images=packet.cache_images)
+
+
 def stop_rewake_section(problem: str, attempt: int, prior_report: str) -> str:
     """Re-asks a role that stopped for the user without a reason CLAUDE.md allows (engine, at most twice)."""
     return _section(f"정지 사유 보완 요청 ({attempt}회차 — 되돌림 횟수에 넣지 않음)",
@@ -454,41 +465,6 @@ def text_only(packet: Packet) -> Packet:
     return Packet(note + "\n\n".join(kept))
 
 
-COMBINED_REVIEW_HEADER = (
-    "# 통합 검수 호출 (review_mode: COMBINED_SUCCESS_SYNTAX_OA)\n\n"
-    "기존 청구항 세트의 한 항 편집(EXISTING_SET_EDIT)에서는 성공조건·통사·OA 검수를 이 한 호출에서 수행한다. 아래 세 역할 파일을 "
-    "claim-success-reviewer → syntax-scope-reviewer → oa-strategy-reviewer 순서로 모두 적용하고, 각 역할의 판정 기준을 서로 섞거나 완화하지 않는다."
-)
-
-
-def review_dependent_combined(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_text: str, dep_design_record_id: str,
-                              dep_meaning_draft_id: str | None, dep_style_record_id: str, set_text: str, corpus_fragments: str | None, baseline_text: str | None, mode: StyleChangeMode) -> Packet:
-    txt, imgs = _dependent_stable(state, store, bundle, root_lock_id, None, ("invention", "drawing", "spec", "prior_art"))
-    txt += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE: LOCKED 전문")
-    txt += _hdr(state, ids, record_id, {"review_mode": "COMBINED_SUCCESS_SYNTAX_OA", "success_scope": "DEPENDENT_SET", "review_scope": "DEPENDENT_SET",
-                                        "dependent_success_record_id (예정)": record_id, "dependent_syntax_record_id (예정)": record_id, "dependent_oa_record_id (예정)": record_id})
-    txt += _section(_root_label(state)[1], root_text)
-    txt += _section("검수 대상 exact 종속항 세트 전문", set_text)
-    txt += _report(state, store, dep_meaning_draft_id, "종속항 PRE_STYLE 의미 초안 보고서 전문")
-    txt += _report(state, store, dep_style_record_id, "dependent style record 전문")
-    if corpus_fragments:
-        txt += _section("style record가 사용한 코퍼스 정확 조각과 라우팅 인덱스", corpus_fragments)
-    txt += _section(f"범위 불변 비교 기준 ({mode.value})", baseline_text or "dependent style record의 PRE_STYLE 세트 참조")
-    txt += _section("통합 검수 규칙", "`report_markdown`을 `### 1. 성공조건 (claim-success-reviewer)`, `### 2. 통사·범위 (syntax-scope-reviewer)`, "
-                    "`### 3. OA (oa-strategy-reviewer)` 세 절로 나누고 각 절에 그 역할의 게이트 줄을 적는다. 뒤 절이 요구하는 앞 역할의 기록 전문"
-                    "(success record, syntax PASS 보고서)은 이 보고서의 앞 절 판정으로 대신한다. 앞 절이 PASS가 아니면 뒤 절은 판정하지 않고 역할 파일의 "
-                    "upstream 미통과 사유로 UNVERIFIED를 적는다.")
-    txt += _output_contract(
-        "`gates`에 CLAIM_STYLE_GATE·TERM_EXPRESSION_GATE(성공조건 재검사), NON_PATENT_TECHNICAL_READER_GATE·GEOMETRIC_OBJECT_GATE(통사), "
-        "FUNCTION_DEDUCTION_GATE(성공조건 조건 2 구성–기능 연역시험; 성공조건·통사 두 절 판정 중 낮은 값), "
-        "DEPENDENT_OA_DRAFT_GATE·DEPENDENT_OA_FINAL_GATE(OA, 분리)를 모두 채운다. 정식 명세서가 없으면 DEPENDENT_OA_FINAL_GATE는 UNVERIFIED이고 "
-        "`gate_reasons`에 SPEC_NOT_PROVIDED를 적는다. `status`는 세 절 중 가장 낮은 판정, `handoff_ready`는 세 절이 모두 다음 단계로 진행 가능할 때만 true다. "
-        "`checks[].name`에는 `success:`·`syntax:`·`oa:` 접두어를 붙이고, `per_claim_gates[]`에 목표항별 독자·기하 판정을, `exact_claim_text`에는 검수 대상 전문을 그대로 echo한다."
-    )
-    return Packet(txt, imgs)
-
-
-# --------------------------------------------------------------------------- review only
 def review_only(state: RunState, bundle: MaterialBundle, ids: Identifiers, record_id: str, role: str, scope: Scope, claim_text: str, request_text: str) -> Packet:
     mats, imgs = _materials(bundle, ("invention", "drawing", "spec", "prior_art"))
     key = {"syntax-scope-reviewer": "review_scope", "oa-strategy-reviewer": "review_scope", "claim-success-reviewer": "success_scope"}.get(role, "scope")

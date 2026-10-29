@@ -2,4 +2,4 @@
 outcome: BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK
 dependent_claim_nos: [9]
 independent_stages_run: false
-max_calls: 7
+max_calls: 9

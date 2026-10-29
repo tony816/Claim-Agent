@@ -42,22 +42,14 @@ def edit_roles(monkeypatch):
     monkeypatch.setattr(R, "DEP_SET_TEXT", EDITED_9)
 
 
-def combined_review():
-    """One envelope carrying the success, syntax and OA verdicts of an edit's combined review call."""
-    def review(spec):
-        gates = {"CLAIM_STYLE_GATE": "PASS", "TERM_EXPRESSION_GATE": "PASS", "NON_PATENT_TECHNICAL_READER_GATE": "PASS", "GEOMETRIC_OBJECT_GATE": "PASS",
-                 "FUNCTION_DEDUCTION_GATE": "PASS", "DEPENDENT_OA_DRAFT_GATE": "PASS", "DEPENDENT_OA_FINAL_GATE": "UNVERIFIED"}
-        return R._base(spec, "PASS", gates, ["- syntax 진행 가능: YES", "- DRAFT 진행 가능: 역구성 YES"],
-                       gate_reasons=[{"gate": "DEPENDENT_OA_FINAL_GATE", "reason_code": "SPEC_NOT_PROVIDED"}])
-    return review
-
-
 def edit_script(**override):
     script = {
         "dependent-claim-strategy-architect": [R.dep_architect()],
         "claim-drafter": [R.drafter("DEPENDENT_SET")],
         "claim-style-adjuster": [R.style("DEPENDENT_SET")],
-        "claim-success-reviewer": [combined_review()],       # success + syntax + OA in one call
+        "claim-success-reviewer": [R.success()],             # success, syntax and OA called together on the same text
+        "syntax-scope-reviewer": [R.syntax()],
+        "oa-strategy-reviewer": [R.oa("DEPENDENT_SET")],
         "blind-claim-reconstruction-reviewer": [R.blind()],
         "picture-claim-reconstruction-reviewer": [R.picture()],
     }
@@ -100,14 +92,16 @@ def test_the_incident_request_edits_claim_9_in_place_without_the_independent_pip
     assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
     assert route.authoring_scope == "EXISTING_SET_EDIT" and route.edit_targets == [9]
     roles = [c.role for c in provider.calls]
-    assert "claim-architect" not in roles and "syntax-scope-reviewer" not in roles and "oa-strategy-reviewer" not in roles
-    assert len(provider.calls) == 7 == sum(expected_calls(RunRequest.model_validate(state.request)).values())
-    review = next(c for c in provider.calls if c.role == "claim-success-reviewer")
-    assert all(f"## 역할 파일: {r}" in review.system_instruction for r in ("claim-success-reviewer", "syntax-scope-reviewer", "oa-strategy-reviewer"))
-    assert "review_mode: COMBINED_SUCCESS_SYNTAX_OA" in review.packet_text
+    assert "claim-architect" not in roles and {"claim-success-reviewer", "syntax-scope-reviewer", "oa-strategy-reviewer"} <= set(roles)
+    assert len(provider.calls) == 9 == sum(expected_calls(RunRequest.model_validate(state.request)).values())
+    # CLAUDE.md 동시 검수 하드 규칙: three separate reviewers; syntax and OA are told the records they would follow are pending.
+    by_role = {c.role: c for c in provider.calls}
+    assert "review_mode: PARALLEL" not in by_role["claim-success-reviewer"].packet_text
+    assert all("review_mode: PARALLEL" in by_role[r].packet_text for r in ("syntax-scope-reviewer", "oa-strategy-reviewer"))
     records = state.dependent.current.records
-    assert records["dependent_success"] == records["dependent_syntax"] == records["dependent_oa"]
-    assert state.records[records["dependent_success"]].role == "claim-success-reviewer+syntax-scope-reviewer+oa-strategy-reviewer"
+    assert len({records["dependent_success"], records["dependent_syntax"], records["dependent_oa"]}) == 3
+    assert [state.records[records[k]].role for k in ("dependent_success", "dependent_syntax", "dependent_oa")] == [
+        "claim-success-reviewer", "syntax-scope-reviewer", "oa-strategy-reviewer"]
     assert state.candidate.design_revision == "N/A" and state.candidate.current is None and not state.candidate.draft_claim_lock
     assert [c["claim_no"] for c in state.dependent.current.claims] == [9]
     assert state.baseline_set.edit_targets == [9] and state.baseline_set.chain_nos == [1, 5, 8]
@@ -748,3 +742,41 @@ def test_a_design_with_no_candidate_at_all_stops_without_a_rewake(rt, request_in
     provider = ScriptedProvider(edit_script(**{"dependent-claim-strategy-architect": [_stopping_design(reason="NO_TECHNICAL_SOLUTION_CANDIDATE")]}))
     result = run_pipeline(rt, provider, request, _route(blocks), blocks, paths, folder)
     assert len(provider.calls) == 1 and rt.store.load_state(result["run_id"]).halt
+
+
+def _syntax_back_to_drafter(text):
+    def f(spec):
+        return R._base(spec, "BLOCK", {"NON_PATENT_TECHNICAL_READER_GATE": "PASS", "GEOMETRIC_OBJECT_GATE": "PASS", "FUNCTION_DEDUCTION_GATE": "RETURN_TO_DRAFTER"},
+                       ["- 종합 판정: BLOCK", "- OA 진행 가능: NO"], next_step="RETURN_TO_DRAFTER", handoff_ready=False,
+                       open_issues=[{"kind": "BLOCK", "code": "DEDUCTION", "text": text, "return_to": "RETURN_TO_DRAFTER"}])
+    return f
+
+
+def test_a_deduction_fault_only_syntax_finds_sends_the_edit_back_to_the_drafter(rt, request_indep, tmp_path, edit_roles):
+    # run_hl1519 dr1: success passed the text and the separate syntax reviewer found the counterexample.
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "syntax-catches")
+    provider = ScriptedProvider(edit_script(**{
+        "claim-drafter": [R.drafter("DEPENDENT_SET")] * 2, "claim-style-adjuster": [R.style("DEPENDENT_SET")] * 2,
+        "claim-success-reviewer": [R.success()] * 2, "syntax-scope-reviewer": [_syntax_back_to_drafter("맞닿음만 있고 통전 없음"), R.syntax()],
+        "oa-strategy-reviewer": [R.oa("DEPENDENT_SET")] * 2}))
+    result = run_pipeline(rt, provider, request, _route(blocks), blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
+    assert state.dependent.loop_counts["DRAFTER"] == 1 and state.dependent.dependent_revision == "dr2"
+    second_draft = [c for c in provider.calls if c.role == "claim-drafter"][1]
+    assert "맞닿음만 있고 통전 없음" in second_draft.packet_text
+
+
+def test_two_reviewers_failing_together_make_one_return_carrying_both_findings(rt, request_indep, tmp_path, edit_roles):
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "both-fail")
+    provider = ScriptedProvider(edit_script(**{
+        "claim-drafter": [R.drafter("DEPENDENT_SET")] * 2, "claim-style-adjuster": [R.style("DEPENDENT_SET")] * 2,
+        "claim-success-reviewer": [R.success(return_to="RETURN_TO_DRAFTER"), R.success()],
+        "syntax-scope-reviewer": [_syntax_back_to_drafter("17항 반례: 신호 핀이 전원 단자에 닿음"), R.syntax()],
+        "oa-strategy-reviewer": [R.oa("DEPENDENT_SET")] * 2}))
+    result = run_pipeline(rt, provider, request, _route(blocks), blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
+    assert state.dependent.loop_counts["DRAFTER"] == 1                       # one revision, not one per reviewer
+    second_draft = [c for c in provider.calls if c.role == "claim-drafter"][1]
+    assert "조건 9 분배 불명확" in second_draft.packet_text and "17항 반례" in second_draft.packet_text
