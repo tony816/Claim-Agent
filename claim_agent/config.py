@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -252,6 +253,11 @@ def migrate_removed_providers(raw: dict[str, Any]) -> dict[str, Any]:
     return raw
 
 
+# A web job's copy of .tui/model-settings.json taken when it was queued: everything the job's process runs (routing,
+# the pipeline's runtime, a resume) reads that copy, so saving the panel while it runs only changes later requests.
+SETTINGS_ENV = "CLAIM_AGENT_MODEL_SETTINGS"
+
+
 def load_config(
     path: Path | None = None,
     project_root: Path | None = None,
@@ -262,7 +268,7 @@ def load_config(
     # utf-8-sig also supports .env files saved with a BOM by Windows editors.
     load_dotenv(root / ".env", override=False, encoding="utf-8-sig")
     raw = load_raw_config(path, root)
-    settings = root / ".tui" / "model-settings.json"
+    settings = Path(os.environ[SETTINGS_ENV]) if os.environ.get(SETTINGS_ENV) else root / ".tui" / "model-settings.json"
     if settings.exists():
         raw = apply_overrides(raw, json.loads(settings.read_text(encoding="utf-8")))
     raw = apply_overrides(raw, overrides)

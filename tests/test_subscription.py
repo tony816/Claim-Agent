@@ -185,7 +185,7 @@ def test_the_moderator_is_set_in_the_panel_like_any_role(tmp_path):
     with pytest.raises(ValueError, match="에이전트 설정을 모두"):
         workspace.save_model_settings(payload)
 
-def test_settings_reject_invalid_inputs_and_running_save(tmp_path):
+def test_settings_reject_invalid_inputs(tmp_path):
     workspace = Workspace(tmp_path)
     payload = settings_payload(workspace)
     payload["defaults"]["codex_oauth"] = 'x; echo token'
@@ -196,9 +196,29 @@ def test_settings_reject_invalid_inputs_and_running_save(tmp_path):
     payload["roles"]["claim-drafter"]["tools"] = False
     with pytest.raises(ValueError):
         settings_overrides(workspace.cfg, payload)
+
+
+def test_saving_while_a_job_runs_leaves_that_job_on_its_pinned_settings(tmp_path, monkeypatch):
+    """Another conversation can try another model while one runs: the running job reads the copy taken when it was queued."""
+    from claim_agent.config import SETTINGS_ENV
+
+    workspace = Workspace(tmp_path)
+    payload = settings_payload(workspace)
+    payload["roles"]["claim-drafter"].update(provider="claude_oauth", model="opus")
+    workspace.save_model_settings(payload)
+    job_dir = tmp_path / ".tui" / "requests" / "web-x"
+    job_dir.mkdir(parents=True)
+    pinned = workspace.pin_settings(job_dir)
     workspace.jobs["running"] = {"done": False}
-    with pytest.raises(ValueError, match="실행 중"):
-        workspace.save_model_settings(settings_payload(workspace))
+
+    payload["roles"]["claim-drafter"].update(model="sonnet")
+    snapshot = workspace.save_model_settings(payload)
+    assert snapshot["busy"] is True
+    assert workspace.switch_provider({"provider": "gemini"})["provider"] == "gemini"
+    assert load_config(project_root=tmp_path).model_for("claim-drafter") == "sonnet"     # the next request
+    monkeypatch.setenv(SETTINGS_ENV, str(pinned))
+    cfg = load_config(project_root=tmp_path)                                               # the running job's process
+    assert cfg.provider.kind == "codex_oauth" and cfg.model_for("claim-drafter") == "opus"
 
 
 def test_header_switch_changes_provider_mid_chat_and_keeps_role_rows(tmp_path, monkeypatch):
@@ -221,9 +241,6 @@ def test_header_switch_changes_provider_mid_chat_and_keeps_role_rows(tmp_path, m
 
     with pytest.raises(ValueError, match="모델 ID"):
         workspace.switch_provider({"provider": "claude_oauth", "model": "opus; echo token"})
-    workspace.jobs["running"] = {"done": False}
-    with pytest.raises(ValueError, match="실행 중"):
-        workspace.switch_provider({"provider": "gemini"})
     assert load_config(project_root=tmp_path).provider.kind == "claude_oauth"
 
 

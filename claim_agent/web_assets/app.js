@@ -60,8 +60,7 @@ function renderModelSettings(){
     row.append(settingSelect(role.label+" 추론",modelSettings.thinking_levels.map(x=>[x,{MINIMAL:"최소",LOW:"낮음",MEDIUM:"보통",HIGH:"높음"}[x]]),role.thinking_level,v=>{role.thinking_level=v;}));
     rows.append(row);
   }
-  $("model-settings-save").disabled=modelSettings.busy;
-  if(modelSettings.busy)$("model-settings-saved").textContent="실행 중에는 저장할 수 없습니다. 완료 또는 중지 후 다시 여세요.";
+  if(modelSettings.busy)$("model-settings-saved").textContent="실행 중인 응답은 시작할 때의 설정 그대로 끝납니다. 저장하면 다음 요청부터 적용됩니다.";
 }
 async function refreshAuth(){
   clearTimeout(authTimer);const data=await api("/api/auth/status"),box=$("auth-connections");box.replaceChildren();
@@ -94,7 +93,7 @@ $("model-settings-form").onsubmit=async event=>{
     modelSettings=await api("/api/model-settings",{provider:modelSettings.provider,defaults:modelSettings.defaults,roles});renderModelSettings();
     providerInfo=modelSettings;renderProviderSwitch();
     $("model-settings-saved").textContent="저장됨 · 다음 요청부터 적용됩니다";await list();
-  }catch(e){settingsError(e.message);}finally{$("model-settings-save").disabled=!!modelSettings.busy;}
+  }catch(e){settingsError(e.message);}finally{$("model-settings-save").disabled=false;}
 };
 // 헤더의 연결 방식·모델 선택: 대화 도중에도 바꾸며, 서브에이전트별 개별 지정은 그대로 둔다.
 let providerInfo=null;
@@ -105,7 +104,7 @@ function fillSelect(select,options,value){
 }
 function providerLock(){    // 목록을 다시 만들지 않는 잠금 갱신: 열려 있는 선택 상자를 건드리지 않는다.
   const kinds=$("provider-kind"),models=$("provider-model");
-  const running=!!state.data?.running||!!providerInfo?.busy,fixed=providerInfo?providerInfo.roles.filter(r=>r.provider).length:0;
+  const running=!!state.data?.running,fixed=providerInfo?providerInfo.roles.filter(r=>r.provider).length:0;
   kinds.disabled=models.disabled=running||!providerInfo;
   const search=document.querySelector(".provider-switch .model-search");if(search)search.disabled=models.disabled;
   const note=!providerInfo?"":running?"응답이 끝난 뒤 바꿀 수 있습니다":fixed?`다음 요청부터 적용 · 서브에이전트 ${fixed}개는 개별 지정`:"다음 요청부터 적용됩니다";

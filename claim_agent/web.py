@@ -18,7 +18,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
 from .claim_scope import resolve_claim_target
-from .config import load_config
+from .config import SETTINGS_ENV, load_config
 from .free_work import FREE, FREE_ROLE, GATED, REVIEW_ROLES, review_asked_text, review_request_text, review_target
 from .live_events import EventReader
 from .live_log import LiveLogFormatter
@@ -102,8 +102,7 @@ class Workspace:
         from .model_settings import settings_overrides
 
         with self.lock:
-            if self.running_count():
-                raise ValueError("실행 중에는 모델 설정을 저장할 수 없습니다. 작업 완료 또는 중지 후 저장하세요.")
+            # Running jobs keep the copy pinned when they were queued (pin_settings); this applies from the next request.
             overrides = settings_overrides(self.cfg, data)
             save_json(self.root / ".tui" / "model-settings.json", overrides)
             self.cfg = load_config(self.config, self.root)
@@ -114,8 +113,6 @@ class Workspace:
         from .model_settings import connection, merge_settings_file, provider_overrides
 
         with self.lock:
-            if self.running_count():
-                raise ValueError("실행 중에는 연결 방식을 바꿀 수 없습니다. 작업 완료 또는 중지 후 바꾸세요.")
             merge_settings_file(self.root, provider_overrides(self.cfg, data))
             self.cfg = load_config(self.config, self.root)
             snapshot = self.model_settings()
@@ -199,6 +196,13 @@ class Workspace:
             session["work_mode"] = mode
             self.persist(session)
             return dict(id=sid, work_mode=mode)
+
+    def pin_settings(self, job_dir: Path) -> Path:
+        """Copy the model settings a job starts with into its folder (caller holds the lock, as saves do)."""
+        source = self.root / ".tui" / "model-settings.json"
+        pinned = job_dir / "model-settings.json"
+        pinned.write_text(source.read_text(encoding="utf-8") if source.exists() else "{}", encoding="utf-8")
+        return pinned
 
     def running_count(self) -> int:
         with self.lock:
@@ -601,7 +605,7 @@ class Workspace:
         session["title"] = session["messages"][0]["text"][:36]
         session["updated"] = time.time()
         self.persist(session)
-        job = dict(done=False, stopped=False, process=None, log="", log_base=0, mid=mid, folder=job_dir,
+        job = dict(done=False, stopped=False, process=None, log="", log_base=0, mid=mid, folder=job_dir, settings=self.pin_settings(job_dir),
                    mode="CHAT", run_id=None, previous_report=0, text=request["text"], files=files or [])
         self.jobs[sid] = job
         thread = threading.Thread(target=self.execute, args=(sid, job, command), daemon=True)
@@ -748,7 +752,7 @@ class Workspace:
             ])
             session["updated"] = time.time()
             self.persist(session)
-            job = dict(done=False, stopped=False, process=None, log="", log_base=0, mid=mid, folder=job_dir,
+            job = dict(done=False, stopped=False, process=None, log="", log_base=0, mid=mid, folder=job_dir, settings=self.pin_settings(job_dir),
                        mode="RESUME", run_id=run_id, previous_report=report.stat().st_mtime_ns if report.exists() else 0)
             self.jobs[sid] = job
             thread = threading.Thread(target=self.execute, args=(sid, job, command), daemon=True)
@@ -830,6 +834,8 @@ class Workspace:
             if os.name != "nt":
                 options["start_new_session"] = True
             options["env"]["CLAIM_AGENT_EVENT_LOG"] = str(reader.path)
+            if job.get("settings"):
+                options["env"][SETTINGS_ENV] = str(job["settings"])
             with (job["folder"] / "console.log").open("w", encoding="utf-8") as console:
                 with self.lock:
                     process = subprocess.Popen(command, stdout=console, stderr=subprocess.STDOUT, **options)
