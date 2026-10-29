@@ -15,12 +15,16 @@ import time
 
 import httpx
 
+from ..sources.images import normalize_image
 from .base import CallSpec, ImagePart, ProviderError
 from .openrouter import tls_verify
 from .subscription import SubscriptionProvider
 
 API = "https://api.runpod.ai/v2"
 POLL_S = 2.0
+# /run rejects bodies over 10 MB with a bare 400. Attached drawings are shrunk (longest side, in turn) until it fits.
+MAX_BODY = 9_500_000
+SHRINK_SIDES = (None, 1536, 1024, 768)
 DONE = {"COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"}
 THINK = re.compile(r"^\s*<think>.*?</think>\s*", re.DOTALL)
 
@@ -70,28 +74,37 @@ class RunPodProvider(SubscriptionProvider):
             data = {}
         if response.status_code != 200:
             message = data.get("error") if isinstance(data, dict) else None
-            raise ProviderError(f"RunPod {response.status_code}: {str(message or response.reason_phrase)[:300]}")
+            message = message or (data if data else None) or getattr(response, "text", "") or response.reason_phrase
+            raise ProviderError(f"RunPod {response.status_code}: {str(message)[:300]}")
         return data if isinstance(data, dict) else {}
 
     def _once(self, spec: CallSpec, packet: str, images: list[ImagePart]) -> tuple[str, dict]:
         key = api_key(self.config)
         if not key:
             raise ProviderError(f".env에 {self.config.api_key_env}를 설정하세요.")
-        content = [{"type": "text", "text": packet}]
-        for img in images:
-            content.extend([{"type": "text", "text": img.label}, {"type": "image_url", "image_url": {
-                "url": f"data:{img.mime_type};base64,{base64.b64encode(img.data).decode('ascii')}"}}])
-        body = {
-            "model": spec.model,
-            "messages": [{"role": "system", "content": spec.system_instruction}, {"role": "user", "content": content}],
-            "temperature": spec.gen.temperature,
-            "max_tokens": self.config.max_output_tokens,
-            # The fine-tune answers directly; Qwen3.5's template would otherwise open a <think> block.
-            "chat_template_kwargs": {"enable_thinking": False},
-        }
-        if spec.json_schema:
-            body["response_format"] = {"type": "json_object"}
-        job = self._request("POST", "run", key, {"input": {"openai_route": "/v1/chat/completions", "openai_input": body}})
+        for side in SHRINK_SIDES:
+            content = [{"type": "text", "text": packet}]
+            for img in images:
+                data = normalize_image(img.data, img.mime_type, side).data if side else img.data
+                content.extend([{"type": "text", "text": img.label}, {"type": "image_url", "image_url": {
+                    "url": f"data:{img.mime_type};base64,{base64.b64encode(data).decode('ascii')}"}}])
+            body = {
+                "model": spec.model,
+                "messages": [{"role": "system", "content": spec.system_instruction}, {"role": "user", "content": content}],
+                "temperature": spec.gen.temperature,
+                "max_tokens": self.config.max_output_tokens,
+                # The fine-tune answers directly; Qwen3.5's template would otherwise open a <think> block.
+                "chat_template_kwargs": {"enable_thinking": False},
+            }
+            if spec.json_schema:
+                body["response_format"] = {"type": "json_object"}
+            payload = {"input": {"openai_route": "/v1/chat/completions", "openai_input": body}}
+            size = len(json.dumps(payload))
+            if size <= MAX_BODY or not images:
+                break
+        if size > MAX_BODY:
+            raise ProviderError(f"RunPod 요청이 {size / 1e6:.1f}MB로 /run 한도 10MB를 넘습니다. 첨부 이미지 수를 줄이세요.")
+        job = self._request("POST", "run", key, payload)
         job_id, deadline = job.get("id"), time.monotonic() + self.config.timeout_s
         if not job_id:
             raise ProviderError("RunPod가 작업 ID를 돌려주지 않았습니다.")

@@ -50,6 +50,25 @@ def test_runpod_submits_an_async_openai_job_and_polls_it(runpod):
     assert result.parsed == {"status": "REVIEW"} and result.provider == "runpod" and result.usage["total_tokens"] == 14
 
 
+def test_runpod_shrinks_drawings_until_the_run_body_fits(runpod, monkeypatch):
+    import io
+
+    from PIL import Image
+
+    from claim_agent.provider.base import ImagePart
+
+    buf = io.BytesIO()
+    Image.effect_noise((3000, 3000), 100).convert("RGB").save(buf, "PNG")
+    big = ImagePart("image/png", buf.getvalue(), "첨부 이미지", "sha")
+    monkeypatch.setattr(rp, "MAX_BODY", 3 * len(big.data))
+    rp.RunPodProvider(RunPodConfig(endpoint_id="ep123")).generate(spec(images=[big] * 10, json_schema={"type": "object"}))
+    assert len(rp.json.dumps(runpod[0][2])) <= rp.MAX_BODY
+
+    monkeypatch.setattr(rp, "MAX_BODY", 1000)
+    with pytest.raises(ProviderError, match="10MB"):
+        rp.RunPodProvider(RunPodConfig(endpoint_id="ep123")).generate(spec(images=[big] * 10))
+
+
 def test_runpod_failed_job_and_missing_setup_never_carry_the_key(monkeypatch):
     monkeypatch.setenv("RUNPOD_API_KEY", "rpa_SECRET")
     monkeypatch.setattr(rp.httpx, "request", lambda *a, **k: FakeResponse(200, {"id": "j", "status": "FAILED", "error": "CUDA OOM"}))
