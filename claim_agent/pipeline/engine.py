@@ -27,6 +27,7 @@ from ..models.state import (
     RunState,
     Stage,
     TargetRecon,
+    nos_label,
 )
 from ..provider.base import CallResult, CallSpec, GenParams, LLMProvider, ProviderError
 from ..roles.prompt import PromptAssembler
@@ -361,6 +362,7 @@ class PipelineEngine(PriorArtSteps):
             user_lock_released=released, renumbered=moved, excluded=excluded, numbered_by_design=not targets,
             cites_by_design=sorted(to_fill),
         )
+        absent, reworded = state.baseline_set.user_lock_apart(lock)
         record, md = build_baseline_record(state)
         self.store.write_record(state.run_id, rid, {**record, "report_markdown": md}, md)
         state.records[rid] = RecordRef(record_id=rid, kind="baseline_set", role="engine", scope=Scope.DEPENDENT_SET.value, stage="BASELINE",
@@ -370,7 +372,9 @@ class PipelineEngine(PriorArtSteps):
                            + (f"; USER_LOCK 중 {', '.join(f'제{n}항' for n in released)}은 이번 요청이 편집 대상으로 지정해 잠금 해제" if released else "")
                            + (f"; {named}을 새 항으로 끼우며 기존 항 번호·인용을 옮김({renumber_line(moved)})" if moved else "")
                            + (f"; 부모항으로 쓰지 않고 원문 그대로 둔 항: {', '.join(f'제{n}항({why})' for n, why in sorted(excluded.items()))}" if excluded else "")
-                           + (f"; 인용항 번호가 빈 {', '.join(f'제{n}항' for n in sorted(to_fill))}은 종속항 설계가 선행 기재로 정함" if to_fill else ""))
+                           + (f"; 인용항 번호가 빈 {', '.join(f'제{n}항' for n in sorted(to_fill))}은 종속항 설계가 선행 기재로 정함" if to_fill else "")
+                           + (f"; 제공된 세트는 프로젝트 USER_LOCK과 다름({'; '.join(x for x in (absent and nos_label(absent) + ' 세트에 없음', reworded and nos_label(reworded) + ' 문언 다름') if x)})"
+                              " — 이번 run은 제공된 세트 문언을 기준으로 하고 USER_LOCK 원문은 바꾸지 않음" if absent or reworded else ""))
 
     def _seal_design_fills(self, state: RunState, env: RoleEnvelope) -> None:
         """Seal the blank citations the dependent design filled (checked in _call) as the set's own, so the chain the
@@ -1430,7 +1434,8 @@ class PipelineEngine(PriorArtSteps):
                 base = state.baseline_set
                 lock_text = merged_set_text([(b.claim_no, b.text) for b in base.claims], {cl.claim_no: cl.text for cl in all_claims if cl.claim_no in set_nos})
                 lock = renumber_text(lock, base.renumbered, base.cites_filled) if lock else lock
-                released = set(base.user_lock_released)
+                # USER_LOCK claims the given set did not hold as locked are the user's other version: not this run's to keep.
+                released = set(base.user_lock_released).union(*base.user_lock_apart(bundle.user_lock))
             if not user_lock_kept(lock_text, lock, released):
                 raise PipelineHalt(Halt(stage=st.value, role="engine", kind="BLOCK", reason_code="USER_LOCK_NOT_PRESERVED", message="USER_LOCK 문언 미보존", record_id=rid))
             styled = {cl.claim_no for cl in all_claims if cl.claim_no in set_nos and not cl.is_independent}

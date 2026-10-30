@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-from ..models.state import RunState
+from ..models.state import RunState, nos_label
 from ..pipeline.locks import PROVISIONAL_LABEL
 
 _FEEDBACK_SECTION = re.compile(r"^#{2,4}\s*(?:\d+[.)]\s*)?사용자 피드백 처리[^\n]*\n(.*?)(?=^#{1,4}\s|\Z)", re.MULTILINE | re.DOTALL)
@@ -296,6 +296,11 @@ def _edit_section(state: RunState) -> list[str]:
             out += [f"### 전체 청구항 세트 ({nos}을 새 항으로 끼움 · 기존 항은 번호·인용만 옮김: {renumber_line(base.renumbered)} · {tag})", "", full, ""]
         else:
             out += [f"### 전체 청구항 세트 ({nos}만 교체 · 나머지 항은 제공된 원문 그대로 · {tag})", "", full, ""]
+    absent, reworded = base.user_lock_apart(state.request.get("user_lock"))
+    if absent or reworded:
+        out += ["이번 세트는 붙여 주신 문언을 기준으로 했습니다. 프로젝트 USER_LOCK과 다른 항("
+                + "; ".join(x for x in (absent and nos_label(absent) + " 세트에 없음", reworded and nos_label(reworded) + " 문언 다름") if x)
+                + ")은 USER_LOCK 원문을 바꾸지 않았습니다. 어느 쪽이 맞는 문언인지 확인해 주세요.", ""]
     if base.cites_filled:
         out += ["빈 인용항 번호는 종속항 설계가 선행 기재로 정했습니다(설계자 가정 — 확인 필요): "
                 + ", ".join(f"제{n}항 → 제{p}항에 있어서" for n, p in sorted(base.cites_filled.items())), ""]

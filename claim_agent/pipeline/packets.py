@@ -12,7 +12,7 @@ from .. import EXECUTION_PROFILE, PROTOCOL_VERSION
 from ..models.enums import Scope, StyleChangeMode
 from ..models.ids import Identifiers
 from ..models.request import MaterialBundle
-from ..models.state import RunState
+from ..models.state import RunState, nos_label
 from ..provider.base import ImagePart
 from .claimtext import flatten, renumber_line
 
@@ -55,6 +55,11 @@ def _hdr(state: RunState, ids: Identifiers, record_id: str, extra: dict[str, str
             lines.append("USER_LOCK 해제: " + ", ".join(f"제{n}항" for n in state.baseline_set.user_lock_released)
                          + " — 현재 요청이 편집 대상으로 지정한 항(명시적 재승인)이라 USER_LOCK 원문의 해당 항 문언은 보존 대상이 아니다. "
                            "USER_LOCK의 나머지 항은 그대로 보존한다")
+        absent, reworded = state.baseline_set.user_lock_apart(state.request.get("user_lock"))
+        if absent or reworded:
+            lines.append("USER_LOCK과 다른 제공 세트: " + "; ".join(x for x in (absent and nos_label(absent) + "은 제공된 세트에 없음",
+                                                                          reworded and nos_label(reworded) + "은 제공된 세트와 문언이 다름") if x)
+                         + " — 이번 run의 부모항 체인은 제공된 세트(BASELINE_SET) 문언이며, USER_LOCK 원문의 그 항들은 보존·변경 대상이 아니다")
     for k, v in (extra or {}).items():
         lines.append(f"{k}: {v}")
     return "\n".join(lines) + "\n\n"

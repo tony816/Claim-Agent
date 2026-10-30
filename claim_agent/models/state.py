@@ -177,6 +177,34 @@ class BaselineSet(BaseModel):
         """The edit targets as reports say them. Empty until the dependent design numbers claims asked for without one."""
         return ", ".join(f"제{n}항" for n in self.edit_targets) or "세트 끝에 붙일 새 종속항(번호는 종속항 설계가 정함)"
 
+    def user_lock_apart(self, user_lock: str | None) -> tuple[list[int], list[int]]:
+        """The USER_LOCK claims this set does not hold in their locked wording: (not in the set, worded otherwise).
+
+        A set pasted into the request may be another version of the project's USER_LOCK (run web-414b2f6d: 14~20 pasted
+        against a lock of 1~19 whose 15~19 read otherwise). The run returns only the set's own claims, verbatim, and its
+        targets, so these claims are neither preserved nor changed by it: the USER_LOCK stays as it is.
+        """
+        from ..pipeline.claimtext import contains_user_lock, numbered_claims, renumber_text
+
+        if not user_lock:
+            return [], []
+        locked = numbered_claims(renumber_text(user_lock, self.renumbered, self.cites_filled))
+        held = {c.claim_no for c in self.claims}
+        text = "\n\n".join(c.text for c in self.claims)
+        apart = [n for n, c in locked.items() if n not in self.user_lock_released and not contains_user_lock(text, c.text)]
+        return [n for n in apart if n not in held], [n for n in apart if n in held]
+
+
+def nos_label(nos: list[int]) -> str:
+    """Claim numbers as reports say them, runs folded: 제1~13항, 제15항."""
+    runs: list[list[int]] = []
+    for n in sorted(nos):
+        if runs and n == runs[-1][-1] + 1:
+            runs[-1].append(n)
+        else:
+            runs.append([n])
+    return ", ".join(f"제{r[0]}~{r[-1]}항" if len(r) > 1 else f"제{r[0]}항" for r in runs)
+
 
 class Halt(BaseModel):
     stage: str

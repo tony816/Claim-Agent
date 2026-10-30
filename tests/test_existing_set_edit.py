@@ -346,6 +346,27 @@ def test_a_set_kept_in_the_project_user_lock_is_edited_in_place_with_only_the_na
     assert any("USER_LOCK 중 제9항은 이번 요청이 편집 대상으로 지정해 잠금 해제" in n for n in state.notes)
 
 
+def test_a_pasted_set_that_is_another_version_of_the_user_lock_is_edited_without_a_lock_block(rt, request_indep, tmp_path, edit_roles):
+    # Run web-414b2f6d: claims 14~20 pasted to fill 20 against a project USER_LOCK of 1~19 whose 15~19 read otherwise
+    # stopped at DEP_STYLE with USER_LOCK_NOT_PRESERVED after three calls: the lock was looked for in a set that never held it.
+    other = BASELINE.replace("손잡이가 결합되는", "노브가 결합되는").rstrip() + "\n\n" + NEW_10
+    request, blocks, paths, folder = _conversation(tmp_path, request_indep, "other-version", user_lock=other)
+    pasted = next(b for b in blocks if "9항 작성하기" in b["text"])
+    route = RouteDecision(mode="AUTHORING_DRAFT", reason="9항 작성", dependent=True, dependent_target="9",
+                          claim_source_id=pasted["id"], revision_kind="DESIGN", edit_intent="EDIT")
+    provider = ScriptedProvider(edit_script())
+    result = run_pipeline(rt, provider, request, route, blocks, paths, folder)
+    state = rt.store.load_state(result["run_id"])
+    assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
+    assert state.baseline_set.user_lock_apart(other) == ([10], [3])
+    full = edited_set_text(state)
+    assert EDITED_9 in full and all(c.text in full for c in parse_claim_set(BASELINE)[:8]) and "노브" not in full
+    assert any("제공된 세트는 프로젝트 USER_LOCK과 다름(제10항 세트에 없음; 제3항 문언 다름)" in n for n in state.notes)
+    design = next(c for c in provider.calls if c.role == "dependent-claim-strategy-architect")
+    assert "USER_LOCK과 다른 제공 세트: 제10항은 제공된 세트에 없음; 제3항은 제공된 세트와 문언이 다름" in design.packet_text
+    assert "USER_LOCK 원문을 바꾸지 않았습니다" in render_chat_report(state)
+
+
 def test_an_edit_that_changes_a_user_lock_claim_it_did_not_name_is_still_blocked():
     from claim_agent.pipeline.claimtext import user_lock_kept
 
