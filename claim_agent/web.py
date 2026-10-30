@@ -33,6 +33,17 @@ LIVE_LOG_HEAD = MAX_LIVE_LOG // 5   # the start of the log stays in the window; 
 MIN_GZIP = 1400             # responses above this are gzipped when the browser accepts it
 MAX_PROJECT_TEXT = 100000
 PROJECT_TEXT_FIELDS = ("name", "description", "instructions", "user_lock")
+CASELAW = "CASELAW"         # 작업 도구의 판례 도구 turns: shown in the conversation, never handed to a model
+
+
+def conversational(messages: list[dict]) -> list[dict]:
+    """The messages a later turn may hand a model (material, prior requests, reference, review targets).
+
+    판례 도구 turns are left out here, in one place: case summaries are the user's reference, never the drafter's or the
+    free agent's input (CLAUDE.md 판례 DB — 판례 원문은 작성 역할에 넘기지 않는다). They never reach history.json either,
+    since they run no job.
+    """
+    return [m for m in messages if m.get("mode") != CASELAW]
 
 
 def save_json(path: Path, data: dict) -> None:
@@ -521,9 +532,10 @@ class Workspace:
             # Every web request is classified from its text; the composer has no chat/authoring switch. The claim
             # picker is a hint, never a bypass around interpretation of the user's current question.
             history = (read_state(folder / "history.json") or {}).get("history", [])
-            prior_users = [m for m in session["messages"] if m["role"] == "user"]
+            turns = conversational(session["messages"])
+            prior_users = [m for m in turns if m["role"] == "user"]
             material = "\n\n".join(m["text"] for m in prior_users)
-            context = "\n\n".join(m["text"] for m in session["messages"] if m.get("role") == "assistant" and m.get("status") in {"complete", "review"}
+            context = "\n\n".join(m["text"] for m in turns if m.get("role") == "assistant" and m.get("status") in {"complete", "review"}
                                   and (m.get("pipeline_run_id") or m.get("mode") == "AUTHORING_DRAFT"))
             earlier_files = [f["id"] for m in prior_users for f in m.get("files", [])]
             preset = self.project_inputs(session)
@@ -580,13 +592,7 @@ class Workspace:
             note = str(data.get("text") or "").strip()
             if len(note) > 200000:
                 raise ValueError("메시지는 최대 20만 글자까지 보낼 수 있습니다.")
-            source = next((m for m in session["messages"] if m["id"] == data.get("message")), None)
-            fixed = source and source.get("role") == "assistant" and (source.get("review") or {}).get("revise")
-            if not source or source.get("status") == "running" or (source.get("mode") == "REVIEW" and not fixed):
-                raise ValueError("검수할 메시지를 찾을 수 없습니다.")
-            target = (fixed and source["review"].get("claim_text")) or review_target(source["text"])
-            if not target:
-                raise ValueError("이 메시지에는 검수할 청구항(【청구항 N】으로 시작하는 문언)이 없습니다.")
+            source, target = self.claim_source(session, data.get("message"))
             self.require_connection(session)
             # The conversation's own uploads are in the history already; the project's files travel as material.
             preset = self.project_inputs(session)
@@ -598,6 +604,55 @@ class Workspace:
             detail = dict(roles=roles, source=source["id"], asked=bool(note))
             self.spawn_chat(sid, request, dict(text=review_asked_text(roles, note, target), files=[], review=detail), "REVIEW",
                             answer=dict(execution_mode="REVIEW_ONLY", review={**detail, "revise": False}))
+
+    @staticmethod
+    def claim_source(session: dict, mid) -> tuple[dict, str]:
+        """The message the tool panel picked and its claim block. A fixed review answer carries its own wording; an older
+        review answer only quotes what it read, and a 판례 도구 turn is no claim draft, so neither is a target."""
+        source = next((m for m in conversational(session["messages"]) if m["id"] == mid), None)
+        fixed = source and source.get("role") == "assistant" and (source.get("review") or {}).get("revise")
+        if not source or source.get("status") == "running" or (source.get("mode") == "REVIEW" and not fixed):
+            raise ValueError("검수할 메시지를 찾을 수 없습니다.")
+        target = (fixed and source["review"].get("claim_text")) or review_target(source["text"])
+        if not target:
+            raise ValueError("이 메시지에는 검수할 청구항(【청구항 N】으로 시작하는 문언)이 없습니다.")
+        return source, target
+
+    def caselaw(self, sid: str, data: dict) -> None:
+        """작업 도구의 판례 도구, in both work modes: it runs no role and writes no wording, only case records (plus one
+        Jev relevance call when Jev is set up). The answer is the user's reference and stays out of every model's context
+        (`conversational`), so the composer text is a finding or a feature, not a message to the agent."""
+        from .graph import caselaw as cl
+        from .graph import caselaw_tool
+
+        tool = data.get("tool")
+        if tool not in caselaw_tool.TOOLS:
+            raise ValueError("지원하지 않는 판례 도구입니다.")
+        text = str(data.get("text") or "")
+
+        def idle() -> None:
+            if self.jobs.get(sid) and not self.jobs[sid]["done"]:
+                raise ValueError("현재 응답을 완료하거나 중지한 뒤 판례 도구를 쓰세요.")
+
+        with self.lock:
+            self.directory(sid)
+            session = self.sessions[sid]
+            idle()
+            claims, target, source = "", "", None
+            if tool == "enforce":
+                source, claims = self.claim_source(session, data.get("message"))
+                target = ("내 메시지" if source["role"] == "user" else "에이전트 답변") + f" #{session['messages'].index(source) + 1}"
+        # Outside the lock: the record files, the DB quote check and Jev take a second or two.
+        answer = caselaw_tool.run(tool, root=self.cfg.project_root, paths=cl.Paths.from_config(self.cfg), text=text, claims=claims, target=target)
+        asked = f"[판례 도구 · {caselaw_tool.TOOLS[tool]}] " + (f"{target}의 청구항" if tool == "enforce" else text.strip())
+        detail = dict(tool=tool, source=source["id"] if source else None)
+        with self.lock:
+            idle()
+            session["messages"].extend([dict(id=uuid.uuid4().hex, role="user", text=asked, files=[], mode=CASELAW, caselaw=detail),
+                                        dict(id=uuid.uuid4().hex, role="assistant", text=self.redact(answer), status="complete", mode=CASELAW, caselaw=detail)])
+            session["title"] = session["messages"][0]["text"][:36]
+            session["updated"] = time.time()
+            self.persist(session)
 
     def phrases(self) -> dict:
         from . import phrases
@@ -747,7 +802,7 @@ class Workspace:
                 return
             from .conversation_pipeline import rerouted_request
             held = [c["claim_no"] for c in (state.get("baseline_set") or {}).get("claims", [])]
-            asked = kind == "none" and rerouted_request(text, [m["text"] for m in session["messages"] if m["role"] == "user"],
+            asked = kind == "none" and rerouted_request(text, [m["text"] for m in conversational(session["messages"]) if m["role"] == "user"],
                                                         state.get("request") or {}, held)
             if asked:
                 # Re-running the stage cannot reach the parents the request names: the request goes through routing
@@ -1169,6 +1224,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.json(workspace.set_work_mode(str(data.get("id", "")), data.get("mode")))
             elif url.path == "/api/review":
                 workspace.review(str(data.get("id", "")), data)
+                self.json({"ok": True})
+            elif url.path == "/api/caselaw":
+                workspace.caselaw(str(data.get("id", "")), data)
                 self.json({"ok": True})
             elif url.path == "/api/phrases":
                 self.json(workspace.save_phrases(data.get("phrases")))

@@ -41,6 +41,28 @@ TAG_LABELS = {
     "P5": "용어 정의",
 }
 
+# 지적 문장의 낱말로 교훈 기록의 태그를 짐작한다. 글자 2-gram 겹침만으로는 '대략 수평' 지적이 '내외' 판례(C3)에 닿지 않는다.
+# 후보를 넓힐 뿐이고 관련성은 Jev가 정한다.
+TAG_WORDS = {
+    "C3": r"대략|약\s*\d|정도|내외|거의|실질적|부근|근방|충분|가까이|미세|난용",
+    "C4": r"측정|기준점|기준면|기준선|기준이|수치|각도|단위",
+    "C2": r"기능|결과만|용도|수단|도록",
+    "C5": r"상기|선행\s*기재|가리키|지칭",
+    "C6": r"결합\s*관계|작동\s*관계|연결\s*관계|관계가?\s*(?:없|불)",
+    "C1": r"뜻|여러\s*(?:가지|의미)|다의|두\s*가지로",
+    "C8": r"카테고리|말미|나열|및/또는",
+    "P4": r"기능|수단|도록",
+    "P2": r"좁게|한정\s*해석|실시예",
+    "P5": r"정의|용어",
+}
+
+
+def hinted_tags(text: str) -> list[str]:
+    """TAG_WORDS에 맞는 태그, 맞은 낱말이 많은 순."""
+    hits = {tag: len(re.findall(pat, text)) for tag, pat in TAG_WORDS.items()}
+    return [tag for tag, n in sorted(hits.items(), key=lambda x: -x[1]) if n]
+
+
 GROUPS = {
     "명확성": lambda r: r["requirement"] == "명확성",
     "뒷받침": lambda r: r["requirement"] in ("뒷받침", "실시가능", "미완성"),
@@ -262,13 +284,29 @@ def find(lessons: dict | list[dict], text: str, group: str | None = None, k: int
     return scored[:k]
 
 
+def _case_state(r: dict) -> dict:
+    return {"사건": _cite(r), "요건": r["requirement"], "결과": r["outcome"], "청구항 문언": r["claim_feature"],
+            "상대 구성": r.get("other_side", ""), "법원이 본 사실": _fact(r), "판결 인용": r["quote"]}
+
+
 def confirm(finding: str, candidates: list[dict], client, question: str = JEV_QUESTION) -> dict:
     """후보마다 question(기본: 같은 종류의 결함인가)을 Jev noul로 한 요청에 묻는다. 반환은 JevClient.noul_batch 결과."""
-    state = {"finding": finding,
-             "cases": {f"case_{i}": {"사건": _cite(r), "요건": r["requirement"], "결과": r["outcome"], "청구항 문언": r["claim_feature"],
-                                     "상대 구성": r.get("other_side", ""), "법원이 본 사실": _fact(r), "판결 인용": r["quote"]}
-                       for i, r in enumerate(candidates)}}
+    state = {"finding": finding, "cases": {f"case_{i}": _case_state(r) for i, r in enumerate(candidates)}}
     questions = {f"case_{i}": f"cases.case_{i}에 대해 답한다. " + question for i in range(len(candidates))}
+    return client.noul_batch(state, questions)
+
+
+def confirm_pairs(pairs: list[tuple[str, dict, str]], client) -> dict:
+    """(finding, 판결 기록, 질문) 쌍마다 질문 하나를 한 요청에 묻는다. 지적·기록 묶음이 여럿이어도 Jev 호출은 한 번이다.
+    확률 키는 쌍의 순서대로 case_0, case_1, … finding이 하나면 confirm()과 같은 state다. 쌍마다 finding을 넣은 state는
+    같은 판례에 훨씬 무딘 확률을 냈다(2026-10-29 실측: '내외' 판례 0.56, 무관 판례 0.39 — confirm 형식은 0.80, 0.18)."""
+    findings = list(dict.fromkeys(f for f, _, _ in pairs))
+    cases = {f"case_{i}": _case_state(r) for i, (_, r, _) in enumerate(pairs)}
+    if len(findings) == 1:
+        state, lead = {"finding": findings[0], "cases": cases}, lambda f: ""
+    else:
+        state, lead = {"findings": {f"f{j}": f for j, f in enumerate(findings)}, "cases": cases}, lambda f: f"finding은 findings.f{findings.index(f)}이다. "
+    questions = {f"case_{i}": f"cases.case_{i}에 대해 답한다. " + lead(f) + q for i, (f, _, q) in enumerate(pairs)}
     return client.noul_batch(state, questions)
 
 

@@ -142,8 +142,12 @@ const routeNames = {CHAT:"일반 대화",META:"설정·진행 확인",AUTHORING_
 // 작업 도구 패널의 검수 도구·피드백 멘트는 누르면 고르기만 하고, 입력창의 Enter가 덧붙인 말과 함께 실행한다.
 const REVIEW_ROLES=[["claim-style-adjuster","문체 조정","스타일가이드·용어 출처 게이트로 범위를 바꾸지 않고 문언을 다듬어 냅니다 (함께 고른 검수는 다듬은 문언을 봅니다)"],["syntax-scope-reviewer","통사·범위","귀속·결속·복수 분배·범위 불변을 봅니다"],["oa-strategy-reviewer","OA","명확성·기능적 표현·뒷받침 등 OA 위험을 봅니다"],["claim-success-reviewer","성공조건","독립항 성공조건과 원자료 근거를 감사합니다"],["blind-claim-reconstruction-reviewer","블라인드 복원","발명을 모르는 기술자가 독립항 문언만 읽고 무엇을 그리는지 봅니다 (기준 비교 없음)"]];
 const REVIEW_LABEL=Object.fromEntries(REVIEW_ROLES.map(([id,label])=>[id,label]));
+// 판례 도구(두 작업 방식 모두): 모델 없이 판례 기록으로 답하고, Jev를 쓸 수 있으면 관련성을 확인한다. 답은 대화에 보이지만 에이전트가 읽는 기록에는 들어가지 않는다.
+const CASELAW_TOOLS=[["enforce","권리행사 점검","대상 청구항에서 기능적 표현·전제부·수치 범위·여러 실시 주체 같은 권리행사 위험 문언을 찾고 비슷한 판례를 붙입니다"],["find","판례 찾기","입력창에 적은 지적·문언과 같은 종류의 결함을 법원이 판단한 판례를 찾습니다 (명확성·뒷받침·권리범위·권리행사·특허성)"],["features","특허성 신호","입력창에 적은 특징(한 줄에 하나)마다 법원의 신규성·진보성 판단 분포와 원자료 확인 질문을 봅니다"]];
+const CASELAW_LABEL=Object.fromEntries(CASELAW_TOOLS.map(([id,label])=>[id,label]));
+const CASELAW_PLACEHOLDER={enforce:"Enter → 대상 청구항을 권리행사 판례로 점검합니다 · 입력창의 말은 쓰지 않습니다",find:"지적이나 청구항 문언을 적고 Enter · 예: '대략 수평으로'는 기준면과 허용 각도가 없음",features:"특징을 한 줄에 하나씩 적고 Enter · 유형을 알면 '가열 온도 300~400℃::F-NUMERIC'처럼"};
 const CLAIM_HEAD=/^[ \t]*(?:\*\*)?(?:【\s*청구항\s*\d+\s*】|\[\s*청구항\s*\d+\s*\])/m;
-const tools={open:false,roles:new Set(),target:"",options:null,phrases:[],editing:false};   // target "" = 가장 최근 청구항을 따라감
+const tools={open:false,roles:new Set(),caselaw:null,target:"",options:null,phrases:[],editing:false};   // target "" = 가장 최근 청구항을 따라감
 function freeMode(){return state.data?.work_mode==="free";}
 async function setWorkMode(mode){
   if(!state.id||state.busy||state.data?.running||state.data?.work_mode===mode)return;
@@ -179,7 +183,7 @@ function markdown(node,text){
   }
 }
 function resize(){const p=$("prompt");p.style.height="auto";p.style.height=Math.min(p.scrollHeight,180)+"px";}
-function controls(){const running=!!state.data?.running,free=freeMode(),pick=reviewPick();providerLock();renderWorkMode();$("send").hidden=running;$("stop").hidden=!running;$("send").disabled=state.busy||state.uploading>0||(!$("prompt").value.trim()&&!pick)||(!free&&!claimTarget().ok);$("attach").disabled=state.uploading>0;$("prompt").placeholder=pick?"검수자에게 덧붙일 말이 있으면 적고 Enter · 없으면 그냥 Enter":free?"자유롭게 요청하세요 · 답변은 미검수 초안이며, 작업 도구에서 필요한 검수만 골라 실행합니다":state.data?.run_id?"질문하거나 수정하고 싶은 내용을 알려주세요":"무엇이든 물어보세요 · 청구항 작성은 발명을 설명하거나 자료를 첨부해 주세요";for(const button of document.querySelectorAll("#review-buttons button"))button.disabled=!free||running||state.busy||!reviewTarget();renderChip();}
+function controls(){const running=!!state.data?.running,free=freeMode(),pick=reviewPick(),lookup=caselawPick(),typed=!!$("prompt").value.trim();providerLock();renderWorkMode();$("send").hidden=running;$("stop").hidden=!running;$("send").disabled=state.busy||state.uploading>0||(lookup?lookup.tool!=="enforce"&&!typed:(!typed&&!pick)||(!free&&!claimTarget().ok));$("attach").disabled=state.uploading>0;for(const button of document.querySelectorAll("#caselaw-buttons button"))button.disabled=running||state.busy||(button.dataset.tool==="enforce"&&!reviewTarget());$("prompt").placeholder=lookup?CASELAW_PLACEHOLDER[lookup.tool]:pick?"검수자에게 덧붙일 말이 있으면 적고 Enter · 없으면 그냥 Enter":free?"자유롭게 요청하세요 · 답변은 미검수 초안이며, 작업 도구에서 필요한 검수만 골라 실행합니다":state.data?.run_id?"질문하거나 수정하고 싶은 내용을 알려주세요":"무엇이든 물어보세요 · 청구항 작성은 발명을 설명하거나 자료를 첨부해 주세요";for(const button of document.querySelectorAll("#review-buttons button"))button.disabled=!free||running||state.busy||!reviewTarget();renderChip();}
 // ---- 작성 대상: 미지정 / 독립항만 / 특정 항 1개 / 종속항 범위. 서버의 resolve_claim_target와 같은 정규형(2~4,6)을 미리 보여 준다.
 const target={segments:[{from:2,to:8}]};
 function formatTarget(numbers){const a=[...numbers].sort((x,y)=>x-y);if(!a.length)return "";const parts=[];let start=a[0],prev=a[0];for(const n of a.slice(1).concat([null])){if(n!==null&&n===prev+1){prev=n;continue;}parts.push(start===prev?String(start):start+"~"+prev);if(n!==null)start=prev=n;}return parts.join(",");}
@@ -233,7 +237,8 @@ function render(data){
       $("messages").append(article);view={article,body,logs,pre,summary,routeLabel,full,fullBody,text:null,status:null};state.nodes.set(m.id,view);
     }
     if(view.full)view.full.hidden=!(m.pipeline_run_id&&m.status&&m.status!=="running");
-    if(view.routeLabel){view.routeLabel.textContent=m.mode==="FREE"?"자유 작업 · 미검수 초안":m.mode==="REVIEW"?(m.review?.revise?"검수 반영 · "+reviewLabels(m.review)+" · 미검수 초안":m.review?.asked?"검수 + 요청 · "+reviewLabels(m.review)+" · LOCK 없음":"선택 검수 · "+reviewLabels(m.review)+" · LOCK 없음"):m.execution_mode?"자동 분류 · "+(routeNames[m.execution_mode]||m.execution_mode):"";view.routeLabel.title=m.route_reason||"";}
+    if(view.logs)view.logs.hidden=!m.log_id;      // 작업 로그가 없는 답(판례 도구 등)에는 펼칠 로그가 없다
+    if(view.routeLabel){view.routeLabel.textContent=m.mode==="CASELAW"?"판례 도구 · "+(CASELAW_LABEL[m.caselaw?.tool]||"")+" · 참고 — 대화 기록에 넣지 않음":m.mode==="FREE"?"자유 작업 · 미검수 초안":m.mode==="REVIEW"?(m.review?.revise?"검수 반영 · "+reviewLabels(m.review)+" · 미검수 초안":m.review?.asked?"검수 + 요청 · "+reviewLabels(m.review)+" · LOCK 없음":"선택 검수 · "+reviewLabels(m.review)+" · LOCK 없음"):m.execution_mode?"자동 분류 · "+(routeNames[m.execution_mode]||m.execution_mode):"";view.routeLabel.title=m.route_reason||"";}
     if(view.text!==m.text||view.status!==m.status){if(m.role==="user")view.body.textContent=m.text;else if(m.text)markdown(view.body,m.text);else view.body.replaceChildren(el("span","pending",m.mode==="FREE"?"답변을 준비하고 있어요…":m.mode==="REVIEW"?(m.review?.asked?"검수한 뒤 입력한 요청대로 처리하고 있어요…":"검수 역할을 실행하고 있어요…"):"요청을 분류하고 답변을 준비하고 있어요…"));view.text=m.text;}
     if(view.logs){
       if(m.status==="running"){view.pre.textContent=state.log.text||"연결 중…";view.summary.textContent="작업 중 · 실시간 로그";if(view.status!=="running")view.logs.open=true;}
@@ -301,14 +306,17 @@ async function upload(files){
 }
 async function send(event){
   // 작업 도구에서 검수 역할을 골라 두었으면 Enter가 그 검수를 실행하고, 입력한 말은 검수자에게 추가 요청으로 간다(비어 있어도 실행).
-  const pick=reviewPick();
-  event.preventDefault();if(state.composing||state.busy||state.uploading||state.data?.running||(!pick&&!$("prompt").value.trim()))return;
+  // 판례 도구를 골라 두었으면 Enter가 그 조회를 실행한다. 판례 찾기·특허성 신호는 입력한 말이 조회 문장이고, 권리행사 점검은 대상 청구항을 본다.
+  const pick=reviewPick(),lookup=caselawPick(),typed=!!$("prompt").value.trim();
+  event.preventDefault();if(state.composing||state.busy||state.uploading||state.data?.running||(lookup?lookup.tool!=="enforce"&&!typed:!pick&&!typed))return;
   if(pick&&state.pending.length){error("검수 실행에는 첨부 파일을 함께 보낼 수 없습니다. 첨부를 빼거나 고른 검수를 취소하세요.");return;}
-  const free=freeMode(),t=claimTarget();if(!free&&!t.ok){error(t.error);return;}
+  if(lookup&&state.pending.length){error("판례 도구에는 첨부 파일을 함께 보낼 수 없습니다. 첨부를 빼거나 고른 판례 도구를 취소하세요.");return;}
+  const free=freeMode(),t=claimTarget();if(!free&&!lookup&&!t.ok){error(t.error);return;}
   state.busy=true;controls();error("");const id=state.id,text=$("prompt").value;
   // 자유 작업에는 작성 대상·선행기술 검색 옵션이 없다(일반 에이전트가 요청 문장대로 답한다).
-  const [path,body]=pick?["/api/review",{id,message:pick.m.id,roles:[...tools.roles],text}]:["/api/send",free?{id,text,files:state.pending.map(f=>f.id)}:{id,text,files:state.pending.map(f=>f.id),target_mode:t.target_mode,target_claim:t.target_claim,target_segments:t.target_segments,dependent:t.dependent,target:t.target,prior_search:$("prior-search").checked}];
-  try{await api(path,body);if(pick)tools.roles.clear();$("prompt").value="";localStorage.removeItem("draft-"+id);state.pending=[];drafts.delete(id);pending();resize();await refresh();restartPoll();await list();$("conversation").scrollTop=$("conversation").scrollHeight;}
+  const [path,body]=lookup?["/api/caselaw",{id,tool:lookup.tool,message:lookup.target?.m.id,text:lookup.tool==="enforce"?"":text}]:pick?["/api/review",{id,message:pick.m.id,roles:[...tools.roles],text}]:["/api/send",free?{id,text,files:state.pending.map(f=>f.id)}:{id,text,files:state.pending.map(f=>f.id),target_mode:t.target_mode,target_claim:t.target_claim,target_segments:t.target_segments,dependent:t.dependent,target:t.target,prior_search:$("prior-search").checked}];
+  const keep=lookup?.tool==="enforce";        // 권리행사 점검은 입력창의 말을 보내지 않으므로 지우지 않는다
+  try{await api(path,body);if(pick)tools.roles.clear();if(lookup)tools.caselaw=null;if(!keep){$("prompt").value="";localStorage.removeItem("draft-"+id);drafts.delete(id);}state.pending=[];pending();resize();await refresh();restartPoll();await list();$("conversation").scrollTop=$("conversation").scrollHeight;}
   catch(e){error(e.message);}finally{state.busy=false;controls();$("prompt").focus();}
 }
 $("composer").onsubmit=send;
@@ -582,16 +590,18 @@ for(const tab of document.querySelectorAll(".improve-tab"))tab.onclick=()=>{
   for(const other of document.querySelectorAll(".improve-tab"))other.classList.toggle("is-on",other===tab);
   for(const name of ["lessons","cases","audit"])$("improve-"+name).hidden=name!==tab.dataset.tab;
 };
-// ---- 작업 도구 패널 (오른쪽): 검수 도구 + 피드백 멘트. 누르면 고르기만 하고, 실행은 입력창의 Enter다.
+// ---- 작업 도구 패널 (오른쪽): 대상 청구항 + 검수 도구 + 판례 도구 + 피드백 멘트. 누르면 고르기만 하고, 실행은 입력창의 Enter다.
 function reviewLabels(review){return ((review?.roles)||[review?.role]).map(r=>REVIEW_LABEL[r]).filter(Boolean).join(" · ");}
-// 검수 대상 후보: 【청구항 N】 문언이 있는 메시지, 최근 것부터. 검수 반영으로 고친 답은 넣고, 문언을 인용만 한 예전 검수 보고서는 뺀다.
+// 대상 후보: 【청구항 N】 문언이 있는 메시지, 최근 것부터. 검수 반영으로 고친 답은 넣고, 문언을 인용만 한 예전 검수 보고서와 판례 도구 답은 뺀다.
 function reviewCandidates(){
   const fixed=m=>m.role==="assistant"&&m.review?.revise;
-  const out=[];(state.data?.messages||[]).forEach((m,i)=>{if(m.status!=="running"&&(m.mode!=="REVIEW"||fixed(m))&&CLAIM_HEAD.test(m.text||""))out.push({m,n:i+1});});
+  const out=[];(state.data?.messages||[]).forEach((m,i)=>{if(m.status!=="running"&&m.mode!=="CASELAW"&&(m.mode!=="REVIEW"||fixed(m))&&CLAIM_HEAD.test(m.text||""))out.push({m,n:i+1});});
   return out.reverse();
 }
-function reviewTarget(){if(!freeMode())return null;const c=reviewCandidates();return tools.target?c.find(x=>x.m.id===tools.target)||null:c[0]||null;}
-function reviewPick(){return tools.roles.size?reviewTarget():null;}
+function reviewTarget(){const c=reviewCandidates();return tools.target?c.find(x=>x.m.id===tools.target)||null:c[0]||null;}
+function reviewPick(){return tools.roles.size&&freeMode()?reviewTarget():null;}
+// 고른 판례 도구. 권리행사 점검은 대상 청구항이 있어야 고를 수 있다.
+function caselawPick(){const tool=tools.caselaw;if(!tool)return null;const target=tool==="enforce"?reviewTarget():null;return tool==="enforce"&&!target?null:{tool,target};}
 // 서버의 review_target와 같은 규칙: 첫 머리줄부터 마지막 청구항 끝(제목·※·구분선·코드 울타리 앞)까지.
 function claimBlock(text){
   const t=(text||"").replace(/\r\n/g,"\n").replace(/\*\*(【\s*청구항\s*\d+\s*】|\[\s*청구항\s*\d+\s*\])\*\*/g,"$1");
@@ -603,35 +613,49 @@ function claimBlock(text){
 function claimOf(m){return m.review?.revise&&m.review?.claim_text||claimBlock(m.text);}
 function candidateLabel({m,n}){const first=(claimOf(m).split("\n").find(l=>l.trim()&&!CLAIM_HEAD.test(l))||"").trim();return (m.role==="user"?"내 메시지":"에이전트 답변")+" #"+n+" · "+(first.length>24?first.slice(0,24)+"…":first);}
 function renderTools(){
-  const visible=tools.open&&state.view==="chat",free=freeMode(),cands=free?reviewCandidates():[];
+  const visible=tools.open&&state.view==="chat",free=freeMode(),cands=reviewCandidates();
   $("tool-panel").hidden=!visible;document.body.classList.toggle("tools-open",visible);$("tool-toggle").setAttribute("aria-expanded",String(visible));$("tool-toggle").classList.toggle("is-on",visible);
   if(tools.target&&!cands.some(x=>x.m.id===tools.target))tools.target="";
   const select=$("review-target"),key=cands.map(x=>x.m.id+":"+x.n).join(",");
   if(key!==tools.options){tools.options=key;select.replaceChildren();const auto=el("option","",cands.length?"가장 최근 청구항 — "+candidateLabel(cands[0]):"청구항이 있는 메시지 없음");auto.value="";select.append(auto);for(const c of cands){const o=el("option","",candidateLabel(c));o.value=c.m.id;select.append(o);}}
   select.value=tools.target;select.disabled=!cands.length;
-  const target=reviewTarget();if(!target)tools.roles.clear();
+  const target=reviewTarget();if(!target||!free)tools.roles.clear();if(!target&&tools.caselaw==="enforce")tools.caselaw=null;
   const preview=$("review-preview");preview.hidden=!target;if(target){const block=claimOf(target.m);preview.textContent=block.length>320?block.slice(0,320)+"…":block;}
   $("review-note").textContent=!free?"검수 도구는 자유 작업 모드에서 씁니다. 위쪽에서 자유 작업으로 바꾸세요.":!target?"아직 【청구항 N】 문언이 있는 메시지가 없습니다. 초안을 받거나 청구항을 붙여 넣으면 고를 수 있습니다.":"고른 메시지의 청구항 블록에 고른 검수를 실행합니다. 입력창이 비어 있으면 검수 결과만, 요청을 적으면 그 방향으로 검수한 뒤 요청대로 처리합니다. 여러 개를 함께 고를 수 있고, 결과는 LOCK 근거가 아닙니다.";
   for(const button of $("review-buttons").children){const on=tools.roles.has(button.dataset.role);button.classList.toggle("is-on",on);button.setAttribute("aria-pressed",String(on));}
-  for(const [id,view] of state.nodes)view.article.classList.toggle("review-target",visible&&!!target&&id===target.m.id);
-  const chip=$("tool-chip");chip.replaceChildren();chip.hidden=!(target&&tools.roles.size);
+  for(const button of $("caselaw-buttons").children){const on=tools.caselaw===button.dataset.tool;button.classList.toggle("is-on",on);button.setAttribute("aria-pressed",String(on));}
+  const lookup=caselawPick(),marked=lookup?lookup.target:free&&target;   // 대상 청구항을 쓰는 도구가 있을 때만 대화에서 표시한다
+  for(const [id,view] of state.nodes)view.article.classList.toggle("review-target",visible&&!!marked&&id===marked.m.id);
+  const chip=$("tool-chip");chip.replaceChildren();chip.hidden=!(lookup||(target&&tools.roles.size));
   if(!chip.hidden){
-    const cancel=el("button","","×");cancel.type="button";cancel.title="고른 검수 취소";cancel.setAttribute("aria-label","고른 검수 취소");cancel.onclick=()=>{tools.roles.clear();renderTools();controls();$("prompt").focus();};
-    chip.append(el("span","tool-chip-label",""),el("span","",reviewLabels({roles:REVIEW_ROLES.map(([r])=>r).filter(r=>tools.roles.has(r))})+" → "+candidateLabel(target)),cancel,el("span","tool-chip-hint",""));
+    const cancel=el("button","","×");cancel.type="button";cancel.title=lookup?"고른 판례 도구 취소":"고른 검수 취소";cancel.setAttribute("aria-label",cancel.title);cancel.onclick=()=>{tools.roles.clear();tools.caselaw=null;renderTools();controls();$("prompt").focus();};
+    const what=lookup?"판례 도구 · "+CASELAW_LABEL[lookup.tool]+(lookup.target?" → "+candidateLabel(lookup.target):""):reviewLabels({roles:REVIEW_ROLES.map(([r])=>r).filter(r=>tools.roles.has(r))})+" → "+candidateLabel(target);
+    chip.append(el("span","tool-chip-label",""),el("span","",what),cancel,el("span","tool-chip-hint",""));
   }
   renderChip();
 }
 // 입력창이 비어 있으면 검수만, 적혀 있으면 그 요청 방향으로 검수한 뒤 요청대로 처리(고쳐 달라면 고치고, 아니면 검수 결과로 답함).
+// 판례 도구는 참고 조회다: 찾기·특허성 신호는 입력한 말로 찾고, 권리행사 점검은 대상 청구항만 본다.
+const CASELAW_HINT={enforce:()=>"Enter → 대상 청구항의 권리행사 위험 문언과 비슷한 판례를 봅니다 · 입력창의 말은 쓰지 않으며, 답은 대화 기록에 넣지 않습니다",
+  find:asked=>asked?"Enter → 적은 지적과 같은 종류의 결함을 법원이 판단한 판례를 찾습니다 · 답은 대화 기록에 넣지 않습니다":"입력창에 지적이나 청구항 문언을 적어야 찾을 수 있습니다",
+  features:asked=>asked?"Enter → 특징마다 신규성·진보성 판단 분포와 원자료 확인 질문을 봅니다 · 판정이 아닙니다":"입력창에 특징을 한 줄에 하나씩 적어야 볼 수 있습니다"};
 function renderChip(){
-  const chip=$("tool-chip");if(chip.hidden||!chip.firstChild)return;const asked=!!$("prompt").value.trim();
+  const chip=$("tool-chip");if(chip.hidden||!chip.firstChild)return;const asked=!!$("prompt").value.trim(),lookup=caselawPick();
+  if(lookup){chip.querySelector(".tool-chip-label").textContent="판례 참고";chip.querySelector(".tool-chip-hint").textContent=CASELAW_HINT[lookup.tool](asked);return;}
   chip.querySelector(".tool-chip-label").textContent=asked?"검수 + 내 요청":"검수만";
   chip.querySelector(".tool-chip-hint").textContent=asked?"Enter → 입력한 요청 방향으로 검수한 뒤 요청대로 처리합니다 (고쳐 달라면 고친 청구항, 아니면 검수 결과로 답)":"Enter → 검수 결과만 받습니다 · 요청을 적으면 그 방향으로 검수하고 요청대로 처리합니다 (예: \"명확성 위주로 봐 줘\", \"지적대로 고쳐 줘\")";
 }
 function setTools(open){tools.open=open;try{localStorage.setItem("claim-tools",open?"1":"0");}catch(e){}renderTools();}
 for(const [role,label,title] of REVIEW_ROLES){
   const button=el("button","review-tool");button.type="button";button.dataset.role=role;button.setAttribute("aria-pressed","false");button.setAttribute("aria-label",label+" — "+title);button.append(el("strong","",label),el("span","",title));
-  button.onclick=()=>{if(tools.roles.has(role))tools.roles.delete(role);else tools.roles.add(role);renderTools();controls();$("prompt").focus();};
+  button.onclick=()=>{if(tools.roles.has(role))tools.roles.delete(role);else tools.roles.add(role);tools.caselaw=null;renderTools();controls();$("prompt").focus();};
   $("review-buttons").append(button);
+}
+// 판례 도구는 하나만 고른다. 고르면 고른 검수는 풀린다(Enter 하나가 한 가지를 실행한다).
+for(const [tool,label,title] of CASELAW_TOOLS){
+  const button=el("button","review-tool");button.type="button";button.dataset.tool=tool;button.setAttribute("aria-pressed","false");button.setAttribute("aria-label",label+" — "+title);button.append(el("strong","",label),el("span","",title));
+  button.onclick=()=>{tools.caselaw=tools.caselaw===tool?null:tool;tools.roles.clear();renderTools();controls();$("prompt").focus();};
+  $("caselaw-buttons").append(button);
 }
 $("review-target").onchange=()=>{tools.target=$("review-target").value;renderTools();controls();const t=reviewTarget();if(t)state.nodes.get(t.m.id)?.article.scrollIntoView({block:"center",behavior:"smooth"});};
 $("tool-toggle").onclick=()=>setTools(!tools.open);$("tool-close").onclick=()=>setTools(false);
