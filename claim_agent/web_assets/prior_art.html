@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>선행기술조사 · Claim-Agent</title><link rel="stylesheet" href="/style.css"><script src="/md.js" defer></script><script src="/prior_art.js" defer></script></head>
+<body class="survey-page">
+<aside id="sidebar">
+  <a class="brand" href="/" aria-label="Claim-Agent 홈"><span class="mark">C</span> Claim-Agent</a>
+  <a class="new-chat side-link" href="/">← 대화로 돌아가기</a>
+  <button id="survey-new" class="new-chat">＋ 새 선행기술조사</button>
+  <p class="side-label">조사 기록</p><nav id="survey-list" aria-label="조사 기록"></nav>
+  <div class="side-bottom"><span class="local-dot"></span> 이 컴퓨터에 저장됨</div>
+</aside>
+<main>
+  <header><div class="header-left"><button id="menu" aria-label="조사 기록 열기">☰</button><strong>선행기술조사</strong><span id="survey-model" class="provider-note"></span></div></header>
+  <div id="survey-body" class="survey-body">
+    <div id="error" role="alert" hidden></div>
+    <section id="survey-form-panel" class="survey-inner" aria-labelledby="survey-form-title">
+      <h1 id="survey-form-title" class="survey-h1">선행기술조사</h1>
+      <p class="survey-lead">WIPS MCP로만 검색하고 문헌 전문을 읽어 구성 대비와 신규성·진보성 위험을 <strong>검색 집합 기준</strong>으로 정리합니다. 에이전트가 차이점의 위험을 따질 때 필요하면 <strong>판례 그래프</strong>와 <strong>OA(심사 이력) 그래프</strong>를 찾아봅니다. Jev는 쓰지 않습니다.</p>
+      <p class="survey-note">결과는 <code>SEARCHED — NOT_EXHAUSTIVE</code> 참고 자료입니다. 대화·청구항 작성 게이트에 자동으로 넘어가지 않으며, 파이프라인에서 쓰려면 문헌을 <em>선행기술</em> 자료로 첨부하세요.</p>
+      <form id="survey-form" class="project-form">
+        <label>발명 내용<textarea id="survey-text" rows="9" placeholder="발명의 구성, 각 구성의 관계, 해결하려는 과제와 효과를 적어 주세요. 청구항을 그대로 붙여 넣어도 됩니다."></textarea></label>
+        <div class="survey-files">
+          <button type="button" id="survey-attach">＋ 발명 자료 파일</button>
+          <span class="survey-hint">TXT·MD·PDF·DOCX·HWPX·HWP (도면 이미지는 받지 않습니다)</span>
+          <ul id="survey-file-list" class="project-file-list"></ul>
+        </div>
+        <fieldset class="survey-countries"><legend>조사 국가</legend><div id="survey-country-boxes"></div></fieldset>
+        <div class="survey-row">
+          <label>기준일 (선택)<input type="date" id="survey-cutoff"></label>
+          <label>조사 깊이<select id="survey-depth">
+            <option value="quick">빠르게 · 최대 6단계</option>
+            <option value="normal" selected>보통 · 최대 10단계</option>
+            <option value="deep">깊게 · 최대 16단계</option>
+          </select></label>
+        </div>
+        <p id="survey-warn" class="survey-warn" hidden></p>
+        <div class="project-form-row"><button type="submit" id="survey-start" class="primary">조사 시작</button><span class="survey-hint">기준일 이후 공개된 문헌은 선행기술에서 빠지도록 표시됩니다.</span></div>
+      </form>
+    </section>
+    <section id="survey-view" class="survey-inner" aria-labelledby="survey-title" hidden>
+      <div class="survey-head">
+        <h2 id="survey-title"></h2><span id="survey-status" class="survey-status"></span>
+        <div class="survey-actions"><button type="button" id="survey-stop" class="danger">중지</button><a id="survey-export" class="run-link" download hidden>MD 내보내기</a><button type="button" id="survey-delete" class="danger">삭제</button></div>
+      </div>
+      <p id="survey-meta" class="survey-meta"></p>
+      <details class="survey-input"><summary>조사 입력</summary><pre id="survey-input-text"></pre></details>
+      <div class="survey-grid">
+        <section class="survey-card" aria-labelledby="survey-progress-title"><h3 id="survey-progress-title">진행</h3><ol id="survey-progress" class="survey-progress"></ol></section>
+        <section class="survey-card" aria-labelledby="survey-cand-title"><h3 id="survey-cand-title">후보 문헌 <span id="survey-count" class="survey-count"></span></h3><div class="survey-table-wrap"><table id="survey-candidates"></table></div></section>
+      </div>
+      <section class="survey-card survey-report-card" aria-labelledby="survey-report-title"><h3 id="survey-report-title">보고서</h3><div class="assistant"><div id="survey-report" class="body"></div></div></section>
+    </section>
+  </div>
+</main>
+<input id="survey-picker" type="file" accept=".txt,.md,.json,.yaml,.yml,.csv,.pdf,.docx,.hwpx,.hwp" multiple hidden>
+</body></html>

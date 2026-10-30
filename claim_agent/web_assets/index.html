@@ -1,11 +1,12 @@
 <!doctype html>
 <html lang="ko">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Claim-Agent</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Claim-Agent</title><link rel="stylesheet" href="/style.css"><script src="/md.js" defer></script><script src="/app.js" defer></script></head>
 <body>
 <aside id="sidebar">
   <a class="brand" href="/" aria-label="Claim-Agent 홈"><span class="mark">C</span> Claim-Agent</a>
   <button id="new-chat" class="new-chat">＋ 새 대화</button>
   <button id="model-settings-open" class="new-chat">⚙ 에이전트 모델 설정</button>
+  <a class="new-chat side-link" href="/prior-art">⌕ 선행기술조사</a>
   <button id="improve-open" class="new-chat">◧ 개선 / Approval Inbox<span id="improve-badge" class="improve-badge" hidden>0</span></button>
   <p class="side-label side-label-row">프로젝트<button id="new-project" title="새 프로젝트" aria-label="새 프로젝트">＋</button></p><nav id="projects" aria-label="프로젝트 목록"></nav>
   <p class="side-label">내 대화</p><nav id="sessions" aria-label="대화 목록"></nav>

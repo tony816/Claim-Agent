@@ -34,6 +34,9 @@ MIN_GZIP = 1400             # responses above this are gzipped when the browser 
 MAX_PROJECT_TEXT = 100000
 PROJECT_TEXT_FIELDS = ("name", "description", "instructions", "user_lock")
 CASELAW = "CASELAW"         # 작업 도구의 판례 도구 turns: shown in the conversation, never handed to a model
+PAGES = {"/": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"), "/style.css": ("style.css", "text/css"),
+         "/md.js": ("md.js", "text/javascript"),
+         "/prior-art": ("prior_art.html", "text/html"), "/prior_art.js": ("prior_art.js", "text/javascript")}
 
 
 def conversational(messages: list[dict]) -> list[dict]:
@@ -81,6 +84,9 @@ class Workspace:
         self.jobs: dict[str, dict] = {}
         self.auth_jobs: dict[str, dict] = {}
         self.improve_jobs: dict[str, dict] = {}   # lesson_id -> running regression gate
+        from .web_survey import Surveys
+
+        self.surveys = Surveys(self)              # 선행기술조사 페이지 (대화와 따로)
         for path in (self.folder / "projects").glob("*/project.json"):
             data = read_state(path)
             if data and re.fullmatch(r"[a-f0-9]{32}", str(data.get("id", ""))):
@@ -248,7 +254,7 @@ class Workspace:
 
     def running_count(self) -> int:
         with self.lock:
-            return sum(1 for job in self.jobs.values() if not job["done"])
+            return sum(1 for job in self.jobs.values() if not job["done"]) + self.surveys.running()
 
     def create(self, project_id: str | None = None, work_mode: str | None = None) -> dict:
         """A conversation, optionally bound to a project whose instructions and source files preset every turn."""
@@ -1031,6 +1037,7 @@ class Workspace:
             self.stop(sid)
         for job in list(self.jobs.values()):
             job["thread"].join(timeout=5)
+        self.surveys.close()
 
 
 class Server(ThreadingHTTPServer):
@@ -1103,9 +1110,22 @@ class Handler(BaseHTTPRequestHandler):
                 self.json({"error": "실행기를 더블클릭해서 접속해 주세요."}, 403)
                 return
             workspace = self.server.workspace
-            if url.path in ("/", "/app.js", "/style.css"):
-                name, mime = {"/": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"), "/style.css": ("style.css", "text/css")}[url.path]
+            if url.path in PAGES:
+                name, mime = PAGES[url.path]
                 self.send(200, (ASSETS / name).read_bytes(), mime + "; charset=utf-8")
+            elif url.path == "/api/surveys":
+                self.json(workspace.surveys.list())
+            elif url.path == "/api/survey":
+                self.json(workspace.surveys.snapshot(query.get("id", [""])[0]))
+            elif url.path == "/api/survey/export":
+                payload, filename = workspace.surveys.export(query.get("id", [""])[0])
+                self.send_response(200)
+                self.send_header("Content-Type", "text/markdown; charset=utf-8")
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + quote(filename))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(payload)
             elif url.path == "/api/model-settings":
                 self.json(workspace.model_settings(query.get("id", [""])[0] or None))
             elif url.path == "/api/phrases":
@@ -1202,6 +1222,9 @@ class Handler(BaseHTTPRequestHandler):
                 query = parse_qs(url.query)
                 self.json(workspace.upload(query.get("id", [""])[0], query.get("name", [""])[0], raw))
                 return
+            if url.path == "/api/survey/upload":
+                self.json(workspace.surveys.upload(parse_qs(url.query).get("name", [""])[0], raw))
+                return
             if url.path == "/api/project/upload":
                 query = parse_qs(url.query)
                 self.json(workspace.project_upload(query.get("id", [""])[0], query.get("name", [""])[0], raw, query.get("category", ["invention"])[0]))
@@ -1227,6 +1250,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.json({"ok": True})
             elif url.path == "/api/caselaw":
                 workspace.caselaw(str(data.get("id", "")), data)
+                self.json({"ok": True})
+            elif url.path == "/api/survey/start":
+                self.json(workspace.surveys.start(data))
+            elif url.path == "/api/survey/stop":
+                workspace.surveys.stop(str(data.get("id", "")))
+                self.json({"ok": True})
+            elif url.path == "/api/survey/delete":
+                workspace.surveys.delete(str(data.get("id", "")))
                 self.json({"ok": True})
             elif url.path == "/api/phrases":
                 self.json(workspace.save_phrases(data.get("phrases")))

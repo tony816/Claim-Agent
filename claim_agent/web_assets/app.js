@@ -159,28 +159,11 @@ function renderWorkMode(){
   for(const button of document.querySelectorAll("#work-mode button")){const on=button.dataset.mode===(free?"free":"gated");button.classList.toggle("is-on",on);button.setAttribute("aria-pressed",String(on));button.disabled=locked;}
   $("free-banner").hidden=!free;$("options").hidden=free;
 }
-const el = (tag, cls, text) => {const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
 function error(message){$("error").textContent=message;$("error").hidden=!message;}
 async function api(path, body, raw=false){
   const options=body===undefined?{}:{method:"POST",headers:{"X-Claim-Request":"1",...(raw?{}:{"Content-Type":"application/json"})},body:raw?body:JSON.stringify(body)};
   const response=await fetch(path,options);const result=await response.json();
   if(!response.ok)throw new Error(result.error||"요청을 처리하지 못했습니다.");return result;
-}
-function inline(node,text){
-  // Build DOM nodes, never inject model/user HTML.
-  const pieces=text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
-  for(const piece of pieces){if(piece.startsWith("**")&&piece.endsWith("**"))node.append(el("strong","",piece.slice(2,-2)));else if(piece.startsWith("`")&&piece.endsWith("`"))node.append(el("code","",piece.slice(1,-1)));else node.append(document.createTextNode(piece));}
-}
-function markdown(node,text){
-  node.replaceChildren();const lines=text.split("\n");let i=0;
-  while(i<lines.length){let line=lines[i];
-    if(line.startsWith("```")){const code=[];i++;while(i<lines.length&&!lines[i].startsWith("```"))code.push(lines[i++]);i++;const pre=el("pre");pre.append(el("code","",code.join("\n")));node.append(pre);continue;}
-    if(!line.trim()){i++;continue;}
-    const heading=line.match(/^(#{1,3})\s+(.*)$/);if(heading){const h=el("h"+heading[1].length);inline(h,heading[2]);node.append(h);i++;continue;}
-    if(line.includes("|")&&i+1<lines.length&&/^\s*\|?\s*:?-{3}/.test(lines[i+1])){const table=el("table");const addRow=(value,head)=>{const row=el("tr");for(const cell of value.trim().replace(/^\||\|$/g,"").split("|")){const c=el(head?"th":"td");inline(c,cell.trim());row.append(c);}table.append(row);};addRow(line,true);i+=2;while(i<lines.length&&lines[i].includes("|"))addRow(lines[i++],false);node.append(table);continue;}
-    const list=line.match(/^\s*(?:[-*]|\d+\.)\s+/);if(list){const ordered=/^\s*\d/.test(line),ul=el(ordered?"ol":"ul");while(i<lines.length&&/^\s*(?:[-*]|\d+\.)\s+/.test(lines[i])){const li=el("li");inline(li,lines[i++].replace(/^\s*(?:[-*]|\d+\.)\s+/,""));ul.append(li);}node.append(ul);continue;}
-    const p=el("p",line.startsWith("※ ")?"note":"");inline(p,line);node.append(p);i++;
-  }
 }
 function resize(){const p=$("prompt");p.style.height="auto";p.style.height=Math.min(p.scrollHeight,180)+"px";}
 function controls(){const running=!!state.data?.running,free=freeMode(),pick=reviewPick(),lookup=caselawPick(),typed=!!$("prompt").value.trim();providerLock();renderWorkMode();$("send").hidden=running;$("stop").hidden=!running;$("send").disabled=state.busy||state.uploading>0||(lookup?lookup.tool!=="enforce"&&!typed:(!typed&&!pick)||(!free&&!claimTarget().ok));$("attach").disabled=state.uploading>0;for(const button of document.querySelectorAll("#caselaw-buttons button"))button.disabled=running||state.busy||(button.dataset.tool==="enforce"&&!reviewTarget());$("prompt").placeholder=lookup?CASELAW_PLACEHOLDER[lookup.tool]:pick?"검수자에게 덧붙일 말이 있으면 적고 Enter · 없으면 그냥 Enter":free?"자유롭게 요청하세요 · 답변은 미검수 초안이며, 작업 도구에서 필요한 검수만 골라 실행합니다":state.data?.run_id?"질문하거나 수정하고 싶은 내용을 알려주세요":"무엇이든 물어보세요 · 청구항 작성은 발명을 설명하거나 자료를 첨부해 주세요";for(const button of document.querySelectorAll("#review-buttons button"))button.disabled=!free||running||state.busy||!reviewTarget();renderChip();}

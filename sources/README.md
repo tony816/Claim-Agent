@@ -17,6 +17,7 @@
 | `12_판례_특허성_유형기준.md` | 판례 DB에서 뽑은 신규성·진보성 판단 기록(`docs/caselaw-patentability.json`)의 특징 유형(F-…)별 요약과 인정 요인별 원자료 확인 질문; 미검토, 판정 기준·게이트 아님 | prior-art-pre-examiner(`PREEXAM_JUDGE`)·dependent-claim-strategy-architect·oa-strategy-reviewer만; 독립항 설계·작성·스타일 역할에는 이 문서와 그 유형·신호를 전달하지 않음 | 사전 심사 JUDGE, 종속항 후보 순위, OA INV 지적 때만 | 불가 — 발명 원자료 아님. 판례만으로 신규성·진보성을 판정하지 않음 |
 | `13_판례_권리행사_작성기준.md` | 판례 DB에서 뽑은 권리범위확인·침해 판단 기록(`docs/caselaw-enforcement.json`)의 청구항 문언 유형(W…)별 요약; 미검토, 판정 기준·게이트 아님 | claim-architect(`INDEPENDENT`)·claim-drafter(`INDEPENDENT`·`DEPENDENT_SET`)·dependent-claim-strategy-architect; claim-success-reviewer가 사용 경계 준수만 감사. OA는 시트 대신 exact 문언의 점검표(`claim-agent graph caselaw enforce`)를 받음 | 독립항 설계 시작부터 의미 초안까지, 종속항 설계·초안 | 불가 — 발명 원자료 아님. 한정·구조·실시 주체를 만들지 않음 |
 | `10_심사이력_경험기준.md` | 등록 특허 30건 심사 이력의 경험 통계; 최신 성공조건 미검증, 판정 기준·게이트 아님 | dependent-claim-strategy-architect(후보 순위)와 prior-art-pre-examiner의 JUDGE(남는 차이의 설계변경 위험)만; 독립항 설계·작성·스타일 역할에는 이 문서와 그 분류 값을 전달하지 않음 | 종속항 후보 순위 결정과 사전 심사 JUDGE 때만; 독립항 생성에는 활성화하지 않음 | 불가 — 발명 원자료 아님 |
+| `14_선행기술조사_특허성판단_지침.md` | 웹 선행기술조사 페이지의 조사 절차(구성 분설·검색·선별·전문 대비·신규성·진보성·위험 등급), 판례·OA 그래프를 부르는 때, 보고서 형식; 끝 절은 판례·OA 그래프 통계를 `claim-agent graph survey-guide --write`로 생성. 판정 기준·게이트 아님 | 선행기술조사 페이지의 조사 에이전트(`claim_agent/prior_art/survey.py`)만; 청구항 파이프라인 역할(prior-art-searcher·pre-examiner 포함)에는 전달하지 않음 | 선행기술조사 페이지에서 조사를 시작할 때 | 불가 — 발명 원자료 아님. 조사 결과도 `PRIOR_ART_SET`이 아님 |
 
 현재 발명의 명세서, 도면, 발명 설명, 구성요소 관계표, 선행기술 및 확정 문언은 별도의 발명 원자료다. 현재 이 폴더에 그러한 원자료가 없으면 예시 코퍼스나 가이드로 기술내용을 보충하지 않고 `근거 미확인` 또는 `BLOCK`으로 처리한다.
 

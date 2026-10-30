@@ -70,6 +70,8 @@ def register(sub) -> None:
     ex.add_argument("--extract-model", dest="extract_model", help="default: that provider's default model")
     ex.add_argument("--rebuild", action="store_true", help="call the model again even for cached cases")
     ex.add_argument("--records-only", action="store_true", help="no model calls: rebuild the record files from the cache")
+    sg = gs.add_parser("survey-guide", help="rebuild the graph summary section of sources/14 (선행기술조사 특허성 판단 지침) from the case-law and OA graphs")
+    sg.add_argument("--write", action="store_true", help="write the file (default: print it)")
     g.set_defaults(func=cmd_graph)
 
 
@@ -105,6 +107,16 @@ def cmd_graph(args) -> int:
         return 0
     if args.graph_cmd == "caselaw":
         return _caselaw(rt, args)
+    if args.graph_cmd == "survey-guide":
+        from ..prior_art import guide
+
+        text = guide.build(rt.cfg)
+        if args.write:
+            (rt.cfg.project_root / guide.GUIDE_PATH).write_text(text, encoding="utf-8")
+            print(f"→ {guide.GUIDE_PATH} ({len(text)}자)")
+        else:
+            print(text)
+        return 0
     return _precedent(rt, args)
 
 
