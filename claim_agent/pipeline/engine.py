@@ -9,6 +9,8 @@ from typing import Any
 
 from ..claim_scope import format_target, parse_target
 from ..config import AppConfig
+from ..graph.claims import ClaimGraph, ClaimGraphError
+from ..graph.claims import open_from_config as open_claim_graph
 from ..graph.pipeline import GraphHooks
 from ..models.contracts import contract_for, fallback_gate_gaps, main_tree_gate_gaps, set_candidates
 from ..models.enums import CandidateClass, ExecStatus, NextStep, RequestMode, Scope, Status, StyleChangeMode
@@ -214,6 +216,7 @@ class PipelineEngine(PriorArtSteps):
         self.graph_hooks = GraphHooks(cfg, provider, store.run_dir, self._account_result)   # advisory sheets; config graph.* (off by default)
         self._bundle: MaterialBundle | None = None
         self._tool_logs: dict[str, ToolLog] = {}
+        self._claim_graph_state: tuple[ClaimGraph | None, str] | None = None
         self._lock = threading.Lock()
         self._pending_repairs: list[tuple[str, str, CallResult]] = []
 
@@ -640,7 +643,7 @@ class PipelineEngine(PriorArtSteps):
         tool_log = ToolLog()
         tools = None
         if use_tools and rc.tools and rc.aux_mode == "two_phase" and not blind:
-            tools = make_tools(self.sources, tool_log)
+            tools = make_tools(self.sources, tool_log, *self._claim_graph())
             # Light tool phase: only the 07 gate and the catalog, no drawings, low thinking, short output.
             # The JSON main call that follows carries the full context.
             phase_a = CallSpec(
@@ -903,6 +906,15 @@ class PipelineEngine(PriorArtSteps):
     def _account(self, state: RunState, stage: str, model: str, usage: dict[str, int], latency_ms: int, cache_hit: bool) -> None:
         state.add_usage(stage, {**usage_row(model, usage, self.cfg.telemetry.pricing),
                                 "latency_ms": latency_ms, "cache_hits": 1 if cache_hit else 0})
+
+    def _claim_graph(self) -> tuple[ClaimGraph | None, str]:
+        """The style tool phase's search source: the style-reference claim graph, or (None, why) for the markdown corpus."""
+        if self._claim_graph_state is None:
+            try:
+                self._claim_graph_state = (open_claim_graph(self.cfg, self.sources.get("CORPUS").text), "")
+            except ClaimGraphError as exc:
+                self._claim_graph_state = (None, str(exc))
+        return self._claim_graph_state
 
     def _telemetry_tool(self, state: RunState, spec: CallSpec, result: CallResult, ids: Identifiers, record_id: str, tool_log: ToolLog) -> None:
         """One row for the tool-phase call itself, then one row per restricted corpus tool call.

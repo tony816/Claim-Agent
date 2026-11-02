@@ -56,6 +56,17 @@ claim-agent graph precedent                       # 패턴 통계
 claim-agent graph precedent --graph out/clip/graph.json
 ```
 
+## 스타일 참고 청구항 그래프 (`graph.claim_style: on`, 기본 켬)
+
+문체 조정(claim-style-adjuster)의 정확 검색 도구가 읽는 그래프다. 위 세 층과 달리 패킷에 시트를 넣지 않고, 도구 단계에서 모델이 부를 때만 읽는다. 판례 그래프가 아니다.
+
+- 데이터: cs2-spec-writer `graph/jev_graph_lossless/graph.sqlite3`(`graph.claim_graph_dir`, 읽기 전용, git 밖). `명세서 병합본.docx`의 126건·청구항 1,014개와 인용관계 862개(`REFERS_TO_CLAIM`, 종속항 → 부모항)를 담는다. 문체 코퍼스 `sources/청구항_문체학습용_분야별검색최적화본.md`(20세트·143항)는 같은 원문에서 엄격선별한 부분집합이다. 2026-11-02 기준 143항이 모두 그래프의 항과 맞는다(코퍼스 파서가 붙이는 끝의 `---`와 공백만 무시).
+- 열 때 같은 폴더 `SHA256SUMS.txt`의 graph.sqlite3 해시와 노드 수(사례 126·청구항 1,014)를 확인한다. 다르거나 없으면 도구가 예전처럼 문체 코퍼스를 검색하고, 도구 로그의 `사용 소스`에 미사용 이유를 적는다.
+- 도구(`claim_agent/pipeline/corpus_tool.py`): `search_style_corpus(mode, query)`는 정확 일치만 찾고, 그 표현을 쓰는 항 수(`total`)·코퍼스 수록 항 수와 조각 최대 2개를 준다. 조각은 코퍼스 수록 항 → 미수록 항 → 코퍼스의 알려진 재검토 대상 순이다. `open_claim_chain(claim_id)`는 그 항과 부모항 체인을 준다(종속항 선행기재 확인용). 분야·카테고리 질의는 예전처럼 거부한다.
+- 예: `길이 방향` 24항(코퍼스 6항), `길이방향` 1항(코퍼스 0항). 문체 코퍼스만으로는 앞의 것만 보였다.
+- 계약 문서: `sources/07_용어표현_출처게이트.md` §3, 라우팅 인덱스, `sources/README.md`, 두 역할 정의, CLAUDE.md 보조 소스 절. 이 문서들이 바뀌어 `source_set_id`가 달라졌으므로 이전 run은 STALE이다.
+- 문체 형식(`style_profile.py`: 제목·주어를 줄로 띄우는지)은 여전히 엄격선별 코퍼스로 잰다.
+
 ## 엔진 연결
 
 `pipeline/engine.py`의 4곳에서 패킷에 시트를 덧붙인다.

@@ -140,7 +140,7 @@ $("provider-model").onchange=()=>switchProvider({provider:providerInfo.provider,
 const routeNames = {CHAT:"일반 대화",META:"설정·진행 확인",AUTHORING_DRAFT:"청구항 작성·수정",FINALIZATION:"출원용 최종 검증",REVIEW_ONLY:"특허 의견·제한 검수"};
 // ---- 자유 작업 모드: 일반 에이전트와 1차 작업하고, 고른 메시지의 청구항에 고른 게이트 역할만 실행한다(REVIEW_ONLY, LOCK 없음).
 // 작업 도구 패널의 검수 도구·피드백 멘트는 누르면 고르기만 하고, 입력창의 Enter가 덧붙인 말과 함께 실행한다.
-const REVIEW_ROLES=[["claim-style-adjuster","문체 조정","스타일가이드·용어 출처 게이트로 범위를 바꾸지 않고 문언을 다듬어 냅니다 (함께 고른 검수는 다듬은 문언을 봅니다)"],["syntax-scope-reviewer","통사·범위","귀속·결속·복수 분배·범위 불변을 봅니다"],["oa-strategy-reviewer","OA","명확성·기능적 표현·뒷받침 등 OA 위험을 봅니다"],["claim-success-reviewer","성공조건","독립항 성공조건과 원자료 근거를 감사합니다"],["blind-claim-reconstruction-reviewer","블라인드 복원","발명을 모르는 기술자가 독립항 문언만 읽고 무엇을 그리는지 봅니다 (기준 비교 없음)"]];
+const REVIEW_ROLES=[["claim-style-adjuster","문체 조정","스타일가이드·용어 출처 게이트로 범위를 바꾸지 않고 문언을 다듬어 냅니다. 표기·문형은 스타일 참고 청구항 그래프(1,014항)에서 정확 검색합니다 (함께 고른 검수는 다듬은 문언을 봅니다)"],["syntax-scope-reviewer","통사·범위","귀속·결속·복수 분배·범위 불변을 봅니다"],["oa-strategy-reviewer","OA","명확성·기능적 표현·뒷받침 등 OA 위험을 봅니다"],["claim-success-reviewer","성공조건","독립항 성공조건과 원자료 근거를 감사합니다"],["blind-claim-reconstruction-reviewer","블라인드 복원","발명을 모르는 기술자가 독립항 문언만 읽고 무엇을 그리는지 봅니다 (기준 비교 없음)"]];
 const REVIEW_LABEL=Object.fromEntries(REVIEW_ROLES.map(([id,label])=>[id,label]));
 // 판례 도구(두 작업 방식 모두): 모델 없이 판례 기록으로 답하고, Jev를 쓸 수 있으면 관련성을 확인한다. 답은 대화에 보이지만 에이전트가 읽는 기록에는 들어가지 않는다.
 const CASELAW_TOOLS=[["enforce","권리행사 점검","대상 청구항에서 기능적 표현·전제부·수치 범위·여러 실시 주체 같은 권리행사 위험 문언을 찾고 비슷한 판례를 붙입니다"],["find","판례 찾기","입력창에 적은 지적·문언과 같은 종류의 결함을 법원이 판단한 판례를 찾습니다 (명확성·뒷받침·권리범위·권리행사·특허성)"],["features","특허성 신호","입력창에 적은 특징(한 줄에 하나)마다 법원의 신규성·진보성 판단 분포와 원자료 확인 질문을 봅니다"]];

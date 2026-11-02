@@ -155,6 +155,10 @@ class GraphConfig(BaseModel):
     caselaw_dir: str = "graph/patent_case_law"
     caselaw_lessons: str = "docs/caselaw-lessons.json"
     caselaw_review: str = "on"        # on | off — OA packets get the enforcement check of the exact claim text (S13 types, code only)
+    # 스타일 참고용 청구항 그래프(cs2 jev_graph_lossless, 문체 코퍼스와 같은 원문 전체): 문체 조정의 정확 검색 도구가 읽는다.
+    # off이거나 그래프가 없으면 sources/의 문체 코퍼스를 검색한다 — docs/graph_layers.md
+    claim_style: str = "on"           # on | off
+    claim_graph_dir: str = "../cs2-spec-writer/graph/jev_graph_lossless"
 
 
 class ConversationConfig(BaseModel):
