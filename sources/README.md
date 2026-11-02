@@ -12,8 +12,8 @@
 | `청구항_문체학습용_분야별검색최적화본.md` | 최신 성공조건 미검증 역사 코퍼스 | claim-style-adjuster가 조건부 최소 문맥 로딩; 사용 시 claim-success-reviewer가 기록 검증 | 검증된 국소 조각 또는 확정 개념의 표면 표현 정확 검색 때만 | 불가 |
 | 스타일 참고용 청구항 그래프 (`graph.claim_graph_dir`, cs2 `jev_graph_lossless` — `sources/` 밖) | 위 역사 코퍼스를 엄격선별한 원문 `명세서 병합본` 전체(126건·1,014항·인용관계). 최신 성공조건 미검증 | claim-style-adjuster의 정확 검색 도구만(표현을 쓰는 항 수·코퍼스 수록 여부·부모항 체인); 없으면 도구가 위 코퍼스를 검색; 사용 시 claim-success-reviewer가 도구 로그로 기록 검증 | 위 코퍼스와 같음 | 불가 |
 | `06_OA_심사리스크_체크리스트.md` | 잠정 문언 검수 + 정식 명세서 최종 검수 | oa-strategy-reviewer | 독립항 success·syntax 또는 종속항 dependent success·syntax를 통과한 동일 문언에만 | 불가 |
-| `08_종속항_기술기여_게이트.md` | 종속항 후보의 과제–추가 기술특징–작동·협동 원리–효과, 권리행사 가치(`ENFORCEMENT_VALUE_GATE`) 및 단순 도면 묘사 배제 검증 | dependent-claim-strategy-architect·claim-drafter; dependent success·syntax·OA reviewer가 검증 | DRAFT 또는 FINAL 독립항 LOCK 뒤, 종속항 트리·문언 작성 전 | 불가 |
-| `05_종속항_전개패턴_가이드.md` | 기술기여 후보의 부모항·권리화 축·종속항 트리 설계 | dependent-claim-strategy-architect·claim-drafter; claim-success-reviewer·syntax-scope-reviewer가 독립 검증 | 후보별 세 기술기여 게이트와 `ENFORCEMENT_VALUE_GATE` PASS 뒤부터 dependent syntax까지 | 불가 |
+| `08_종속항_기술기여_게이트.md` | 종속항 후보의 과제–추가 기술특징–작동·협동 원리–효과, 권리행사 가치(`ENFORCEMENT_VALUE_GATE`) 및 단순 도면 묘사 배제 검증; 후보마다 과제 트리의 상위 노드(`parent_node`)와 과제·구성·효과 요약을 기록(§1.6·§5.6) | dependent-claim-strategy-architect·claim-drafter; dependent success·syntax·OA reviewer가 검증 | DRAFT 또는 FINAL 독립항 LOCK 뒤, 종속항 트리·문언 작성 전 | 불가 |
+| `05_종속항_전개패턴_가이드.md` | 기술기여 후보의 부모항·권리화 축·종속항 트리 설계; 부모항은 과제 계층의 상위 노드 항이 정한다(§1.1a), 결과는 `최상류 과제 → 1항 → 종속항(과제·구성·효과)` 청구항 트리로 기록 | dependent-claim-strategy-architect·claim-drafter; claim-success-reviewer·syntax-scope-reviewer가 독립 검증 | 후보별 세 기술기여 게이트와 `ENFORCEMENT_VALUE_GATE` PASS 뒤부터 dependent syntax까지 | 불가 |
 | `11_판례_청구항_주의시트.md` | 판례 DB(`case-graph-20260930-v2`) 교훈 기록에서 만든 청구항 문언 주의 시트(명확성 C1~C8·뒷받침·권리범위 P2/P4/P5); 미검토 요약, 판정 기준·게이트 아님 | claim-architect(`INDEPENDENT`)·claim-drafter(`INDEPENDENT`·`DEPENDENT_SET`); claim-success-reviewer가 사용 경계 준수만 감사. style·syntax·OA에는 전달하지 않고, syntax·OA 지적별 판례는 오케스트레이터가 `claim-agent graph caselaw find`로 붙인다 | 독립항 설계 시작부터 의미 초안까지 | 불가 — 발명 원자료 아님. 한정·구성·수치·효과를 만들지 않음 |
 | `12_판례_특허성_유형기준.md` | 판례 DB에서 뽑은 신규성·진보성 판단 기록(`docs/caselaw-patentability.json`)의 특징 유형(F-…)별 요약과 인정 요인별 원자료 확인 질문; 미검토, 판정 기준·게이트 아님 | prior-art-pre-examiner(`PREEXAM_JUDGE`)·dependent-claim-strategy-architect·oa-strategy-reviewer만; 독립항 설계·작성·스타일 역할에는 이 문서와 그 유형·신호를 전달하지 않음 | 사전 심사 JUDGE, 종속항 후보 순위, OA INV 지적 때만 | 불가 — 발명 원자료 아님. 판례만으로 신규성·진보성을 판정하지 않음 |
 | `13_판례_권리행사_작성기준.md` | 판례 DB에서 뽑은 권리범위확인·침해 판단 기록(`docs/caselaw-enforcement.json`)의 청구항 문언 유형(W…)별 요약; 미검토, 판정 기준·게이트 아님 | claim-architect(`INDEPENDENT`)·claim-drafter(`INDEPENDENT`·`DEPENDENT_SET`)·dependent-claim-strategy-architect; claim-success-reviewer가 사용 경계 준수만 감사. OA는 시트 대신 exact 문언의 점검표(`claim-agent graph caselaw enforce`)를 받음 | 독립항 설계 시작부터 의미 초안까지, 종속항 설계·초안 | 불가 — 발명 원자료 아님. 한정·구조·실시 주체를 만들지 않음 |
@@ -21,6 +21,8 @@
 | `14_선행기술조사_특허성판단_지침.md` | 웹 선행기술조사 페이지의 조사 절차(구성 분설·검색·선별·전문 대비·신규성·진보성·위험 등급), 판례·OA 그래프를 부르는 때, 보고서 형식; 끝 절은 판례·OA 그래프 통계를 `claim-agent graph survey-guide --write`로 생성. 판정 기준·게이트 아님 | 선행기술조사 페이지의 조사 에이전트(`claim_agent/prior_art/survey.py`)만; 청구항 파이프라인 역할(prior-art-searcher·pre-examiner 포함)에는 전달하지 않음 | 선행기술조사 페이지에서 조사를 시작할 때 | 불가 — 발명 원자료 아님. 조사 결과도 `PRIOR_ART_SET`이 아님 |
 
 현재 발명의 명세서, 도면, 발명 설명, 구성요소 관계표, 선행기술 및 확정 문언은 별도의 발명 원자료다. 현재 이 폴더에 그러한 원자료가 없으면 예시 코퍼스나 가이드로 기술내용을 보충하지 않고 `근거 미확인` 또는 `BLOCK`으로 처리한다.
+
+`invention-problem-finder`의 최상류 과제 기록과 사용자가 확정한 `USER_PROBLEM`은 원자료가 아닌 생성 방향 입력(성공조건 0단계의 원띵 문서)이다. claim-architect의 주골격 방향과 dependent-claim-strategy-architect의 청구항 트리 꼭대기 노드·하류 과제 재료로만 쓰며, 과제·효과의 근거는 원자료 위치로만 댄다.
 
 기본 활성 순서는 다음과 같다.
 

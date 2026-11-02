@@ -241,7 +241,7 @@ def test_search_off_by_default_keeps_the_old_flow(rt, request_indep):
     engine = rt.engine(prov)
     state = engine.run(engine.start(request_indep, "run-pa-10"))
     assert state.outcome == "DRAFT_CLAIM_LOCK" and state.prior_art is None
-    assert [r.kind for r in state.records.values()][:2] == ["design", "meaning_draft"]
+    assert [r.kind for r in state.records.values()][:3] == ["problem", "design", "meaning_draft"]
 
 
 def test_dependent_set_gets_preexam_record_s10_and_handoff(rt, request_dep):

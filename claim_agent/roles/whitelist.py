@@ -34,6 +34,8 @@ SOURCE_WHITELIST: dict[tuple[str, Scope], list[str]] = {
     ("picture-claim-reconstruction-reviewer", Scope.DEPENDENT_SINGLE): [],
     ("blind-claim-reconstruction-reviewer", Scope.INDEPENDENT): [],
     ("blind-claim-reconstruction-reviewer", Scope.DEPENDENT_SINGLE): [],
+    # invention-problem-finder (CLAUDE.md 0a) reads the raw material only; no sources/ document is pre-loaded.
+    ("invention-problem-finder", Scope.INDEPENDENT): [],
     ("prior-art-searcher", Scope.PRIOR_QUERY): [],
     ("prior-art-searcher", Scope.PRIOR_SCREEN): [],
     ("prior-art-pre-examiner", Scope.PREEXAM_COMPARE): ["README", "SUCCESS", "S09"],
@@ -52,6 +54,7 @@ INVENTION_SOURCE_ROLES = {
     "picture-claim-reconstruction-reviewer",
     "prior-art-searcher",
     "prior-art-pre-examiner",
+    "invention-problem-finder",
 }
 
 

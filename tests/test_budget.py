@@ -22,10 +22,10 @@ def test_usage_totals_and_performance_summary(tmp_path, request_indep):
     engine = rt.engine(ScriptedProvider(R.happy_script(dependent=False)))
     state = engine.run(engine.start(request_indep, "budget-01"))
     assert state.outcome == "DRAFT_CLAIM_LOCK"
-    assert state.usage["calls"] == 9 and state.usage["unpriced_calls"] == 0 and state.usage["cost_usd"] > 0   # 8 main + style tool phase
-    assert set(state.stage_usage) == {"ARCHITECT", "DRAFT", "STYLE", "SUCCESS", "SYNTAX", "OA", "BLIND", "PICTURE"}
+    assert state.usage["calls"] == 10 and state.usage["unpriced_calls"] == 0 and state.usage["cost_usd"] > 0   # problem finder + 8 main + style tool phase
+    assert set(state.stage_usage) == {"PROBLEM", "ARCHITECT", "DRAFT", "STYLE", "SUCCESS", "SYNTAX", "OA", "BLIND", "PICTURE"}
     report = (rt.store.run_dir("budget-01") / "report.md").read_text(encoding="utf-8")
-    assert "## 성능 요약" in report and "| **합계** | 9 |" in report and "$" in report
+    assert "## 성능 요약" in report and "| **합계** | 10 |" in report and "$" in report
 
 
 def test_budget_limit_halts_before_the_next_call_and_resumes(tmp_path, request_indep):
@@ -41,8 +41,8 @@ def test_budget_limit_halts_before_the_next_call_and_resumes(tmp_path, request_i
     rt2 = _rt(tmp_path, **{"pipeline.max_calls": 20})
     engine2 = rt2.engine(prov)
     state2 = engine2.resume("budget-02", Decision())
-    assert state2.outcome == "DRAFT_CLAIM_LOCK" and state2.usage["calls"] == 10   # the interrupted style stage repeats its tool phase
-    assert [c.role for c in prov.calls[:4]] == ["claim-architect", "claim-drafter", "claim-style-adjuster", "claim-style-adjuster"]
+    assert state2.outcome == "DRAFT_CLAIM_LOCK" and state2.usage["calls"] == 10   # the halt fell before the style tool phase, so nothing repeats
+    assert [c.role for c in prov.calls[:4]] == ["invention-problem-finder", "claim-architect", "claim-drafter", "claim-style-adjuster"]
 
 
 def test_continuing_a_budget_halt_counts_the_same_limit_again(tmp_path, request_indep):

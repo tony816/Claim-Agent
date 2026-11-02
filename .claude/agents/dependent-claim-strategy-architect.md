@@ -43,6 +43,7 @@ color: cyan
 - 현재 발명의 원자료의 정확한 경로 또는 요청 본문의 원문
 - 선행기술의 정확한 경로 또는 `PRIOR_ART_SET: NONE`
 - 선택: 사용자가 제공한 `BUSINESS_CONTEXT` 또는 `BUSINESS_CONTEXT: NONE`. 이 입력은 누락으로 보지 않는다.
+- 선택: 최상류 과제 기록(`invention-problem-finder`의 `problem_record_id` 전문 — 최상류 과제 문장·`problem_structure`·하류 문제표) 또는 사용자가 확정한 `USER_PROBLEM`. 비게이팅이며 발명 원자료가 아니다. 이 입력이 없다는 이유로 설계를 막지 않고, 없으면 `ROOT` 과제는 루트 설계 기록의 `problem`(1항이 푸는 최상류 과제 문장) 또는 원자료에서 직접 정하고 그 위치를 적는다.
 
 하나라도 누락되면 설계를 시작하지 않고 `상태: BLOCK`, `DEPENDENT_DESIGN_GATE: UNLOCKED`, `BLOCK — INPUT_MISSING`으로 반환한다. LOCK의 식별자·문언·USER_LOCK·원자료·선행기술 집합이 현재 입력과 다르면 `BLOCK — ROOT_LOCK_MISSING_OR_STALE`로 반환한다.
 
@@ -65,7 +66,8 @@ color: cyan
 8. 선행기술이 제공된 경우에만 문헌별 개시, 차이점, 결합동기, 변경 용이성, 변경 저해 및 효과의 예측 가능성을 검토한다. 없으면 모든 신규성·진보성 판정을 `UNVERIFIED — PRIOR_ART_NOT_PROVIDED`로 둔다.
 9. `TECHNICAL_SOLUTION_CANDIDATE`만 주된 권리화 축에 배치한다. `DEPENDENT_SOURCE_GATE`와 `CLAIMABILITY_GATE`가 PASS인 `FALLBACK_ONLY`는 기본으로 보조 축에 잠가 주된 트리 뒤 `planned_claim_no`를 주고(구조 관계 → 재질·부품 종류 순), 유지 이유(개시된 실시형태를 심사 중 보정 근거로 남김)를 적는다. 보조 축의 의미 한정 패키지는 원자료가 보여 주는 구조만 담고 효과·목적 구절을 넣지 않으며, 주된 기술기여 후보처럼 표현하지 않는다. 보조 축 후보의 `CAUSAL_CONTRIBUTION_GATE`·`ENFORCEMENT_VALUE_GATE` 실패는 기록만 하고 잠금을 막지 않는다. 사용자가 기술기여 종속항만 요청하면 보조 축을 두지 않는다. 요청이 항 번호를 정했으면 그 번호를 주된 트리 후보로 먼저 채우고 남는 번호에만 보조 축을 둔다.
 9a. `TECHNICAL_SOLUTION_CANDIDATE`마다 `10_심사이력_경험기준.md`의 `exam_pattern`(REL_POSITION_COUPLING, SUBASSEMBLY_ACTION, CONDITIONAL_BRANCH, MODE_OPERATION, OPERATION_ORDER, PURPOSE_POSITION_MATERIAL, NUMERIC_WITH_REASON, NUMERIC_NO_REASON, SELECTION_MATERIAL, SELECTION_SHAPE, SELECTION_METHOD, SELECTION_INPUT_DATA, KNOWN_ITEM, OTHER)과 `design_change_risk`(LOW·MEDIUM·HIGH)를 붙이고, 분류의 원자료 근거 위치를 `exam_pattern_basis`에 적는다. 유형은 원자료의 문장으로만 정하며, 원자료가 두 구성의 결합 위치를 말하지 않으면 REL_POSITION_COUPLING으로 올리지 않는다. 이 분류는 순서 신호일 뿐 `CandidateClass`나 08의 세 게이트 값을 바꾸지 않는다. HIGH 후보도 인과사슬이 원자료로 닫히면 주된 트리에 남되, 같은 부모항 아래에서는 LOW → MEDIUM → HIGH 순서로 예정 항을 정하고 같은 위험도 안에서는 05의 권리화 축 순서를 따른다. `business_fit`이 HIGH·MEDIUM·LOW로 기록된 후보가 있으면 같은 부모항 아래에서 그 순서를 위험도보다 먼저 적용하고, `UNVERIFIED` 후보는 이 키로 앞뒤를 정하지 않는다. NUMERIC_NO_REASON에는 `원자료에 범위 안팎 비교 없음 — 반복 실험 최적화로 넘어갈 위험`을 적는다. 선행기술이 봉인돼 있고 그 관계가 개시돼 있으면 그 사실이 위험도보다 우선한다. `authoring_scope: EXISTING_SET_EDIT`이면 번호·인용관계를 바꾸지 않으므로 분류는 보고서에만 남긴다.
-10. 후보별 세 필수 기술기여 게이트와 `ENFORCEMENT_VALUE_GATE`가 PASS한 뒤 `05_종속항_전개패턴_가이드.md`를 적용한다. 필요한 선행 용어와 전제관계를 기준으로 가장 넓은 적정 부모항을 정하고, 문언이 아닌 후보 ID와 의미 한정 패키지로 종속항 전략 트리를 만든다.
+9b. 과제 트리를 먼저 세운다(08 제1.6절, 05 제1.1a절). `ROOT` 과제는 1항이 푸는 최상류 과제이며 과제 기록(`problem_record_id`의 `problem`) → `USER_PROBLEM` → 루트 설계 기록의 `problem` 순으로 잡고, 셋 다 없으면 원자료에서 직접 정해 위치를 적는다. 과제 기록의 하류 문제표(D-ID)를 재료로 삼아 각 `TECHNICAL_SOLUTION_CANDIDATE`의 과제를 `ROOT`를 직접 세분하는 하위 과제 또는 상위 후보 과제의 하위 과제로 배치하고, 후보마다 `parent_node`(`ROOT` 또는 상위 후보의 `DC-NN`)를 정한다. 보조 축 후보는 그 구조가 구체화하는 노드(상위 후보의 `DC-NN` 또는 `ROOT`)에 붙이되 `problem`·`effect`는 비운다. 후보마다 트리 노드에 적을 `problem`(과제)·`feature`(추가 기술특징·구성 요약)·`effect`(효과) 한 줄씩을 채운다. 과제 기록·USER_PROBLEM은 원자료가 아니므로 과제·효과의 근거는 여전히 원자료 위치로 댄다.
+10. 후보별 세 필수 기술기여 게이트와 `ENFORCEMENT_VALUE_GATE`가 PASS한 뒤 `05_종속항_전개패턴_가이드.md`를 적용한다. 부모항은 `parent_node`의 항이다(`ROOT`이면 독립항, `DC-NN`이면 그 후보의 예정 항이며 `parent_claim_no`는 그 번호와 같고 그 후보는 앞 번호다). 필요한 선행 용어·전제관계는 그 부모항 체인 안에서 확인한다(05 제1.1a절). 선행 용어가 1항에 다 있다는 이유로 과제 계층상 하위인 후보를 1항으로 올리지 않는다. 체인에 없는 용어가 필요하면 체인 안에서 그 용어를 가진 항을 다시 고르거나 패키지가 그 구성을 새로 도입하게 짜고, 둘 다 안 되면 REVIEW로 낸다. 문언이 아닌 후보 ID와 의미 한정 패키지로 종속항 전략 트리를 만든다.
 11. 후보를 청구하려면 루트 독립항의 주골격·계층·최소충분 한정·기술 개념을 바꿔야 하는 경우 종속항으로 강행하지 않고 `RETURN_TO_ARCHITECT`로 중지한다.
 12. `08_종속항_기술기여_게이트.md`의 모든 필수 게이트를 판정한다. 주된 트리에 `DRAWING_ONLY`, 해결되지 않은 `UNVERIFIED`, 인과사슬이 닫히지 않은 후보 또는 `ENFORCEMENT_VALUE_GATE`가 PASS가 아닌 후보가 남거나, 보조 축에 `DEPENDENT_SOURCE_GATE`·`CLAIMABILITY_GATE`가 PASS가 아닌 후보가 있거나, 주된 트리에도 보조 축에도 잠글 후보가 없으면 `DEPENDENT_DESIGN_GATE`를 잠그지 않는다. 후보가 없다는 이유로 형상 항을 채워 넣지 않고 `UNLOCKED — NO_TECHNICAL_SOLUTION_CANDIDATE`로 반환한다. `TECHNICAL_SOLUTION_CANDIDATE`가 없어도 보조 축 후보가 있으면 그것만 잠그고(`상태: PASS`), 보고에 `기술기여 확인 후보 없음 — 보조 축만`을 적는다.
 12a. 근거가 닫히지 않는 후보가 있다고 해서 "자료를 주실지, 잠글 수 있는 후보로 갈지"를 사용자에게 묻고 멈추지 않는다. 잠글 수 있는 후보로 진행하고, 닫히지 않은 후보의 끊긴 고리와 필요한 자료는 `발명자 확인 질문`으로 남긴다. 사용자에게 멈추는 경우는 CLAUDE.md의 정지 사유(원자료에 없는 사실만으로 남는 후보뿐인 경우, 잠긴 계약으로 정해지지 않는 권리범위 선택, 부모항 체인 변경)뿐이다.
@@ -79,6 +81,7 @@ color: cyan
 - 독립항과 부가한정의 전체 조합을 평가하며, 부가한정 하나만 떼어 진보성을 단정하지 않는다.
 - `DRAWING_ONLY`를 후보 수를 채우기 위해 `FALLBACK_ONLY`로 완화하지 않는다.
 - 요청 항 수를 채우려고 `ENFORCEMENT_VALUE_GATE`가 PASS가 아닌 후보를 주된 트리에 넣지 않는다. 주된 트리의 항 수가 줄어드는 것은 정상 결과이며, 원자료 근거와 청구 가능성이 있는 나머지 특징은 보조 축(수행 순서 9)으로 쓴다.
+- 청구항 트리 계약: 세트에 쓰이는 모든 후보(주된 트리와 보조 축)는 `parent_node`를 가지고, `parent_node`가 `DC-NN`이면 `parent_claim_no`는 그 후보의 `planned_claim_no`와 같아야 하며, `ROOT`이면 `parent_claim_no`는 독립항(기존 세트 편집에서는 읽기 전용 체인의 항)이고 이 세트의 후보 항이면 안 된다. `TECHNICAL_SOLUTION_CANDIDATE`는 `problem`·`effect`를, 모든 세트 후보는 `feature`를 채운다. 엔진이 `claim_tree_gaps`로 이 정합을 검사해 어긋나면 번호 계약처럼 1회 재호출(`CLAIM_TREE_CONTRACT`) 뒤 멈춘다. 설계 뒤 엔진이 `최상류 과제 → 1항 → 종속항(과제·구성·효과)` 청구항 트리를 그려 보고와 LOCK에 기록한다.
 - 요청 패킷의 종속항 목표 범위(`dependent_target_claim_nos`)에 번호가 지정되면 주된 트리와 보조 축을 합친 `candidates[].planned_claim_no`가 그 번호 집합과 정확히 일치해야 한다. 임의 발번·범위 확대·누락은 계약 위반이다. 08 제3.1절의 탐색을 마쳤는데도 해당 번호로 낼 기술기여 후보가 없을 때만 후보를 만들지 말고 `status: REVIEW`로 사유를 보고하며, 시도한 짝마다 끊긴 고리 하나를 적는다.
 - USER_LOCK은 수정 권한을 제한하지만 기술기여 결함을 PASS로 바꾸지 않는다.
 - 뒤 단계(success·syntax·OA·역구성)에서 결함이 될 수 있는 위험을 찾으면 자기 권한 안에서 닫거나, 닫을 수 없으면 PASS 대신 해당 되돌림 또는 REVIEW로 판정한다. `<뒤 단계>가 확인해야 한다`는 인계만으로 PASS를 내지 않는다. `비게이팅 잔존 위험`에는 자기 권한으로 닫을 수 없는 것(선행기술·정식 명세서 미제공에 따른 UNVERIFIED, 발명자 확인 질문, 잠긴 계약·USER_LOCK·부모항 체인이 정한 사항)만 남기고, 항목마다 닫을 수 없는 이유와 그 계약 위치를 적는다. 설계 계약에 `<뒤 단계>가 확인` 형태의 미결 위험을 남기지 않는다. 그 위험이 문언 선택(선행기재·복수 도입·주어 구조 등)에 달려 있으면 계약에서 선택을 정하고, 정할 수 없으면 UNLOCKED 또는 REVIEW로 낸다.
@@ -97,13 +100,14 @@ color: cyan
 - dependent_set_id
 - dependent_design_revision
 - DEPENDENT_DESIGN_GATE: LOCKED / UNLOCKED
-- LOCK 범위: 후보 집합 / 과제–특징–원리–효과 / 의미 한정 패키지 / 형상·공간 객체 계약 / 부모항 전략 / 방사형·연쇄형 트리 / 권리화 축 / USER_LOCK
+- LOCK 범위: 후보 집합 / 과제–특징–원리–효과 / 의미 한정 패키지 / 형상·공간 객체 계약 / 부모항 전략 / 과제 트리(상위 노드) / 방사형·연쇄형 트리 / 권리화 축 / USER_LOCK
 - LOCK 미해결 사항
 - 소스 로딩 기록: 실제로 읽은 파일 경로, 문서 역할, 적용 기준
 - 원자료 집합
 - PRIOR_ART_SET: 정확한 경로 목록 / NONE
 - USER_LOCK 보존 결과
 - 후보별 필수 인과기록표: `후보 ID / 원자료 근거 / 부모항 전체 조합 / 과제 / 추가 기술특징 / 작동·협동 원리 / 효과 / 인과사슬 / 청구 가능 의미 한정 패키지 / 연역 전제와 반례 모델 시도 결과 / 메인 주체와 선택 이유 / 선행기술 대비 / 분류`
+- 후보별 트리 노드: `후보 ID / parent_node(ROOT 또는 DC-NN) / problem / feature / effect` (보조 축은 problem·effect 비움)
 - 후보별 게이트표: `DEPENDENT_SOURCE_GATE / CAUSAL_CONTRIBUTION_GATE / CLAIMABILITY_GATE / ENFORCEMENT_VALUE_GATE / PRIOR_ART_CONTRIBUTION_GATE`
 - 후보별 권리행사 기록: `후보 ID / 권리행사 시나리오 / EV1 한정 실익 / EV2 충족 확인 / EV3 단일 실시 주체 / EV4 회피 대가 / EV5 독립 축 / business_fit / business_fit_basis 또는 사업 확인 질문`
 - 후보별 심사 경험 순위 신호: `후보 ID / exam_pattern / design_change_risk / 분류 근거 위치` (10_심사이력_경험기준; 게이트 아님)
@@ -114,7 +118,8 @@ color: cyan
 - DRAWING_ONLY 제외 목록과 정확한 제외 이유
 - UNVERIFIED 목록과 필요한 최소 자료
 - RETURN_TO_ARCHITECT 여부와 이유
-- 종속항 전략 트리: `예정 항 / 후보 ID / 부모항 / 필요한 선행 용어 / 방사형·연쇄형 관계 / 의미 한정 패키지 / 권리화 축 / 우선순위`
+- 종속항 전략 트리: `예정 항 / 후보 ID / 부모항 / 상위 노드(parent_node) / 필요한 선행 용어 / 방사형·연쇄형 관계 / 의미 한정 패키지 / 권리화 축 / 우선순위`
+- 청구항 트리: `ROOT 과제 문장(출처: 과제 기록 / USER_PROBLEM / 루트 설계 기록 / 원자료 위치)` → 1항(최상위 기능·구성·효과) → 노드별 `예정 항 / DC-NN / 과제 / 구성 / 효과`(보조 축은 구조만)
 - INVENTIVE_STEP: PASS / REVIEW / BLOCK / UNVERIFIED와 검토한 선행기술 범위
 - drafter에게 전달할 PRE_STYLE 변경 금지 기술기여 계약
 - claim-style-adjuster에게 전달할 종속항 표면 문언·형상·공간 객체 계약

@@ -75,6 +75,10 @@ def _request_from_args(args) -> RunRequest:
         if args.mode:
             req.request_mode = RequestMode(args.mode)
         req.prior_search = _prior_search_args(args, req.prior_search)
+        if getattr(args, "no_problem_finding", False):
+            req.problem_finding = False
+        if getattr(args, "user_problem", None):
+            req.user_problem = args.user_problem
         return req
     text = Path(args.request_file).read_text(encoding="utf-8") if args.request_file else (args.request or "")
     if not text:
@@ -86,6 +90,7 @@ def _request_from_args(args) -> RunRequest:
         invention_sources=args.source or [], spec_path=args.spec, drawings=args.drawing or [], prior_art=prior, dependent=bool(args.dependent),
         dependent_target=args.dependent_target, dependent_set_id=args.dependent_set_id, claim_file=args.claim_file,
         prior_search=_prior_search_args(args, None),
+        problem_finding=False if getattr(args, "no_problem_finding", False) else None, user_problem=getattr(args, "user_problem", None),
     )
 
 
@@ -620,6 +625,8 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--dependent-target")
     r.add_argument("--dependent-set-id")
     r.add_argument("--claim-file")
+    r.add_argument("--no-problem-finding", action="store_true", help="CLAUDE.md 0a invention-problem-finder를 이 run에서 생략 (비게이팅 단계)")
+    r.add_argument("--user-problem", help="사용자가 확정한 최상류 과제 문장: 과제 탐색을 생략하고 청구항 트리의 꼭대기로 쓴다")
     r.add_argument("--shadow", help="experiments/<name>.yaml to run as shadow")
     r.add_argument("--claims-only", action="store_true")
     r.add_argument("--run-id")

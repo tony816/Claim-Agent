@@ -278,3 +278,52 @@ def contract_for(role: str, scope: Scope) -> GateContract:
         return CONTRACTS[(role, scope)]
     except KeyError as exc:  # pragma: no cover - programming error
         raise KeyError(f"no gate contract for {role} / {scope}") from exc
+
+
+# ----------------------------------------------------------------------------- 청구항 트리 (CLAUDE.md 제12단계)
+ROOT_NODE = "ROOT"
+
+
+def claim_tree_gaps(env: RoleEnvelope) -> list[str]:
+    """Every candidate the set writes names the node it hangs on: `parent_node` is ROOT (its parent claim is outside this
+    design: the independent claim or an edit's read-only chain) or the DC-NN whose problem it refines, and then its
+    `parent_claim_no` is that candidate's planned claim. A TECHNICAL_SOLUTION_CANDIDATE carries its problem and effect;
+    every written candidate carries its feature. The fallback axis (structure only) leaves problem/effect empty."""
+    written = set_candidates(env)
+    by_id = {c.dc_id: c for c in written}
+    nos = {c.planned_claim_no for c in written if c.planned_claim_no}
+    gaps: list[str] = []
+    for c in written:
+        node = (c.parent_node or "").strip()
+        main = c.classification == CandidateClass.TECHNICAL_SOLUTION_CANDIDATE
+        if not node:
+            gaps.append(f"{c.dc_id}: parent_node 없음 (ROOT 또는 상위 후보의 DC-NN)")
+        elif node.upper() == ROOT_NODE:
+            if c.parent_claim_no in nos:
+                p = next(x.dc_id for x in written if x.planned_claim_no == c.parent_claim_no)
+                gaps.append(f"{c.dc_id}: parent_node가 ROOT인데 부모 제{c.parent_claim_no}항은 이 세트의 후보 {p} — parent_node를 {p}로 적거나 부모를 독립항으로 한다")
+        else:
+            parent = by_id.get(node)
+            if parent is None:
+                gaps.append(f"{c.dc_id}: parent_node {node}이(가) 이 세트에 쓰이는 후보가 아니다")
+            elif parent.planned_claim_no != c.parent_claim_no:
+                gaps.append(f"{c.dc_id}: parent_node {node}의 예정 항 제{parent.planned_claim_no}항과 부모 제{c.parent_claim_no}항이 다르다")
+            elif c.planned_claim_no is not None and parent.planned_claim_no is not None and parent.planned_claim_no >= c.planned_claim_no:
+                gaps.append(f"{c.dc_id}: 상위 노드 {node}의 항(제{parent.planned_claim_no}항)이 뒤 번호다")
+        if not (c.feature or "").strip():
+            gaps.append(f"{c.dc_id}: feature(추가 기술특징 요약) 없음")
+        if main and not (c.problem or "").strip():
+            gaps.append(f"{c.dc_id}: TECHNICAL_SOLUTION_CANDIDATE의 problem(과제) 없음")
+        if main and not (c.effect or "").strip():
+            gaps.append(f"{c.dc_id}: TECHNICAL_SOLUTION_CANDIDATE의 effect(효과) 없음")
+    return gaps
+
+
+# ----------------------------------------------------------------------------- invention-problem-finder (CLAUDE.md 0a)
+def _problem(env: RoleEnvelope, mode: RequestMode) -> bool:
+    # Non-gating: PASS (ONE_THING / SINGLE_PROBLEM / INDEPENDENT_PROBLEMS) or REVIEW (UNRESOLVED) both count as a record,
+    # as long as the role wrote a problem statement or a structure; the engine never stops on this role.
+    return env.execution_status == ExecStatus.RUN and env.status in (Status.PASS, Status.REVIEW) and bool((env.problem or "").strip() or env.problem_structure)
+
+
+CONTRACTS[("invention-problem-finder", Scope.INDEPENDENT)] = GateContract("invention-problem-finder", [], _problem, [])

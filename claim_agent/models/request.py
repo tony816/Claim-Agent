@@ -57,6 +57,10 @@ class RunRequest(BaseModel):
     # 08 §1.5·5.4: optional user business input (own product spec, competitor products, target implementers, roadmap).
     # It only ranks dependent candidates (BUSINESS_FIT); it is never invention material or a gate.
     business_context: str | None = None
+    # CLAUDE.md 0a: invention-problem-finder before the first architect call (None = claim-agent.yaml pipeline.problem_finding).
+    problem_finding: bool | None = None
+    # A problem the user already fixed (성공조건 0단계의 원띵 문서): the finder is skipped and this is the tree's top node.
+    user_problem: str | None = None
 
     @classmethod
     def from_yaml(cls, path: Path) -> RunRequest:

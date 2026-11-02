@@ -129,6 +129,13 @@ class CandidateItem(BaseModel):
     exam_pattern: str | None = None
     design_change_risk: str | None = None
     exam_pattern_basis: str | None = None
+    # CLAUDE.md 제12단계 청구항 트리 (dependent-claim-strategy-architect only): the node this candidate is in the
+    # 과제 → 1항 → 종속항(기능·구성·효과) tree. `parent_node` is ROOT or the DC-NN whose problem this one refines;
+    # `claim_tree_gaps` checks that `parent_claim_no` is that node's claim. The fallback axis leaves problem/effect null.
+    problem: str | None = None
+    feature: str | None = None
+    effect: str | None = None
+    parent_node: str | None = None
 
 
 class CitationFill(BaseModel):
@@ -215,6 +222,16 @@ class OpenIssue(BaseModel):
     return_to: str | None = None
 
 
+class DownstreamProblem(BaseModel):
+    """One downstream problem of the invention-problem-finder record (CLAUDE.md 0a): the dependent tree's problem material."""
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    text: str
+    source_location: str | None = None
+    basis: EvidenceBasis | None = None
+    explained_by_upstream: bool | None = None
+
+
 class RoleEnvelope(BaseModel):
     model_config = ConfigDict(extra="ignore")
     identifiers: EnvelopeIdentifiers = Field(default_factory=EnvelopeIdentifiers)
@@ -242,7 +259,9 @@ class RoleEnvelope(BaseModel):
     queries_ko: list[str] = Field(default_factory=list)
     queries_en: list[str] = Field(default_factory=list)
     provisional_elements: list[str] = Field(default_factory=list)
-    problem: str | None = None
+    problem: str | None = None   # prior-art-searcher: 과제 요지; invention-problem-finder·claim-architect: 최상류 과제 문장 (트리 꼭대기)
+    problem_structure: str | None = None   # invention-problem-finder: ONE_THING | SINGLE_PROBLEM | INDEPENDENT_PROBLEMS | UNRESOLVED
+    downstream_problems: list[DownstreamProblem] = Field(default_factory=list)
     screened: list[ScreenItem] = Field(default_factory=list)
     preexam_rows: list[PreexamRow] = Field(default_factory=list)
     doc_published: str | None = None
@@ -395,6 +414,10 @@ ENVELOPE_JSON_SCHEMA: dict[str, Any] = _obj(
                     "exam_pattern": _enum(list(EXAM_PATTERN_RISK), nullable=True, desc="10_심사이력_경험기준 유형(순위 신호, 게이트 아님)"),
                     "design_change_risk": _enum(_RISK3, nullable=True),
                     "exam_pattern_basis": _str("유형 분류의 원자료 근거 위치", nullable=True),
+                    "problem": _str("이 후보가 푸는 과제(상위 노드 과제의 세분); 보조 축은 null", nullable=True),
+                    "feature": _str("추가 기술특징(구성) 요약", nullable=True),
+                    "effect": _str("효과; 보조 축은 null", nullable=True),
+                    "parent_node": _str("ROOT 또는 이 후보의 과제가 세분하는 상위 후보의 DC-NN; parent_claim_no는 그 노드의 항", nullable=True),
                 },
                 ["dc_id", "classification"],
             )
@@ -425,7 +448,20 @@ ENVELOPE_JSON_SCHEMA: dict[str, Any] = _obj(
         "queries_ko": _arr(_str()),
         "queries_en": _arr(_str()),
         "provisional_elements": _arr(_str()),
-        "problem": _str("해결 과제 요지 한두 문장", nullable=True),
+        "problem": _str("해결 과제 요지 한두 문장 (invention-problem-finder·claim-architect: 해결수단이 들어가지 않은 최상류 과제 문장)", nullable=True),
+        "problem_structure": _enum(["ONE_THING", "SINGLE_PROBLEM", "INDEPENDENT_PROBLEMS", "UNRESOLVED"], nullable=True, desc="invention-problem-finder의 구조 판정"),
+        "downstream_problems": _arr(
+            _obj(
+                {
+                    "id": _str("D1, D2 …"),
+                    "text": _str("하류 문제 한 문장"),
+                    "source_location": _str("원자료 위치", nullable=True),
+                    "basis": _enum([b.value for b in EvidenceBasis], nullable=True),
+                    "explained_by_upstream": {"type": ["boolean", "null"], "description": "최상류 과제로 설명되는지"},
+                },
+                ["id", "text"],
+            )
+        ),
         "screened": _arr(_obj({"skey": _str(), "relevance": _enum(["높음", "중간", "낮음"]), "reason": _str()}, ["skey", "relevance"])),
         "preexam_rows": _arr(
             _obj(
@@ -494,13 +530,15 @@ ENVELOPE_JSON_SCHEMA: dict[str, Any] = _obj(
 # Prior-art and exam-history fields belong to a few roles only. Gemini rejects the union as too complex
 # (400 INVALID_ARGUMENT on the live run), so each role receives the shared fields plus its own.
 ROLE_EXTRA_FIELDS: dict[str, tuple[str, ...]] = {
-    "claim-architect": ("design_elements",),
+    "claim-architect": ("design_elements", "problem"),
+    "invention-problem-finder": ("problem", "problem_structure", "downstream_problems"),
     "dependent-claim-strategy-architect": ("citation_fills",),
     "prior-art-searcher": ("queries_ko", "queries_en", "provisional_elements", "problem", "screened"),
     "prior-art-pre-examiner": ("preexam_rows", "doc_published", "doc_field", "doc_summary", "novelty", "inventive_primary_doc",
                                "inventive_risk", "inventive_reason", "remaining_differences"),
 }
 CANDIDATE_EXAM_FIELDS = ("exam_pattern", "design_change_risk", "exam_pattern_basis")   # dependent-claim-strategy-architect only
+CANDIDATE_TREE_FIELDS = ("problem", "feature", "effect", "parent_node")                 # dependent-claim-strategy-architect only (청구항 트리)
 _ALL_EXTRA = {f for fields in ROLE_EXTRA_FIELDS.values() for f in fields}
 _ROLE_SCHEMAS: dict[str, dict[str, Any]] = {}
 
@@ -514,7 +552,7 @@ def envelope_schema_for(role: str) -> dict[str, Any]:
         for name in _ALL_EXTRA - set(ROLE_EXTRA_FIELDS.get(role, ())):
             schema["properties"].pop(name)
         if role != "dependent-claim-strategy-architect":
-            for name in CANDIDATE_EXAM_FIELDS:
+            for name in CANDIDATE_EXAM_FIELDS + CANDIDATE_TREE_FIELDS:
                 schema["properties"]["candidates"]["items"]["properties"].pop(name)
         if role != "prior-art-pre-examiner":
             schema["properties"]["gates"]["properties"].pop("PREEXAM_NOVELTY_GATE")

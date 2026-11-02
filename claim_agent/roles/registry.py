@@ -21,6 +21,7 @@ ROLE_NAMES = [
     "dependent-claim-strategy-architect",
     "prior-art-searcher",
     "prior-art-pre-examiner",
+    "invention-problem-finder",
 ]
 
 _FRONTMATTER = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)

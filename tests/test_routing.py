@@ -103,9 +103,9 @@ def test_chat_entry_runs_full_independent_and_dependent_harness(rt, request_inde
     expected = ["claim-architect", "claim-drafter", "claim-style-adjuster", "claim-success-reviewer",
                 "syntax-scope-reviewer", "oa-strategy-reviewer", "blind-claim-reconstruction-reviewer",
                 "picture-claim-reconstruction-reviewer"]
-    assert roles[:8] == expected
-    assert roles[8:14] == ["dependent-claim-strategy-architect", *expected[1:6]]
-    assert roles[14:] == expected[6:] * 3
+    assert roles[0] == "invention-problem-finder" and roles[1:9] == expected   # CLAUDE.md 0a: the problem finder runs once, first
+    assert roles[9:15] == ["dependent-claim-strategy-architect", *expected[1:6]]
+    assert roles[15:] == expected[6:] * 3
     for call in provider.calls:
         if call.role == "blind-claim-reconstruction-reviewer":
             assert call.sources_block == "" and not call.images and not call.use_cache
@@ -122,10 +122,10 @@ def test_failed_design_never_calls_drafter_or_plain_chat(rt, request_indep, tmp_
     folder.mkdir()
     request = request_data(request_indep)
     blocks, paths = intake(request, folder)
-    provider = ScriptedProvider({"claim-architect": [R.architect(locked=False)]})
+    provider = ScriptedProvider({"invention-problem-finder": [R.problem_finder()], "claim-architect": [R.architect(locked=False)]})
     result = run_pipeline(rt, provider, request, RouteDecision(mode="AUTHORING_DRAFT", reason="수정"), blocks, paths, folder)
     assert result["status"] == "review" and result["finish_reason"] == "PIPELINE_HALTED"
-    assert [c.role for c in provider.calls] == ["claim-architect"]
+    assert [c.role for c in provider.calls] == ["invention-problem-finder", "claim-architect"]
     assert not rt.store.load_state(result["run_id"]).candidate.draft_claim_lock
     halt = rt.store.load_state(result["run_id"]).halt
     assert "- 중지: " in result["answer"] and halt.report_markdown not in result["answer"]
@@ -179,7 +179,7 @@ def test_automatic_followup_preserves_id_and_rechecks_new_revision(rt, request_i
     assert result["run_id"] == previous.run_id
     assert current.candidate.revision == "r2" and current.candidate.design_revision == "d2"
     assert current.candidate.draft_claim_lock != old_lock
-    assert len([c for c in provider.calls if c.phase == "main"]) == 8
+    assert len([c for c in provider.calls if c.phase == "main"]) == 8   # the problem record is made once per run; a restart keeps it
     assert current.request["user_lock"] == previous.request["user_lock"]
 
 

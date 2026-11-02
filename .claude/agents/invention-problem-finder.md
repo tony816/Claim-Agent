@@ -22,6 +22,10 @@ color: yellow
 
 모든 호출에는 `problem_scope: INVENTION | CANDIDATE`, run 식별자(`CANDIDATE`이면 candidate_id도), 발명 원자료 텍스트 또는 정확한 경로, USER_LOCK 원문 또는 `없음`이 필수다. 도면은 작동을 이해하는 데 쓸 수 있다. 선택 입력은 사용자가 이미 적어 둔 과제 문장(`USER_PROBLEM`)과 이전 `problem_record_id`의 기록이다. 원자료가 없으면 `실행 상태: GATE_NOT_RUN`, `UNVERIFIED — INPUT_MISSING`으로 반환한다.
 
+## Python 엔진 실행
+
+웹·TUI의 Python 엔진도 이 역할을 돌린다. 새 독립항을 쓰는 run의 ARCHITECT 단계 안에서 첫 설계 호출 전에 한 번(`Stage.PROBLEM`, 기록 접두 `prb-`), `problem_scope: INVENTION`으로 호출되며 비게이팅이다. `상태: REVIEW`(UNRESOLVED)나 호출 실패도 run을 멈추지 않고 노트만 남긴다. `claim-agent.yaml`의 `pipeline.problem_finding: false`, 요청의 `problem_finding: false`, 요청문의 `problem_finding: off`, 또는 사용자가 확정한 `user_problem`이 있으면 생략된다. JSON 봉투에는 `problem`(해결수단이 들어가지 않은 최상류 과제 문장; `UNRESOLVED`이면 후보들을 ` / `로 이어 적음), `problem_structure`(ONE_THING | SINGLE_PROBLEM | INDEPENDENT_PROBLEMS | UNRESOLVED), `downstream_problems[]`(`id`·`text`·`source_location`·`basis`·`explained_by_upstream`)를 채운다. 기록 전문은 `claim-architect`(주골격 방향 참고)와 `dependent-claim-strategy-architect`(청구항 트리의 꼭대기 노드와 하류 과제 재료) 둘 다에 전달되며, 어느 쪽에서도 발명 원자료가 아니다.
+
 `sources/`의 기준 문서는 이 역할에 사전 로딩되지 않으며 읽을 필요가 없다. 기술 사실은 현재 발명의 원자료에서만 가져온다. 원자료에 없는 문제·원인·작동 원리·효과를 만들지 않고, 인과 고리가 원자료에 없으면 `근거 미확인`으로 둔다. 원자료가 문제를 직접 적지 않고 구성·작동만 적었다면 작동에서 거꾸로 추론한 문제는 `DERIVED`로 표시하고 근거 위치를 단다. 오케스트레이터가 WIPS로 검색한 선행기술 집합은 받지 않는다. 원자료 안에 적힌 종래기술 설명은 원자료로 쓴다.
 
 ## 작업 순서

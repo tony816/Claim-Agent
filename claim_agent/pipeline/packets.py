@@ -131,9 +131,43 @@ _GATE_DEDUCTION = _DEDUCTION.format(gate="FUNCTION_DEDUCTION_GATE")
 # nothing in any role contract fixes the header position, and every identifier is still in the packet.
 
 
-def architect(state: RunState, bundle: MaterialBundle, ids: Identifiers, record_id: str, request_text: str, redesign_goal: str | None) -> Packet:
+PROBLEM_RECORD_TITLE = "최상류 과제 기록 전문 (invention-problem-finder — 발명 원자료 아님; 주골격·종속항 과제 트리의 방향 참고, 비게이팅)"
+USER_PROBLEM_TITLE = "사용자가 확정한 과제 (USER_PROBLEM — 성공조건 0단계의 원띵 문서에 해당하는 생성 방향 입력; 원자료 아님)"
+
+
+def _problem_inputs(state: RunState, store, problem_record_id: str | None, user_problem: str | None) -> str:
+    """The problem node every design reads (CLAUDE.md 0a·1·12): the finder's record, the user's fixed problem, or neither."""
+    txt = ""
+    if user_problem and user_problem.strip():
+        txt += _section(USER_PROBLEM_TITLE, user_problem.strip())
+    if problem_record_id:
+        txt += _report(state, store, problem_record_id, PROBLEM_RECORD_TITLE)
+    elif not (user_problem and user_problem.strip()):
+        txt += _section("최상류 과제 기록", "없음 (problem_finding off 또는 실행 안 됨) — 과제는 원자료에서 직접 정하고 그 위치를 적는다.")
+    return txt
+
+
+def problem_finder(state: RunState, bundle: MaterialBundle, ids: Identifiers, record_id: str, request_text: str, user_problem: str | None) -> Packet:
+    """invention-problem-finder (CLAUDE.md 0a): the top upstream problem, once per run, before the first architect call."""
+    mats, imgs = _materials(bundle, ("invention", "drawing", "spec"))
+    txt = _user_lock(bundle) + mats
+    txt += _hdr(state, ids, record_id, {"problem_scope": "INVENTION", "problem_record_id": record_id})
+    txt += _section("현재 요청", request_text)
+    if user_problem and user_problem.strip():
+        txt += _section("USER_PROBLEM (사용자가 이미 적어 둔 과제 문장 — 덮어쓰지 말고 나란히 둔다)", user_problem.strip())
+    txt += _output_contract("`problem`에 해결수단이 들어가지 않은 최상류 과제 문장(`UNRESOLVED`이면 후보들을 ` / `로 이어 적음), `problem_structure`에 "
+                            "ONE_THING/SINGLE_PROBLEM/INDEPENDENT_PROBLEMS/UNRESOLVED, `downstream_problems[]`에 하류 문제표(`id`·`text`·`source_location`·"
+                            "`basis`·`explained_by_upstream`)를 채운다. 하류 문제는 종속항 과제 트리의 재료다. 청구항 문언은 만들지 않는다. "
+                            "`status`는 PASS(ONE_THING·SINGLE_PROBLEM·INDEPENDENT_PROBLEMS) 또는 REVIEW(UNRESOLVED)이며 어느 쪽도 run을 멈추지 않는다.")
+    return Packet(txt, imgs)
+
+
+def architect(state: RunState, bundle: MaterialBundle, ids: Identifiers, record_id: str, request_text: str, redesign_goal: str | None,
+              store=None, problem_record_id: str | None = None, user_problem: str | None = None) -> Packet:
     mats, imgs = _materials(bundle, ("invention", "drawing", "spec", "prior_art"))
     txt = _user_lock(bundle) + mats
+    if store is not None:
+        txt += _problem_inputs(state, store, problem_record_id, user_problem)
     txt += _hdr(state, ids, record_id)
     txt += _section("현재 요청", request_text)
     if bundle.claim_file_text():
@@ -141,7 +175,9 @@ def architect(state: RunState, bundle: MaterialBundle, ids: Identifiers, record_
     if redesign_goal:
         txt += _section("설계 변경 목표 (새 design_revision)", redesign_goal)
     txt += _output_contract("`gates.DESIGN_GATE`에 LOCKED/UNLOCKED, `invention_type`에 발명 유형을, `design_elements[]`에 주골격 명제와 독립항 최소충분 한정을 "
-                            "`E1, E2 …` 요소로 나누어(종류·요지·독립항 포함 여부·원자료 근거 위치·근거 유형) 적는다.")
+                            "`E1, E2 …` 요소로 나누어(종류·요지·독립항 포함 여부·원자료 근거 위치·근거 유형) 적는다. "
+                            "`problem`에는 이 독립항이 푸는 최상류 과제 문장(과제 기록·USER_PROBLEM을 따랐으면 그 문장, 다르게 정했으면 그 문장과 이유를 보고서 `과제 기록 대조`에)을 적는다. "
+                            "이 문장은 청구항 트리의 꼭대기 노드가 되며 원자료가 아니다.")
     return Packet(txt, imgs)
 
 
@@ -354,9 +390,17 @@ def stop_rewake_section(problem: str, attempt: int, prior_report: str) -> str:
                     "#### 직전 출력 보고서\n\n" + prior_report)
 
 
+TREE_CONTRACT = (" 청구항 트리(CLAUDE.md 제12단계, 05 §1.1a): 후보마다 `problem`(이 후보가 푸는 과제; 보조 축은 null), `feature`(추가 기술특징·구성 요약), "
+                 "`effect`(효과; 보조 축은 null), `parent_node`(`ROOT` 또는 이 후보의 과제가 세분하는 상위 후보의 `DC-NN`)를 채운다. `parent_node`가 `DC-NN`이면 "
+                 "`parent_claim_no`는 그 후보의 `planned_claim_no`와 같아야 하고, `ROOT`이면 `parent_claim_no`는 독립항(기존 세트 편집에서는 읽기 전용 체인의 항)이다. "
+                 "상위 노드의 과제를 세분하는 후보는 그 노드의 항을 부모로 삼고, 선행 용어가 1항에 다 있다는 이유로 1항으로 끌어올리지 않는다.")
+
+
 def dep_architect(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_design_record_id: str, root_text: str, request_text: str, redesign_goal: str | None,
-                  target_nos: set[int] | None = None, scope_repair: str | None = None, business_context: str | None = None) -> Packet:
+                  target_nos: set[int] | None = None, scope_repair: str | None = None, business_context: str | None = None,
+                  problem_record_id: str | None = None, user_problem: str | None = None) -> Packet:
     txt, imgs = _dependent_stable(state, store, bundle, root_lock_id, root_design_record_id, ("invention", "drawing", "spec", "prior_art"))
+    txt += _problem_inputs(state, store, problem_record_id, user_problem)
     txt += _hdr(state, ids, record_id, {"dependent_target_claim_nos": ", ".join(map(str, sorted(target_nos)))} if target_nos else None)
     txt += _section("현재 요청 (종속항 세트)", request_text)
     txt += _section("BUSINESS_CONTEXT (사용자 제공 사업 입력 — 발명 원자료·한정 근거 아님, BUSINESS_FIT 순위 신호에만 사용)",
@@ -366,11 +410,11 @@ def dep_architect(state: RunState, store, bundle: MaterialBundle, ids: Identifie
     if redesign_goal:
         txt += _section("종속항 설계 변경 목표", redesign_goal)
     if scope_repair:
-        txt += _section("번호 계약 위반 복구 (1회)", f"직전 설계가 번호 계약을 어겨 중지되었다: {scope_repair}\n"
-                        "예정 항 번호와 부모항을 아래 출력 계약의 번호 집합·인용관계와 정확히 일치시켜 다시 설계한다.")
+        txt += _section("번호 계약 위반 복구 (1회)", f"직전 설계가 번호 또는 청구항 트리 계약을 어겨 중지되었다: {scope_repair}\n"
+                        "예정 항 번호·부모항·상위 노드를 아래 출력 계약의 번호 집합·인용관계·트리 규칙과 정확히 일치시켜 다시 설계한다.")
     txt += _section(_root_label(state)[1], root_text)
     txt += _output_contract("`gates.DEPENDENT_DESIGN_GATE`, `gates.INVENTIVE_STEP`, `candidates[]`(DC-NN별 분류·네 후보 게이트(DEPENDENT_SOURCE·CAUSAL_CONTRIBUTION·CLAIMABILITY·ENFORCEMENT_VALUE)·`enforcement_scenario`·`enforcement_failed_tests`·`business_fit`·`business_fit_basis`·예정 항·부모항과 10_심사이력_경험기준의 `exam_pattern`·`design_change_risk`·`exam_pattern_basis`)를 채운다. TECHNICAL_SOLUTION_CANDIDATE는 네 후보 게이트가 모두 PASS이고 `enforcement_scenario`가 비어 있지 않아야 한다. 보조 축 FALLBACK_ONLY는 `planned_claim_no`를 갖고 DEPENDENT_SOURCE·CLAIMABILITY가 PASS여야 한다."
-                            + _number_contract(state, target_nos))
+                            + TREE_CONTRACT + _number_contract(state, target_nos))
     return Packet(txt, imgs)
 
 

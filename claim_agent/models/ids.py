@@ -76,6 +76,7 @@ RECORD_PREFIX = {
     "prior_art_set": "pset",
     "preexam_compare": "pec",
     "preexam_judge": "pej",
+    "problem": "prb",
 }
 
 
@@ -107,7 +108,7 @@ def record_id(kind: str, ids: Identifiers, seq: int = 1) -> str:
     """Deterministic record id for a record kind and identifier set."""
     prefix = RECORD_PREFIX[kind]
     nn = f"{seq:02d}"
-    if kind in {"design", "preexam_judge"}:
+    if kind in {"design", "preexam_judge", "problem"}:
         return f"{prefix}-{ids.candidate_id}-{ids.design_revision}-{nn}"
     if kind == "preexam_compare":
         # One per document of the sealed set (D1, D2 …).

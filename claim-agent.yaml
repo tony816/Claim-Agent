@@ -43,6 +43,9 @@ roles:
   blind-claim-reconstruction-reviewer:   {thinking_level: MEDIUM, temperature: 0.7, cache: false, tools: false}
   picture-claim-reconstruction-reviewer: {thinking_level: HIGH,   temperature: 0.1}
   dependent-claim-strategy-architect:    {thinking_level: HIGH,   temperature: 0.2}
+  # Top upstream problem (CLAUDE.md 0a, 원띵): one non-gating call before the first architect call; its record is a
+  # direction input for the architect and the problem node the dependent design hangs its tree on.
+  invention-problem-finder:              {thinking_level: HIGH,   temperature: 0.2}
   # Prior-art search (검색 문장·Jev 실패 시 선별) and pre-exam (문헌별 대비·종합 판단), docs/선행기술조사_사전심사_설계_2026-10.md
   prior-art-searcher:                    {thinking_level: MEDIUM, temperature: 0.2}
   prior-art-pre-examiner:                {thinking_level: HIGH,   temperature: 0.1}
@@ -62,6 +65,7 @@ pipeline:
   max_return_loops: {STYLE_ONLY: 2, DRAFTER: 2, ARCHITECT: 1, DEPENDENT_ARCHITECT: 1, PREEXAM: 2}
   max_concurrency: 3
   expand_multi_dependent: false
+  problem_finding: true     # CLAUDE.md 0a: invention-problem-finder before the first architect call (non-gating); request `problem_finding: off` skips it
   retry: {max_attempts: 3, backoff_s: [2, 8, 20]}
   # Budget guard (null = unlimited). Checked before every call; the run halts with HALTED_BUDGET_LIMIT.
   # Continuing a budget halt (chat '재개' or `claim-agent resume <run_id>`) counts the caps afresh from that point.

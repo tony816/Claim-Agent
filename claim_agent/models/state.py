@@ -17,6 +17,7 @@ class Stage(str, Enum):  # noqa: UP042
     PRIOR_SCREEN = "PRIOR_SCREEN"
     PRIOR_FETCH = "PRIOR_FETCH"
     PRIOR_TRIM = "PRIOR_TRIM"
+    PROBLEM = "PROBLEM"          # invention-problem-finder (CLAUDE.md 0a): non-gating, runs inside the ARCHITECT step
     ARCHITECT = "ARCHITECT"
     PRE_EXAM = "PRE_EXAM"
     DRAFT = "DRAFT"
@@ -92,6 +93,10 @@ class CandidateState(BaseModel):
     # design revisions keyed by "<doc sha256>:<element text sha256>" (설계 5.5).
     preexam_record_id: str | None = None
     preexam_rows: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    # CLAUDE.md 0a: the top upstream problem record (invention-problem-finder), made once per run before the first
+    # architect call; non-gating. `problem_skipped` remembers that the step was turned off or failed, so it never reruns.
+    problem_record_id: str | None = None
+    problem_skipped: bool = False
 
 
 class TargetRecon(BaseModel):
@@ -140,6 +145,8 @@ class DependentSetState(BaseModel):
     final_set_lock: str | None = None
     loop_counts: dict[str, int] = Field(default_factory=dict)
     stale: bool = False
+    # 최상류 과제 → 1항 → 종속항(기능·구성·효과) tree drawn from the sealed design records (claim_tree.py); a record, not a gate.
+    claim_tree: str | None = None
 
 
 class BaselineClaim(BaseModel):

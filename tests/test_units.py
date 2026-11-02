@@ -192,7 +192,7 @@ def test_feedback_report_from_runs(rt, request_indep):
     engine2 = rt.engine(ScriptedProvider(R.happy_script(dependent=False)))
     engine2.run(engine2.start(request_indep, "run-fb-02"))
     rep = build_feedback(rt.cfg.path("runs_dir"))
-    assert rep.runs == 2 and rep.calls == 18  # 10 (one drafter return loop) + 8
+    assert rep.runs == 2 and rep.calls == 20  # 11 (problem finder + one drafter return loop) + 9
     assert rep.return_flows[("claim-style-adjuster", "RETURN_TO_DRAFTER")] == 1
     md = rep.render_md()
     assert "역할별 비용·지연" in md and "DRAFT_CLAIM_LOCK" in md

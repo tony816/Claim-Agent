@@ -91,6 +91,9 @@ class PipelineConfig(BaseModel):
     )
     max_concurrency: int = 3
     expand_multi_dependent: bool = False
+    # CLAUDE.md 0a: run invention-problem-finder once before the first architect call (non-gating). A request can turn it
+    # off (`problem_finding: false`, or `problem_finding: off` in its text) or replace it with a fixed `user_problem`.
+    problem_finding: bool = True
     retry: RetryConfig = Field(default_factory=RetryConfig)
     # Budget guard: a run halts with HALTED_BUDGET_LIMIT when any limit is exceeded (None = unlimited). Continuing a
     # budget halt counts the limits afresh from that point (RunState.budget_base).

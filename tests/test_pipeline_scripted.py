@@ -23,7 +23,7 @@ def test_independent_happy_path_draft_lock(rt, request_indep):
     assert state.outcome == "DRAFT_CLAIM_LOCK", state.halt
     assert state.candidate.draft_claim_lock == "dcl-clip-holder-r1-01"
     kinds = [r.kind for r in state.records.values()]
-    assert kinds == ["design", "meaning_draft", "style", "success", "syntax", "oa", "blind", "reference_compare", "draft_claim_lock"]
+    assert kinds == ["problem", "design", "meaning_draft", "style", "success", "syntax", "oa", "blind", "reference_compare", "draft_claim_lock"]
     # blind call: no sources, no cache, only the closed packet
     blind_call = next(c for c in prov.calls if c.role == "blind-claim-reconstruction-reviewer")
     assert blind_call.sources_block == "" and blind_call.use_cache is False
@@ -38,7 +38,7 @@ def test_independent_happy_path_draft_lock(rt, request_indep):
     report = (run_dir / "report.md").read_text(encoding="utf-8")
     assert "명세서 뒷받침·실시가능성 미검증 잠정안" in report and "【청구항 1】" in report
     rows = read_telemetry(run_dir / "telemetry.jsonl")
-    assert len([r for r in rows if r["phase"] == "main"]) == 8
+    assert len([r for r in rows if r["phase"] == "main"]) == 9   # problem finder + 8 gated roles
     assert [r["phase"] for r in rows if r["phase"] != "main"] == ["tool_phase"]  # style adjuster asked for no corpus search
     assert all(R.ROOT_CLAIM[:20] not in json.dumps(r, ensure_ascii=False) for r in rows)
 

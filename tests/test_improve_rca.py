@@ -25,8 +25,8 @@ def test_rca_localizes_the_returning_style_record(rt, request_indep):
 
     rep = build_rca(rt.store, "run-rca-01")
     stages = [s.stage for s in rep.trace]
-    assert stages[:4] == ["ARCHITECT", "DRAFT", "STYLE", "DRAFT"]          # 되돌아간 순서가 그대로 보인다
-    assert rep.trace[1].superseded and rep.trace[1].record_id == "md-clip-holder-r1-01"
+    assert stages[:5] == ["PROBLEM", "ARCHITECT", "DRAFT", "STYLE", "DRAFT"]          # 되돌아간 순서가 그대로 보인다 (과제 탐색이 맨 앞)
+    assert rep.trace[2].superseded and rep.trace[2].record_id == "md-clip-holder-r1-01"
     assert rep.loop_waste_calls >= 1 and rep.loop_waste_tokens > 0
     assert any("RETURN_TO_DRAFTER" in t for t in rep.transitions)
     assert any("revision r1 → 폐기" in t for t in rep.transitions)

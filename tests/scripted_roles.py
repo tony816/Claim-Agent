@@ -23,6 +23,19 @@ DEP_CLAIMS = [
     (4, 3, "DC-03", "【청구항 4】\n제3항에 있어서,\n상기 조임 나사의 끝단이 상기 책상 하면을 누를 때 상기 상판이 책상 상면에 밀착되는 케이블 클립 홀더."),
 ]
 DEP_SET_TEXT = "\n\n".join(t for _, _, _, t in DEP_CLAIMS)
+# 청구항 트리 (CLAUDE.md 제12단계): claims 2 and 3 refine the root problem, claim 4 refines claim 3's problem (DC-02).
+def tree_node(dc: str, parent_no: int | None) -> dict[str, str]:
+    """The candidate's problem node: the DEP_CLAIMS entry its parent claim belongs to, else ROOT; texts from TREE_NODE."""
+    node = next((d for n, _, d, _ in DEP_CLAIMS if n == parent_no), "ROOT")
+    texts = TREE_NODE.get(dc) or {"problem": f"{dc} 과제", "feature": f"{dc} 구성", "effect": f"{dc} 효과"}
+    return {**texts, "parent_node": node}
+
+
+TREE_NODE = {
+    "DC-01": {"parent_node": "ROOT", "problem": "슬롯에 끼운 클립이 진동으로 빠진다", "feature": "슬롯 입구 양측의 탄성 리브", "effect": "클립이 리브에 걸려 이탈하지 않는다"},
+    "DC-02": {"parent_node": "ROOT", "problem": "클램프부가 조임 하중에 벌어진다", "feature": "상판과 하판을 잇는 연결판", "effect": "조임 하중이 상판으로 전달된다"},
+    "DC-03": {"parent_node": "DC-02", "problem": "조임 때 상판이 책상 상면에서 들뜬다", "feature": "조임 나사 끝단이 책상 하면을 누를 때 상판이 책상 상면에 밀착", "effect": "클램프가 책상에 고정된다"},
+}
 
 
 def _hdr(spec: CallSpec, key: str) -> str | None:
@@ -164,15 +177,28 @@ def picture(status: str = "PASS", return_to: str | None = None) -> Callable[[Cal
 def dep_architect(locked: bool = True, tsc: bool = True, enforcement: str = "PASS", fallback: bool = False) -> Callable[[CallSpec], dict]:
     def f(spec: CallSpec) -> dict:
         scenario = lambda dc: f"{dc} 실시품 제조·판매 시 분해로 확인" if enforcement == "PASS" else None  # noqa: E731
-        cands = [{"dc_id": dc, "classification": "FALLBACK_ONLY" if fallback else "TECHNICAL_SOLUTION_CANDIDATE" if tsc else "DRAWING_ONLY", "DEPENDENT_SOURCE_GATE": "PASS", "CAUSAL_CONTRIBUTION_GATE": "PASS", "CLAIMABILITY_GATE": "PASS", "ENFORCEMENT_VALUE_GATE": enforcement, "enforcement_scenario": scenario(dc), "PRIOR_ART_CONTRIBUTION_GATE": "UNVERIFIED", "planned_claim_no": n, "parent_claim_no": p} for n, p, dc, _ in DEP_CLAIMS]
+        cands = [{"dc_id": dc, "classification": "FALLBACK_ONLY" if fallback else "TECHNICAL_SOLUTION_CANDIDATE" if tsc else "DRAWING_ONLY", "DEPENDENT_SOURCE_GATE": "PASS", "CAUSAL_CONTRIBUTION_GATE": "PASS", "CLAIMABILITY_GATE": "PASS", "ENFORCEMENT_VALUE_GATE": enforcement, "enforcement_scenario": scenario(dc), "PRIOR_ART_CONTRIBUTION_GATE": "UNVERIFIED", "planned_claim_no": n, "parent_claim_no": p, **tree_node(dc, p)} for n, p, dc, _ in DEP_CLAIMS]
         if not locked or not tsc:
             return _base(spec, "BLOCK", {"DEPENDENT_DESIGN_GATE": "UNLOCKED", "INVENTIVE_STEP": "UNVERIFIED"}, ["- DEPENDENT_DESIGN_GATE: UNLOCKED — NO_TECHNICAL_SOLUTION_CANDIDATE"], reason_code="NO_TECHNICAL_SOLUTION_CANDIDATE", candidates=cands, next_step="STOP")
         return _base(spec, "PASS", {"DEPENDENT_DESIGN_GATE": "LOCKED", "INVENTIVE_STEP": "UNVERIFIED"}, ["- INVENTIVE_STEP: UNVERIFIED — PRIOR_ART_NOT_PROVIDED"], candidates=cands)
     return f
 
 
+def problem_finder(structure: str = "ONE_THING") -> Callable[[CallSpec], dict]:
+    """invention-problem-finder (CLAUDE.md 0a): non-gating; REVIEW with UNRESOLVED never stops the run."""
+    def f(spec: CallSpec) -> dict:
+        status = "REVIEW" if structure == "UNRESOLVED" else "PASS"
+        return _base(spec, status, {}, [f"- 구조: {structure}", "- [최상류 과제] 책상 가장자리에 걸어 둔 홀더에서 케이블 클립이 흔들림으로 빠지는 것"],
+                     problem="책상 가장자리에 걸어 둔 홀더에서 케이블 클립이 흔들림으로 빠지는 것", problem_structure=structure,
+                     downstream_problems=[{"id": "D1", "text": "클립이 슬롯에서 빠진다", "source_location": "invention.md §2", "basis": "DIRECT", "explained_by_upstream": True},
+                                          {"id": "D2", "text": "홀더가 책상에서 밀린다", "source_location": "invention.md §3", "basis": "DERIVED", "explained_by_upstream": True}],
+                     next_step="PROCEED" if status == "PASS" else "USER_DECISION")
+    return f
+
+
 def happy_script(dependent: bool = True, n_targets: int = 3) -> dict[str, list]:
     s = {
+        "invention-problem-finder": [problem_finder()],
         "claim-architect": [architect()],
         "claim-drafter": [drafter("INDEPENDENT")] + ([drafter("DEPENDENT_SET")] if dependent else []),
         "claim-style-adjuster": [style("INDEPENDENT")] + ([style("DEPENDENT_SET")] if dependent else []),

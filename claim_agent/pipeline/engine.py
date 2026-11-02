@@ -1,6 +1,7 @@
 """PipelineEngine: deterministic orchestration of the 19-step CLAUDE.md pipeline."""
 from __future__ import annotations
 
+import re
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -12,7 +13,7 @@ from ..config import AppConfig
 from ..graph.claims import ClaimGraph, ClaimGraphError
 from ..graph.claims import open_from_config as open_claim_graph
 from ..graph.pipeline import GraphHooks
-from ..models.contracts import contract_for, fallback_gate_gaps, main_tree_gate_gaps, set_candidates
+from ..models.contracts import claim_tree_gaps, contract_for, fallback_gate_gaps, main_tree_gate_gaps, set_candidates
 from ..models.enums import CandidateClass, ExecStatus, NextStep, RequestMode, Scope, Status, StyleChangeMode
 from ..models.envelope import OpenIssue, RoleEnvelope, envelope_schema_for
 from ..models.ids import Identifiers, bump_dependent_design_revision, bump_dependent_revision, bump_design_revision, bump_revision, input_revision_id, record_id
@@ -40,6 +41,7 @@ from ..store.runstore import RunStore
 from ..store.telemetry import TelemetryRow, TelemetryWriter, estimate_cost, now, usage_row
 from . import packets
 from .blind_guard import BlindPacket
+from .claim_tree import render_claim_tree
 from .claimtext import (
     ClaimParseError,
     MultiDependentChain,
@@ -78,6 +80,7 @@ from .style_profile import StyleProfile, drift, render_target, target_profile
 from .transitions import LOOP_KEY, Transition, decide, inadmissible_stop
 
 ROLE_BY_STAGE = {
+    Stage.PROBLEM: "invention-problem-finder",
     Stage.ARCHITECT: "claim-architect",
     Stage.DRAFT: "claim-drafter",
     Stage.STYLE: "claim-style-adjuster",
@@ -767,6 +770,12 @@ class PipelineEngine(PriorArtSteps):
             evidence_problem = "MAIN_TREE_GATE_GAP: 세트 후보의 필수 게이트 PASS 또는 권리행사 시나리오가 없음: " + "; ".join(tree_gaps)
             unconfirmed = tree_gaps
             issued = False
+        if stage == Stage.DEP_ARCHITECT and env.status == Status.PASS and not tree_gaps and not scope_problem:
+            # CLAUDE.md 제12단계 청구항 트리: every written candidate names the problem node it refines, and its parent claim
+            # is that node's claim. A miss is a design contract fault, repaired once like the number contract.
+            hierarchy = claim_tree_gaps(env)
+            if hierarchy:
+                scope_problem = "CLAIM_TREE_CONTRACT: " + "; ".join(hierarchy)
         if scope_problem:
             issued = False
         if (stage == Stage.DEP_ARCHITECT and issued and contract.passes(env, state.request_mode)
@@ -803,6 +812,8 @@ class PipelineEngine(PriorArtSteps):
             "per_claim_gates": [g.model_dump() for g in env.per_claim_gates], "open_issues": [o.model_dump() for o in env.open_issues],
             "limitation_evidence": [e.model_dump(mode="json") for e in env.limitation_evidence], "evidence_problem": evidence_problem,
             "design_elements": [e.model_dump(mode="json") for e in env.design_elements],
+            "problem": env.problem, "problem_structure": env.problem_structure,
+            "downstream_problems": [p.model_dump(mode="json") for p in env.downstream_problems],
             "preexam_rows": [r.model_dump(mode="json") for r in env.preexam_rows], "novelty": [n.model_dump(mode="json") for n in env.novelty],
             "remaining_differences": [r.model_dump(mode="json") for r in env.remaining_differences],
             "inventive_risk": env.inventive_risk.value if env.inventive_risk else None, "inventive_primary_doc": env.inventive_primary_doc,
@@ -1091,6 +1102,43 @@ class PipelineEngine(PriorArtSteps):
                 self._dependent_step(state, bundle)
             self.store.save_state(state)
 
+    # ------------------------------------------------------------------ problem (CLAUDE.md 0a)
+    def _problem_wanted(self, req: RunRequest) -> bool:
+        """Off by config, by the request (`problem_finding: false` or `problem_finding: off` in its text), or when the user fixed the problem."""
+        if req.problem_finding is False or (req.problem_finding is None and not self.cfg.pipeline.problem_finding):
+            return False
+        if req.user_problem and req.user_problem.strip():
+            return False
+        return not re.search(r"problem_finding\s*[:=]\s*off", req.request_text or "", re.IGNORECASE)
+
+    def _problem_step(self, state: RunState, bundle: MaterialBundle, req: RunRequest, ids: Identifiers) -> None:
+        """invention-problem-finder once per run, before the first architect call. Non-gating: its record is a direction
+        input for the architect and the problem node of the dependent tree; a failed or REVIEW call never stops the run."""
+        c = state.candidate
+        if c.problem_record_id or c.problem_skipped:
+            return
+        if not self._problem_wanted(req):
+            c.problem_skipped = True
+            state.notes.append("과제 탐색: 생략 — " + ("사용자가 과제를 확정함 (USER_PROBLEM)" if req.user_problem and req.user_problem.strip() else "problem_finding off"))
+            return
+        rid = record_id("problem", ids)
+        pk = packets.problem_finder(state, bundle, ids, rid, req.request_text, req.user_problem)
+        try:
+            env, _ = self._call(state, "invention-problem-finder", Scope.INDEPENDENT, Stage.PROBLEM, "problem", pk, ids, rid)
+        except PipelineHalt as ph:
+            if ph.halt.kind == "BUDGET_LIMIT":
+                raise
+            c.problem_skipped = True
+            state.notes.append(f"과제 탐색: 실행 안 됨 ({ph.halt.kind}: {ph.halt.message}) — 비게이팅이므로 설계는 원자료만으로 진행")
+            return
+        except ProviderError as exc:
+            c.problem_skipped = True
+            state.notes.append(f"과제 탐색: 실행 안 됨 (provider: {exc}) — 비게이팅이므로 설계는 원자료만으로 진행")
+            return
+        c.problem_record_id = rid
+        head = (env.problem or "").strip().splitlines()[0][:100] if (env.problem or "").strip() else "과제 문장 없음"
+        state.notes.append(f"과제 탐색 ({rid}): {env.problem_structure or env.status.value} — {head}")
+
     # ------------------------------------------------------------------ independent
     def _independent_step(self, state: RunState, bundle: MaterialBundle) -> None:
         c = state.candidate
@@ -1098,9 +1146,10 @@ class PipelineEngine(PriorArtSteps):
         req = RunRequest.model_validate(state.request)
         if st == Stage.ARCHITECT:
             ids = Identifiers(c.candidate_id, c.revision, c.design_revision, input_revision=state.input_revision)
+            self._problem_step(state, bundle, req, ids)
             rid = record_id("design", ids)
             goal = next((n.split(": ", 1)[1] for n in reversed(state.notes) if n.startswith(f"설계 변경 목표 ({c.design_revision})")), None)
-            pk = packets.architect(state, bundle, ids, rid, req.request_text, goal)
+            pk = packets.architect(state, bundle, ids, rid, req.request_text, goal, store=self.store, problem_record_id=c.problem_record_id, user_problem=req.user_problem)
             pk.text = self.graph_hooks.architect_packet(state, bundle, pk.text)
             env, ref = self._call(state, "claim-architect", Scope.INDEPENDENT, st, "design", pk, ids, rid, loop_index=c.loop_counts.get("ARCHITECT", 0))
             tr = self._decide(state, env, "claim-architect", Scope.INDEPENDENT, st, rid, c.loop_counts)
@@ -1414,26 +1463,29 @@ class PipelineEngine(PriorArtSteps):
             # Asked for with no number: each design numbers its claims anew, so an earlier design's numbers bind nothing.
             targets = None if by_design else parse_target(req.dependent_target)
             loop = d.loop_counts.get("DEPENDENT_ARCHITECT", 0)
+            problem_kw = dict(problem_record_id=c.problem_record_id, user_problem=req.user_problem)
             pk = packets.dep_architect(state, self.store, bundle, ids, rid, d.root_lock_id, c.design_record_id or "", root_text, req.request_text, goal, targets,
-                                       business_context=req.business_context)
+                                       business_context=req.business_context, **problem_kw)
             pk.text = self.graph_hooks.dependent_packet(state, bundle, pk.text)
             try:
                 env, ref = self._call(state, "dependent-claim-strategy-architect", Scope.DEPENDENT_SET, st, "dependent_design", pk, ids, rid, loop_index=loop)
             except PipelineHalt as ph:
-                if not ((targets or by_design) and ph.halt.message.startswith("REQUEST_SCOPE_MISMATCH")):
+                tree_miss = "CLAIM_TREE_CONTRACT" in ph.halt.message
+                if not (((targets or by_design) or tree_miss) and ph.halt.message.startswith("REQUEST_SCOPE_MISMATCH")):
                     raise
-                # Fail fast on numbering: one repair call that restates the number contract; a second miss stops here,
-                # before any drafting, instead of after the rest of the pipeline has run.
+                # Fail fast on numbering and on the claim tree: one repair call that restates the contract; a second miss
+                # stops here, before any drafting, instead of after the rest of the pipeline has run.
                 state.records[rid].superseded = True
                 rid = record_id("dependent_design", ids, seq=2)
                 pk = packets.dep_architect(state, self.store, bundle, ids, rid, d.root_lock_id, c.design_record_id or "", root_text, req.request_text, goal, targets,
-                                           scope_repair=ph.halt.message, business_context=req.business_context)
+                                           scope_repair=ph.halt.message, business_context=req.business_context, **problem_kw)
                 pk.text = self.graph_hooks.dependent_packet(state, bundle, pk.text)
                 env, ref = self._call(state, "dependent-claim-strategy-architect", Scope.DEPENDENT_SET, st, "dependent_design", pk, ids, rid, loop_index=loop)
             tr = self._decide(state, env, "dependent-claim-strategy-architect", Scope.DEPENDENT_SET, st, rid, d.loop_counts)
             if tr.kind == "RETURN":
                 self._apply_return(state, tr, env, rid, dependent=True)
                 return
+            d.claim_tree = render_claim_tree(state, self.store, env, root_text)
             if base and base.cites_by_design and not base.cites_filled:
                 self._seal_design_fills(state, env)
             planned = sorted(x.planned_claim_no for x in set_candidates(env) if x.planned_claim_no)

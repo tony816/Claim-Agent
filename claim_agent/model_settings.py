@@ -18,7 +18,7 @@ from .roles.registry import ROLE_NAMES
 # it has no role file, but the user picks its model here like any other (claim-agent.yaml roles.conversation-moderator).
 SETTINGS_ROLES = [*ROLE_NAMES, MODERATOR]
 ROLE_LABELS = ["독립항 설계", "의미 초안 작성", "용어·스타일 조정", "성공조건 검수", "통사·범위 검수", "OA 전략 검수", "블라인드 복원", "도면·기준 비교", "종속항 전략 설계", "선행기술 검색 문장", "사전 심사",
-               "대화 모더레이터 (요청 분류·답변)"]
+               "최상류 과제 탐색", "대화 모더레이터 (요청 분류·답변)"]
 PROVIDERS = {
     "gemini": {"label": "Gemini · API 키", "models": []},     # models.list로 채운다(model_catalog)
     # CLI가 받는 별칭 프리셋(`claude --model`, 별칭은 늘 최신판)과 최신 정확 ID. Claude CLI에는 모델 목록 명령이 없다.

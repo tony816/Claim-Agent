@@ -317,14 +317,24 @@ def _root_section(state: RunState, root_text: str | None) -> list[str]:
     return [no_lock_line(state), "", f"### {unlocked_label(state)}: 독립항", "", root_text, ""]
 
 
+def _tree_lines(state: RunState) -> list[str]:
+    """The 과제 → 1항 → 종속항(기능·구성·효과) tree drawn from the accepted dependent design (a record, not a gate)."""
+    dep = state.dependent
+    if not (dep and dep.claim_tree):
+        return []
+    return ["### 청구항 트리 (최상류 과제 → 1항 → 종속항 기능·구성·효과; 설계 기록에서 그림, 게이트 아님)", "", "```text", dep.claim_tree, "```", ""]
+
+
 def _dependent_section(state: RunState) -> list[str]:
     dep = state.dependent
     text = (dep.current.exact_text if dep.current and dep.current.exact_text else None) or "종속항 문언 없음"
     dl = dep.final_set_lock or dep.draft_set_lock
     if dl:
         lock = ("FINAL_DEPENDENT_SET_LOCK " if dep.final_set_lock else "DRAFT_DEPENDENT_SET_LOCK ") + dl
-        return [f"### 종속항 세트 ({lock}; {'출원용 최종 종속항 세트' if dep.final_set_lock else PROVISIONAL_LABEL})", "", text, ""]
-    return [f"### 종속항 세트 — {unlocked_label(state)}", "", text, ""]
+        out = [f"### 종속항 세트 ({lock}; {'출원용 최종 종속항 세트' if dep.final_set_lock else PROVISIONAL_LABEL})", "", text, ""]
+    else:
+        out = [f"### 종속항 세트 — {unlocked_label(state)}", "", text, ""]
+    return out + _tree_lines(state)
 
 
 def prior_art_line(state: RunState) -> str:
@@ -391,7 +401,7 @@ def render_chat_report(state: RunState) -> str:
         if not state.review_reports:
             out += ["검토 의견 없음 (검토 역할이 보고서를 남기기 전에 중지)", ""]
     elif _set_edit(state):
-        out += ["## 최종안", ""] + _edit_section(state)
+        out += ["## 최종안", ""] + _edit_section(state) + _tree_lines(state)
     else:
         root_text = cur.exact_text if cur and cur.exact_text else (cur.meaning_draft_text if cur else None)
         out += ["## 최종안", ""] + _root_section(state, root_text)
@@ -445,7 +455,7 @@ def render_report(state: RunState, claims_only: bool = False) -> str:
             out.append("검토 보고서가 아직 생성되지 않았습니다.")
         out.append("")
     elif _set_edit(state):
-        out.extend(_edit_section(state))
+        out.extend(_edit_section(state) + _tree_lines(state))
     else:
         out.extend(_root_section(state, root_text))
     if state.halt and state.halt.report_markdown and not reviewing:
