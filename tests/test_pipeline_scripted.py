@@ -153,6 +153,24 @@ def test_architect_stopping_for_an_inventor_answer_is_woken_to_decide_it(rt, req
     assert "발명자 확인은 받을 수 없으므로" in rewake.packet_text and "DESIGN_GATE: LOCKED" in rewake.packet_text
 
 
+def test_a_style_only_revision_keeps_its_meaning_draft_for_success(rt, request_indep):
+    """Regression for run web-114e8990: success sent r1 back to style, and the r2 success packet had no meaning draft."""
+    script = R.happy_script(dependent=False)
+    script["claim-success-reviewer"] = [R.success(return_to="RETURN_TO_STYLE_ADJUSTER"), R.success()]
+    script["claim-style-adjuster"] = [R.style(), R.style()]
+    engine = _engine(rt, script)
+    state = engine.run(engine.start(request_indep, "run-test-07b"))
+    assert state.outcome == "DRAFT_CLAIM_LOCK", state.halt
+    cur = state.candidate.current
+    assert cur.revision == "r2" and cur.records["meaning_draft"] == state.candidate.history[0].records["meaning_draft"]
+    assert not state.records[cur.records["meaning_draft"]].superseded
+    md = cur.records["meaning_draft"]
+    first, second = [c for c in engine.provider.calls if c.role == "claim-success-reviewer"]
+    assert f"PRE_STYLE 의미 초안 보고서 전문 ({md})" in first.packet_text and "직전 revision 청구항 전문" not in first.packet_text
+    assert f"PRE_STYLE 의미 초안 보고서 전문 ({md})" in second.packet_text
+    assert "직전 revision 청구항 전문" in second.packet_text and "직전 revision success record 전문" in second.packet_text
+
+
 def test_architect_unlocked_halts_review_then_resume_with_decision(rt, request_indep):
     script = R.happy_script(dependent=False)
     script["claim-architect"] = [R.architect(locked=False), R.architect(locked=True)]

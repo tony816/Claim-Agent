@@ -225,7 +225,16 @@ def style_independent(
     return Packet(txt, imgs)
 
 
-def success_independent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, design_record_id: str, meaning_draft_id: str | None, style_record_id: str, exact_text: str, corpus_fragments: str | None) -> Packet:
+def _style_only_prior(state: RunState, store, prior_text: str | None, prior_success_record_id: str | None) -> str:
+    """A style-only revision is checked against the revision it restyles: its wording and the findings that sent it back."""
+    if prior_text is None and prior_success_record_id is None:
+        return ""
+    return (_section("직전 revision 청구항 전문 (STYLE_ONLY_REVISION의 비교 대상)", prior_text or "없음")
+            + _report(state, store, prior_success_record_id, "직전 revision success record 전문 (이번 문체 수정을 부른 지적)"))
+
+
+def success_independent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, design_record_id: str, meaning_draft_id: str | None, style_record_id: str, exact_text: str, corpus_fragments: str | None,
+                        prior_text: str | None = None, prior_success_record_id: str | None = None) -> Packet:
     mats, imgs = _materials(bundle, ("invention", "drawing", "spec", "prior_art"))
     txt = _user_lock(bundle) + mats
     txt += _report(state, store, design_record_id, "DESIGN_GATE: LOCKED 전문")
@@ -233,6 +242,7 @@ def success_independent(state: RunState, store, bundle: MaterialBundle, ids: Ide
     txt += _section("검수 대상 exact 청구항 전문", exact_text)
     txt += _section("평문(줄바꿈·번호 제거)", flatten(exact_text))
     txt += _report(state, store, meaning_draft_id, "PRE_STYLE 의미 초안 보고서 전문")
+    txt += _style_only_prior(state, store, prior_text, prior_success_record_id)
     txt += _report(state, store, style_record_id, "style record 전문 (변경 대조표·용어·표현 출처표·두 후처리 게이트·독자·기하 게이트)")
     if corpus_fragments:
         txt += _section("style record가 사용한 코퍼스 정확 조각과 라우팅 인덱스", corpus_fragments)
@@ -452,13 +462,15 @@ def style_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identif
     return Packet(txt, imgs)
 
 
-def success_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_text: str, dep_design_record_id: str, dep_meaning_draft_id: str | None, dep_style_record_id: str, set_text: str, corpus_fragments: str | None) -> Packet:
+def success_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_text: str, dep_design_record_id: str, dep_meaning_draft_id: str | None, dep_style_record_id: str, set_text: str, corpus_fragments: str | None,
+                      prior_text: str | None = None, prior_success_record_id: str | None = None) -> Packet:
     txt, imgs = _dependent_stable(state, store, bundle, root_lock_id, None, ("invention", "drawing", "spec", "prior_art"))
     txt += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE: LOCKED 전문")
     txt += _hdr(state, ids, record_id, {"success_scope": "DEPENDENT_SET", "dependent_success_record_id (예정)": record_id})
     txt += _section(_root_label(state)[1], root_text)
     txt += _section("검수 대상 exact 종속항 세트 전문", set_text)
     txt += _report(state, store, dep_meaning_draft_id, "종속항 PRE_STYLE 의미 초안 보고서 전문")
+    txt += _style_only_prior(state, store, prior_text, prior_success_record_id)
     txt += _report(state, store, dep_style_record_id, "dependent style record 전문")
     if corpus_fragments:
         txt += _section("style record가 사용한 코퍼스 정확 조각과 라우팅 인덱스", corpus_fragments)

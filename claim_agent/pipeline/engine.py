@@ -1015,10 +1015,14 @@ class PipelineEngine(PriorArtSteps):
         cur = c.current
         assert cur is not None
         c.history.append(cur)
-        state.mark_superseded([r for k, r in cur.records.items() if k not in ("design",)])
+        # A style-only revision keeps the same PRE_STYLE draft as its scope baseline: carry its record, not just its text,
+        # or the success packet finds no meaning draft (run web-114e8990: INPUT_MISSING at SUCCESS r2).
+        keep = {"meaning_draft"} if mode == StyleChangeMode.STYLE_ONLY_REVISION and "meaning_draft" in cur.records else set()
+        state.mark_superseded([r for k, r in cur.records.items() if k not in ({"design"} | keep)])
         nxt = RevisionState(
             revision=bump_revision(cur.revision), design_revision=cur.design_revision, style_change_mode=mode, change_goal=feedback,
             prior_revision=cur.revision, meaning_draft_text=cur.meaning_draft_text if mode == StyleChangeMode.STYLE_ONLY_REVISION else None,
+            records={k: cur.records[k] for k in keep},
         )
         c.current = nxt
         c.revision = nxt.revision
@@ -1207,7 +1211,11 @@ class PipelineEngine(PriorArtSteps):
         if st == Stage.SUCCESS:
             rid = record_id("success", ids)
             frags = self._corpus_fragments(cur.records.get("style"))
-            pk = packets.success_independent(state, self.store, bundle, ids, rid, c.design_record_id or "", cur.records.get("meaning_draft"), cur.records.get("style", ""), exact, frags)
+            style_only = cur.style_change_mode == StyleChangeMode.STYLE_ONLY_REVISION
+            if style_only:
+                self._carry_meaning_draft(state, cur, c.history, "meaning_draft")
+            pk = packets.success_independent(state, self.store, bundle, ids, rid, c.design_record_id or "", cur.records.get("meaning_draft"), cur.records.get("style", ""), exact, frags,
+                                             prior_text=self._prior_text(state) if style_only else None, prior_success_record_id=self._prior_record(state, "success") if style_only else None)
             env, ref = self._call(state, "claim-success-reviewer", Scope.INDEPENDENT, st, "success", pk, ids, rid, expected_exact=exact)
             tr = self._decide(state, env, "claim-success-reviewer", Scope.INDEPENDENT, st, rid, c.loop_counts)
             if tr.kind == "RETURN":
@@ -1333,6 +1341,20 @@ class PipelineEngine(PriorArtSteps):
                 return rs.exact_text or rs.meaning_draft_text
         return None
 
+    @staticmethod
+    def _carry_meaning_draft(state: RunState, cur, history: list, kind: str) -> None:
+        """Heals a style-only revision saved before its meaning-draft record was carried over (run web-114e8990)."""
+        if kind in cur.records:
+            return
+        for rs in reversed(history):
+            if kind in rs.records:
+                cur.records[kind] = rs.records[kind]
+                if rs.records[kind] in state.records:
+                    state.records[rs.records[kind]].superseded = False
+                return
+            if rs.style_change_mode != StyleChangeMode.STYLE_ONLY_REVISION:
+                return
+
     def _prior_record(self, state: RunState, kind: str) -> str | None:
         for rs in reversed(state.candidate.history):
             if kind in rs.records:
@@ -1397,10 +1419,12 @@ class PipelineEngine(PriorArtSteps):
         assert d is not None and d.current is not None
         cur = d.current
         d.history.append(cur)
-        state.mark_superseded(cur.record_ids())
+        keep = {"dependent_meaning_draft"} if mode == StyleChangeMode.STYLE_ONLY_REVISION and "dependent_meaning_draft" in cur.records else set()
+        state.mark_superseded([r for r in cur.record_ids() if r not in {cur.records[k] for k in keep}])
         nxt = DependentRevisionState(
             dependent_revision=bump_dependent_revision(cur.dependent_revision), dependent_design_revision=cur.dependent_design_revision,
             style_change_mode=mode, change_goal=feedback, meaning_draft_text=cur.meaning_draft_text if mode == StyleChangeMode.STYLE_ONLY_REVISION else None,
+            records={k: cur.records[k] for k in keep},
         )
         d.current = nxt
         d.dependent_revision = nxt.dependent_revision
@@ -1604,8 +1628,13 @@ class PipelineEngine(PriorArtSteps):
         rids = {kind: record_id(kind, ids) for kind in ("dependent_success", "dependent_syntax", "dependent_oa")}
         style_rid = cur.records.get("dependent_style", "")
         baseline = self._dep_prior_text(state) if cur.style_change_mode != StyleChangeMode.INITIAL_FROM_DRAFTER else cur.meaning_draft_text
+        style_only = cur.style_change_mode == StyleChangeMode.STYLE_ONLY_REVISION
+        if style_only:
+            self._carry_meaning_draft(state, cur, d.history, "dependent_meaning_draft")
         success_pk = packets.success_dependent(state, self.store, bundle, ids, rids["dependent_success"], d.root_lock_id, root_text, d.design_record_id or "",
-                                               cur.records.get("dependent_meaning_draft"), style_rid, set_text, self._corpus_fragments(style_rid))
+                                               cur.records.get("dependent_meaning_draft"), style_rid, set_text, self._corpus_fragments(style_rid),
+                                               prior_text=self._dep_prior_text(state) if style_only else None,
+                                               prior_success_record_id=self._dep_prior_record(state, "dependent_success") if style_only else None)
         syntax_pk = packets.parallel_review(packets.syntax_dependent(state, self.store, bundle, ids, rids["dependent_syntax"], d.root_lock_id, root_text, d.design_record_id or "",
                                                                      style_rid, None, set_text, baseline, cur.style_change_mode), ["dependent success record"])
         oa_pk = packets.oa_dependent(state, self.store, bundle, ids, rids["dependent_oa"], d.root_lock_id, root_text, d.design_record_id or "", style_rid, None, None, set_text)
