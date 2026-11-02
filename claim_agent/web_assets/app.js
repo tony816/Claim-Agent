@@ -255,6 +255,7 @@ async function list(){
   for(const s of visible){const row=el("div","session-row"+(s.id===state.id&&state.view==="chat"?" active":""));const b=el("button","session-open");b.append(document.createTextNode(s.title));if(s.work_mode==="free")b.append(el("span","tag tag-free","자유"));if(!state.project&&s.project_id&&names.has(s.project_id))b.append(el("span","tag",names.get(s.project_id)));b.onclick=()=>open(s.id).catch(e=>error(e.message));const del=el("button","session-delete","×");del.title="대화 삭제";del.setAttribute("aria-label",s.title+" 삭제");del.onclick=()=>deleteSession(s.id,s.title).catch(e=>error(e.message));row.append(b,del);sessions.append(row);}
   if(!visible.length)sessions.append(el("p","side-empty",state.project?"아직 대화가 없습니다.":"대화가 없습니다."));
   $("new-chat").textContent=state.project&&names.has(state.project)?"＋ 새 대화 · "+names.get(state.project):"＋ 새 대화";
+  $("new-general-chat").hidden=!(state.project&&names.has(state.project));
   return data.sessions;
 }
 function showChat(){state.view="chat";$("project-panel").hidden=true;$("improve-panel").hidden=true;$("conversation").hidden=false;document.querySelector("main footer").hidden=false;renderTools();}
@@ -313,7 +314,7 @@ let drag=0;document.addEventListener("dragenter",event=>{if(event.dataTransfer.t
 document.addEventListener("dragover",event=>{if(event.dataTransfer.types.includes("Files"))event.preventDefault();});
 document.addEventListener("dragleave",()=>{if(--drag<=0){drag=0;$("drop-overlay").hidden=true;}});
 document.addEventListener("drop",event=>{drag=0;$("drop-overlay").hidden=true;if(event.dataTransfer.files.length){event.preventDefault();upload([...event.dataTransfer.files]);}});
-$("new-chat").onclick=()=>create().catch(e=>error(e.message));$("menu").onclick=()=>document.body.classList.toggle("sidebar-open");
+$("new-chat").onclick=()=>create().catch(e=>error(e.message));$("new-general-chat").onclick=()=>create(null).catch(e=>error(e.message));$("menu").onclick=()=>document.body.classList.toggle("sidebar-open");
 $("new-project").onclick=()=>createProject().catch(e=>error(e.message));
 $("stop").onclick=async()=>{try{await api("/api/stop",{id:state.id});await refresh();}catch(e){error(e.message);}};
 $("shutdown").onclick=async()=>{if(state.data?.running&&!confirm("진행 중인 응답을 중지하고 프로그램을 종료할까요?"))return;try{await api("/api/shutdown",{});stopPolling();$("composer").hidden=true;error("프로그램을 종료했습니다. 다시 이용하려면 바탕화면 실행기를 더블클릭하세요.");}catch(e){error(e.message);}};
