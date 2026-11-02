@@ -855,9 +855,9 @@ def test_a_design_still_stopping_after_two_supplements_stops(rt, request_indep, 
     assert state.halt and any("보완 뒤에도 허용 사유 없이 멈춤" in n for n in state.notes)
 
 
-@pytest.mark.parametrize("basis,calls", [("USER_LOCK_CHANGE", 1), ("SCOPE_CHOICE_UNDETERMINED", 1), ("SOURCE_FACT_ABSENT", 3)])
+@pytest.mark.parametrize("basis,calls", [("USER_LOCK_CHANGE", 1), ("EDIT_PARENT_CHAIN_CHANGE", 1), ("SCOPE_CHOICE_UNDETERMINED", 3), ("SOURCE_FACT_ABSENT", 3)])
 def test_only_an_allowed_stop_reaches_the_user_at_once(rt, request_indep, tmp_path, edit_roles, basis, calls):
-    # The dependent design may not stop for a fact the sources lack (CLAUDE.md 제12단계): that one is woken too.
+    # Inventor answers cannot be had (CLAUDE.md 발명자 확인 불가 하드 규칙): a missing fact or an open scope choice is woken too.
     request, blocks, paths, folder = _conversation(tmp_path, request_indep, f"basis-{basis}")
     provider = ScriptedProvider(edit_script(**{"dependent-claim-strategy-architect": [_stopping_design(basis)] * 3}))
     result = run_pipeline(rt, provider, request, _route(blocks), blocks, paths, folder)

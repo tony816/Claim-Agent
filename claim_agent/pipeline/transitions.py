@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..models.contracts import GateContract
-from ..models.enums import ExecStatus, GateValue, NextStep, RequestMode, Status, StopBasis
+from ..models.enums import ADMISSIBLE_STOP_BASES, ExecStatus, GateValue, NextStep, RequestMode, Status
 from ..models.envelope import RoleEnvelope
 from ..models.state import Stage
 
@@ -78,10 +78,9 @@ INPUT_STOP_REASONS = {
 def inadmissible_stop(env: RoleEnvelope, contract: GateContract, mode: RequestMode, stage: Stage) -> str | None:
     """Why this envelope would stop the run for the user without a reason CLAUDE.md allows, or None.
 
-    A role that neither passes nor routes a return may stop only for a USER_LOCK change, a parent-chain change in an
-    existing-set edit, a fact the sources lack, or a scope choice the locked contract leaves open. The dependent architect
-    may not stop for a missing fact: an unclosed candidate drops to the fallback axis or leaves the set, and the broken
-    link becomes an inventor question (CLAUDE.md 제12단계).
+    A role that neither passes nor routes a return may stop only for a USER_LOCK change or a parent-chain change in an
+    existing-set edit. A fact the sources lack or a scope choice they leave open no longer stops a run: inventor answers
+    cannot be had, so the role decides by the fixed order and records a 설계자 가정 (CLAUDE.md 발명자 확인 불가 하드 규칙).
     """
     if stage not in AUTHORING_STAGES or contract.passes(env, mode):
         return None
@@ -92,14 +91,21 @@ def inadmissible_stop(env: RoleEnvelope, contract: GateContract, mode: RequestMo
     if env.status in (Status.PASS, Status.PASS_RANGE) and env.next_step != NextStep.USER_DECISION:
         return None            # a PASS that breaks the contract is an envelope fault, handled by decide()
     basis = env.stop_basis
-    if basis is not None and not (basis == StopBasis.SOURCE_FACT_ABSENT and stage == Stage.DEP_ARCHITECT):
+    if basis in ADMISSIBLE_STOP_BASES:
         return None
     said = f"{env.status.value}" + (f" ({env.reason_code})" if env.reason_code else "") + (f", 정지 사유 {basis.value}" if basis else ", 정지 사유 없음")
+    decide_it = (" 발명자 확인은 받을 수 없으므로 원자료가 답하지 않거나 어긋나는 사항, 원자료가 정하지 않는 권리범위 선택으로는 멈추지 않는다. "
+                 "그 사항은 (1) 그것 없이 주골격·협동관계가 닫히면 한정하지 않고 열어 두며, (2) 열 수 없으면 원자료가 더 직접·더 나중에·더 많이 "
+                 "뒷받침하는 쪽(같으면 넓은 쪽)을 고르고, (3) 원자료에 없는 사실이 있어야 서는 한정·기능 구절은 빼고 원자료가 보여 주는 구조·관계만 "
+                 "청구한다. 정한 사항마다 `설계자 가정 — 확인 필요`(사항 / 고른 쪽 / 근거 / 다른 쪽이면 바뀌는 권리범위)로 적고 끊긴 고리는 발명자 확인 "
+                 "질문으로 남긴다. 둘 다 비게이팅이다.")
+    if stage == Stage.ARCHITECT:
+        return said + "." + decide_it + " 그렇게 정해 `DESIGN_GATE: LOCKED`로 낸다."
     if stage == Stage.DEP_ARCHITECT:
-        return (said + ". 종속항 설계는 원자료로 닫히지 않는 후보 때문에 멈추지 않는다: 원자료·부모항 체인으로 확인되는 구조만 남겨 "
-                "보조 축 FALLBACK_ONLY로 잠그거나(근거·청구 가능성 PASS) 그 후보를 세트에서 빼고, 끊긴 고리는 발명자 확인 질문으로 남긴다.")
-    return (said + ". 허용 사유가 아니면 지적을 고칠 되돌림 단계(표면 표기면 RETURN_TO_STYLE_ADJUSTER, 절 결속·관계 술어·한정 표현이면 "
-            "RETURN_TO_DRAFTER, 후보·의미 한정 패키지·주체 구조·형상 계약이면 설계자 되돌림)를 `next_step`으로 낸다.")
+        return (said + "." + decide_it + " 종속항 설계는 원자료로 닫히지 않는 후보 때문에 멈추지 않는다: 원자료·부모항 체인으로 확인되는 구조만 남겨 "
+                "보조 축 FALLBACK_ONLY로 잠그거나(근거·청구 가능성 PASS) 그 후보를 세트에서 빼고 `DEPENDENT_DESIGN_GATE`를 잠근다.")
+    return (said + "." + decide_it + " 지적을 고칠 되돌림 단계(표면 표기면 RETURN_TO_STYLE_ADJUSTER, 절 결속·관계 술어·한정 표현이면 "
+            "RETURN_TO_DRAFTER, 후보·의미 한정 패키지·주체 구조·형상 계약이나 위 사항의 선택이면 설계자 되돌림)를 `next_step`으로 낸다.")
 
 
 def gate_is_pass(env: RoleEnvelope, name: str, allow_na: bool = False) -> bool:

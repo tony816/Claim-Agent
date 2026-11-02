@@ -72,8 +72,14 @@ class StopBasis(StrEnum):
 
     USER_LOCK_CHANGE = "USER_LOCK_CHANGE"                    # 고치려면 USER_LOCK 문언을 바꿔야 함
     EDIT_PARENT_CHAIN_CHANGE = "EDIT_PARENT_CHAIN_CHANGE"    # EXISTING_SET_EDIT의 부모항 체인을 바꿔야 함
+    # The two below no longer stop a run (CLAUDE.md 발명자 확인 불가 하드 규칙, 사용자 결정 2026-11-02): the role decides and
+    # records a 설계자 가정. Kept so envelopes already on disk still parse; the schema no longer offers them.
     SOURCE_FACT_ABSENT = "SOURCE_FACT_ABSENT"                # 고치려면 원자료에 없는 사실이 필요함
     SCOPE_CHOICE_UNDETERMINED = "SCOPE_CHOICE_UNDETERMINED"  # 잠긴 계약·USER_LOCK이 정하지 않는 권리범위 선택
+
+
+# Stop reasons a role may still give for stopping an authoring run for the user.
+ADMISSIBLE_STOP_BASES = (StopBasis.USER_LOCK_CHANGE, StopBasis.EDIT_PARENT_CHAIN_CHANGE)
 
 
 class FinalizedStatus(StrEnum):

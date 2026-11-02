@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .enums import (
+    ADMISSIBLE_STOP_BASES,
     EFFECT_LINKS,
     EXAM_PATTERN_RISK,
     GATE_NAMES,
@@ -364,8 +365,9 @@ ENVELOPE_JSON_SCHEMA: dict[str, Any] = _obj(
             )
         ),
         "next_step": _enum([n.value for n in NextStep]),
-        "stop_basis": _enum([b.value for b in StopBasis], nullable=True,
-                            desc="PASS도 RETURN_TO_*도 아닌 상태로 사용자에게 멈출 때만: 그 정지가 허용되는 사유. 그 밖에는 null"),
+        "stop_basis": _enum([b.value for b in ADMISSIBLE_STOP_BASES], nullable=True,
+                            desc="PASS도 RETURN_TO_*도 아닌 상태로 사용자에게 멈출 때만: 그 정지가 허용되는 사유. 그 밖에는 null. "
+                                 "원자료에 없는 사실·원자료가 정하지 않는 권리범위 선택으로는 멈추지 않고 설계자 가정으로 정한다"),
         "handoff_ready": {"type": "boolean", "description": "인계 가능 / syntax·OA·DRAFT 진행 가능 여부"},
         "finalized_status": _enum([f.value for f in FinalizedStatus], nullable=True),
         "exact_claim_text": _str("작성·확정·검수 대상 청구항 전문(글자 단위 그대로)", nullable=True),

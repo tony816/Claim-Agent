@@ -137,6 +137,22 @@ def test_loop_limit_halts(rt, request_indep):
     assert state.halt and state.halt.kind == "LOOP_LIMIT" and state.candidate.loop_counts["DRAFTER"] == 2
 
 
+def test_architect_stopping_for_an_inventor_answer_is_woken_to_decide_it(rt, request_indep):
+    """Regression for run web-c3eb50bf: the design stopped on SCOPE_CHOICE_UNDETERMINED to ask where the inventor put a part."""
+    def asks_inventor(spec):
+        return R._base(spec, "REVIEW", {"DESIGN_GATE": "UNLOCKED"}, ["- LOCK 미해결 사항: 온도 제어부 위치 — 발명자 확인 필요"],
+                       next_step="USER_DECISION", stop_basis="SCOPE_CHOICE_UNDETERMINED",
+                       open_issues=[{"kind": "REVIEW", "code": "OTHER", "text": "온도 제어부가 각 유닛에 있는지 콘솔에 있는지 발명자 확인", "return_to": None}])
+    script = R.happy_script(dependent=False)
+    script["claim-architect"] = [asks_inventor, R.architect(locked=True)]
+    engine = _engine(rt, script)
+    state = engine.run(engine.start(request_indep, "run-test-07a"))
+    assert state.outcome == "DRAFT_CLAIM_LOCK", state.halt
+    first, rewake = [c for c in engine.provider.calls if c.role == "claim-architect"]
+    assert "정지 사유 보완 요청 (1회차" in rewake.packet_text and "설계자 가정" in rewake.packet_text
+    assert "발명자 확인은 받을 수 없으므로" in rewake.packet_text and "DESIGN_GATE: LOCKED" in rewake.packet_text
+
+
 def test_architect_unlocked_halts_review_then_resume_with_decision(rt, request_indep):
     script = R.happy_script(dependent=False)
     script["claim-architect"] = [R.architect(locked=False), R.architect(locked=True)]
@@ -158,7 +174,7 @@ def test_resume_style_fix_after_review_halt(rt, request_indep):
     # syntax reviewer returns REVIEW without routing -> halt; user applies style-only fix
     def syntax_review(spec):
         env = R.syntax()(spec)
-        env.update(status="REVIEW", handoff_ready=False, next_step="USER_DECISION", stop_basis="SCOPE_CHOICE_UNDETERMINED", open_issues=[{"kind": "REVIEW", "code": "SPACING", "text": "'길이방향' 띄어쓰기"}])
+        env.update(status="REVIEW", handoff_ready=False, next_step="USER_DECISION", stop_basis="USER_LOCK_CHANGE", open_issues=[{"kind": "REVIEW", "code": "SPACING", "text": "'길이방향' 띄어쓰기"}])
         env["report_markdown"] = env["report_markdown"].replace("- 상태: PASS", "- 상태: REVIEW")
         return env
     script["syntax-scope-reviewer"] = [syntax_review, R.syntax()]
