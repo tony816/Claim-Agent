@@ -149,21 +149,27 @@ class PipelineHalt(Exception):
         self.halt = halt
 
 
-def budget_violation(usage: dict[str, float], cfg: AppConfig) -> str | None:
+BUDGET_KEYS = ("calls", "prompt_tokens", "output_tokens", "thoughts_tokens", "cost_usd")
+
+
+def budget_violation(usage: dict[str, float], cfg: AppConfig, base: dict[str, float] | None = None) -> str | None:
     """Message when the next call would exceed pipeline.max_calls, or accumulated tokens/cost already exceed their caps.
 
     Checked before every provider call, so a completed call is never discarded; token and cost caps
-    can therefore be exceeded by at most one call.
+    can therefore be exceeded by at most one call. The caps count from `base`, the usage when the user last continued
+    a budget halt: continuing is the user's go-ahead for one more allowance (the web has no other way to raise a cap).
     """
-    pc = cfg.pipeline
-    calls = int(usage.get("calls", 0))
+    pc, base = cfg.pipeline, base or {}
+    used = {k: usage.get(k, 0) - base.get(k, 0) for k in BUDGET_KEYS}
+    total = f", 전체 {int(usage.get('calls', 0))}회" if base else ""
+    calls = int(used["calls"])
     if pc.max_calls is not None and calls >= pc.max_calls:
-        return f"호출 수 한도 도달: {calls}/{pc.max_calls} (pipeline.max_calls)"
-    tokens = int(usage.get("prompt_tokens", 0) + usage.get("output_tokens", 0) + usage.get("thoughts_tokens", 0))
+        return f"호출 수 한도 도달: {calls}/{pc.max_calls}{' (이어 간 뒤' + total + ')' if base else ''} (pipeline.max_calls)"
+    tokens = int(used["prompt_tokens"] + used["output_tokens"] + used["thoughts_tokens"])
     if pc.max_total_tokens is not None and tokens > pc.max_total_tokens:
         return f"토큰 한도 초과: {tokens:,}/{pc.max_total_tokens:,} (pipeline.max_total_tokens)"
-    if pc.max_cost_usd is not None and usage.get("cost_usd", 0) > pc.max_cost_usd:
-        return f"비용 한도 초과: ${usage.get('cost_usd', 0):.4f}/${pc.max_cost_usd:.4f} (pipeline.max_cost_usd)"
+    if pc.max_cost_usd is not None and used["cost_usd"] > pc.max_cost_usd:
+        return f"비용 한도 초과: ${used['cost_usd']:.4f}/${pc.max_cost_usd:.4f} (pipeline.max_cost_usd)"
     return None
 
 
@@ -532,6 +538,10 @@ class PipelineEngine(PriorArtSteps):
             state.spec_present = bundle.spec_present
             state.prior_art_present = bundle.prior_art_present
             decision.action = "redesign" if decision.action in ("none", "add_source") else decision.action
+        if state.halt and state.halt.kind == "BUDGET_LIMIT":
+            # Continuing a budget halt is the user's go-ahead for one more allowance: the caps count from here.
+            state.budget_base = {k: state.usage.get(k, 0) for k in BUDGET_KEYS}
+            state.notes.append(f"예산 한도: 사용자가 이어 가기로 해 호출 {int(state.usage.get('calls', 0))}회 시점부터 한도를 다시 센다")
         self._bundle = self._load_bundle(req)
         halted_stage = Stage(state.halt.stage) if state.halt else state.stage
         # An edit of an existing set has no independent claim of its own: every decision applies to its dependent revision.
@@ -831,9 +841,11 @@ class PipelineEngine(PriorArtSteps):
 
     def _guard_budget(self, state: RunState, stage: Stage) -> None:
         with self._lock:
-            over = budget_violation(state.usage, self.cfg)
+            over = budget_violation(state.usage, self.cfg, state.budget_base)
         if over:
-            raise PipelineHalt(Halt(stage=stage.value, role="engine", kind="BUDGET_LIMIT", message=over + " — 한도를 올려 `claim-agent resume <run_id> --max-calls N --max-cost-usd X`로 재개"))
+            raise PipelineHalt(Halt(stage=stage.value, role="engine", kind="BUDGET_LIMIT", message=over + " — 대화창에 '재개'를 보내거나 "
+                                    "`claim-agent resume <run_id>`로 이어 가면 그 시점부터 같은 한도만큼 더 진행한다(한도 자체는 "
+                                    "`claim-agent.yaml`의 pipeline.max_calls·max_cost_usd, 이번 재개만 바꾸려면 `--max-calls N`)"))
 
     def _generate_validated(self, spec: CallSpec, contract, ids: Identifiers, rid: str, expected_exact: str | None, preloaded: list[str], blind: bool):
         from .verify import cross_check

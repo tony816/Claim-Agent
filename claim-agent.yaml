@@ -63,9 +63,10 @@ pipeline:
   max_concurrency: 3
   expand_multi_dependent: false
   retry: {max_attempts: 3, backoff_s: [2, 8, 20]}
-  # Budget guard (null = unlimited). Checked before every call; the run halts with HALTED_BUDGET_LIMIT
-  # and can be resumed after raising the limit (`claim-agent resume <run_id> --max-calls N`).
-  max_calls: 60
+  # Budget guard (null = unlimited). Checked before every call; the run halts with HALTED_BUDGET_LIMIT.
+  # Continuing a budget halt (chat '재개' or `claim-agent resume <run_id>`) counts the caps afresh from that point.
+  # 120 calls: a dependent set of 8 claims with one return loop needs about 70 (2 reconstruction calls per claim and pass).
+  max_calls: 120
   max_total_tokens: null
   max_cost_usd: null
 

@@ -45,6 +45,23 @@ def test_budget_limit_halts_before_the_next_call_and_resumes(tmp_path, request_i
     assert [c.role for c in prov.calls[:4]] == ["claim-architect", "claim-drafter", "claim-style-adjuster", "claim-style-adjuster"]
 
 
+def test_continuing_a_budget_halt_counts_the_same_limit_again(tmp_path, request_indep):
+    # The web cannot pass --max-calls: '재개' on a budget halt is the go-ahead for one more allowance of the same limit.
+    rt = _rt(tmp_path, **{"pipeline.max_calls": 3})
+    prov = ScriptedProvider(R.happy_script(dependent=False))
+    state = rt.engine(prov).run(rt.engine(prov).start(request_indep, "budget-04"))
+    assert state.outcome == "HALTED_BUDGET_LIMIT" and state.usage["calls"] == 3 and not state.budget_base
+    assert "대화창에 '재개'" in state.halt.message
+    state = rt.engine(prov).resume("budget-04", Decision(text="재개"))
+    assert state.outcome == "HALTED_BUDGET_LIMIT" and state.usage["calls"] == 6 and state.budget_base["calls"] == 3
+    assert "3/3 (이어 간 뒤, 전체 6회)" in state.halt.message
+    for _ in range(10):
+        if state.outcome != "HALTED_BUDGET_LIMIT":
+            break
+        state = rt.engine(prov).resume("budget-04", Decision(text="재개"))
+    assert state.outcome == "DRAFT_CLAIM_LOCK"
+
+
 def test_unpriced_model_reports_na(tmp_path, request_indep):
     rt = _rt(tmp_path)
     engine = rt.engine(ScriptedProvider(R.happy_script(dependent=False)))

@@ -595,7 +595,7 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--strict-replay", action="store_true")
         sp.add_argument("--record", help="fixtures dir to record live responses")
         sp.add_argument("--variant", help="experiments/<name>.yaml")
-        sp.add_argument("--max-calls", type=int, help="budget guard: halt before exceeding this many provider calls")
+        sp.add_argument("--max-calls", type=int, help="budget guard: halt before exceeding this many provider calls (counted from the last continued budget halt)")
         sp.add_argument("--max-total-tokens", type=int, help="budget guard: halt once prompt+output+thoughts tokens exceed this")
         sp.add_argument("--max-cost-usd", type=float, help="budget guard: halt once the estimated cost exceeds this (needs telemetry.pricing)")
         sp.add_argument("--expand-multi", action="store_true", help="reconstruct multi-dependent claims once per alternative parent chain (pipeline.expand_multi_dependent)")
