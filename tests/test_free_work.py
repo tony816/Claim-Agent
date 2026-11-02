@@ -206,8 +206,10 @@ def test_style_that_changes_nothing_leaves_the_target_as_it_was(rt, tmp_path, mo
     assert free_work.STYLE_UNCHANGED_NOTE in result["answer"] and "### 스타일 조정 문언" not in result["answer"]
 
 
-def test_blind_reads_each_claim_with_its_parent_chain_and_skips_picture(rt, tmp_path, monkeypatch):
-    provider = ScriptedProvider({"blind-claim-reconstruction-reviewer": [R.blind(), R.blind()], free_work.FREE_ROLE: [FIXED]})
+def test_blind_reads_each_claim_with_its_parent_chain_and_picture_gets_the_request(rt, tmp_path, monkeypatch):
+    # The conversation is the user's material, so picture compares each snapshot with it; only picture gets the request.
+    provider = ScriptedProvider({"blind-claim-reconstruction-reviewer": [R.blind(), R.blind()], "picture-claim-reconstruction-reviewer": [R.picture(), R.picture()],
+                                 free_work.FREE_ROLE: [FIXED]})
     _offline(rt, monkeypatch, provider)
     folder = tmp_path / "request"
     folder.mkdir()
@@ -223,9 +225,35 @@ def test_blind_reads_each_claim_with_its_parent_chain_and_skips_picture(rt, tmp_
     chain, claim = second.packet_text.split("parent_chain_text:\n")[1].split("\ntarget_claim_text:\n")
     assert chain.startswith("【청구항 1】") and "【청구항 2】" not in chain and claim.startswith("【청구항 2】")
     assert "형상 위주로" in fix.packet_text                               # the request goes to the follow-up instead
+    assert all("형상 위주로" in c.packet_text for c in provider.calls if c.role == "picture-claim-reconstruction-reviewer")
     assert free_work.BLIND_NOTE in result["answer"] and free_work.BLIND_NOTE_TEXT in result["answer"]
     state = rt.store.load_state(result["run_id"])
-    assert state.outcome == "REVIEW_ONLY_DONE" and len(state.candidate.current.records) == 2
+    assert state.outcome == "REVIEW_ONLY_DONE" and len(state.candidate.current.records) == 4
+
+
+def test_reconstruction_tool_compares_each_snapshot_with_the_materials(rt, tmp_path, monkeypatch):
+    # 역피처 검수 as one tool: each claim's blind snapshot, then picture on it against what the user's materials show.
+    provider = ScriptedProvider({"blind-claim-reconstruction-reviewer": [R.blind(), R.blind()], "picture-claim-reconstruction-reviewer": [R.picture(), R.picture()]})
+    _offline(rt, monkeypatch, provider)
+    folder = tmp_path / "request"
+    folder.mkdir()
+    drawing = tmp_path / "슬라이드1.png"
+    Image.new("RGB", (40, 30), (255, 255, 255)).save(drawing, format="PNG")
+    request = _review_request("blind-claim-reconstruction-reviewer")
+    request.update(files=[str(drawing)], attachments=[dict(path=str(drawing), name=drawing.name, category="drawing")])
+    result = free_work.review_turn(provider, rt.cfg, None, request, folder)
+    first, second = _blind_calls(provider, "claim_scope: INDEPENDENT", "claim_scope: DEPENDENT_SINGLE")
+    assert not first.images and not second.images                         # the blind reader still gets the wording alone
+    pictures = [c for c in provider.calls if c.role == "picture-claim-reconstruction-reviewer"]
+    assert len(pictures) == 2
+    for call in pictures:
+        assert "reference_basis: SOURCE_MATERIALS" in call.packet_text and "REVIEW_ONLY 기준 비교 규칙" in call.packet_text
+        assert len(call.images) == 1 and "봉인된 blind snapshot 전문" in call.packet_text
+    dep = next(c for c in pictures if "claim_scope: DEPENDENT_SINGLE" in c.packet_text)
+    assert "부모항 체인 전문" in dep.packet_text
+    assert "##### 기준 비교 (원자료 기준)" in result["answer"] and free_work.BLIND_NOTE in result["answer"]
+    state = rt.store.load_state(result["run_id"])
+    assert state.outcome == "REVIEW_ONLY_DONE" and len(state.candidate.current.records) == 4
 
 
 def test_blind_finds_parents_in_the_conversation_and_user_lock_and_never_guesses(rt, tmp_path, monkeypatch):
@@ -239,7 +267,7 @@ def test_blind_finds_parents_in_the_conversation_and_user_lock_and_never_guesses
               "【청구항 7】\n제7항에 있어서,\n상기 홀은 관통하는,\n핵산 증폭 장치.\n\n"
               "【청구항 9】\n제8항에 있어서,\n상기 홀은 원형인,\n핵산 증폭 장치.")
     history = [{"role": "user", "parts": [{"text": "4항을 인용하는 5항을 써 줘\n---\n\n" + claim_4}]}, {"role": "model", "parts": [{"text": "초안입니다.\n\n" + claims}]}]
-    provider = ScriptedProvider({"blind-claim-reconstruction-reviewer": [R.blind(), R.blind()]})   # review only: no agent turn
+    provider = ScriptedProvider({"blind-claim-reconstruction-reviewer": [R.blind(), R.blind()], "picture-claim-reconstruction-reviewer": [R.picture(), R.picture()]})   # review only: no agent turn
     _offline(rt, monkeypatch, provider)
     folder = tmp_path / "request"
     folder.mkdir()

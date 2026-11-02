@@ -234,7 +234,8 @@ def oa_independent(state: RunState, store, bundle: MaterialBundle, ids: Identifi
     return Packet(txt, imgs)
 
 
-def picture_independent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, design_record_id: str, style_record_id: str, oa_record_id: str, blind_record_id: str, exact_text: str) -> Packet:
+def picture_independent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, design_record_id: str, style_record_id: str, blind_record_id: str, exact_text: str) -> Packet:
+    # Called right after blind, alongside OA: the comparison never reads the OA report, and LOCK adopts OA separately.
     mats, imgs = _materials(bundle, ("invention", "drawing"))
     txt = mats
     txt += _report(state, store, design_record_id, "DESIGN_GATE 전문")
@@ -242,7 +243,6 @@ def picture_independent(state: RunState, store, bundle: MaterialBundle, ids: Ide
     txt += _section("변경 없는 청구항 전문", exact_text)
     txt += _report(state, store, blind_record_id, "봉인된 blind snapshot 전문 (independence: FRESH_CALL_NO_PROJECT_CONTEXT)")
     txt += _report(state, store, style_record_id, "style record 전문 (CLAIM_STYLE_GATE·TERM_EXPRESSION_GATE)")
-    txt += _report(state, store, oa_record_id, "OA 보고서 전문")
     txt += _output_contract("`status`는 최종 판정(PASS/PASS-RANGE/REVIEW/BLOCK/UNVERIFIED)이다.")
     return Packet(txt, imgs)
 
@@ -450,7 +450,7 @@ def oa_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identifier
     return Packet(txt, imgs)
 
 
-def picture_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_design_record_id: str, dep_design_record_id: str, dep_style_record_id: str, dep_oa_record_id: str, blind_record_id: str, parent_chain_text: str, target_claim_text: str, dc_id: str | None) -> Packet:
+def picture_dependent(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, root_lock_id: str, root_design_record_id: str, dep_design_record_id: str, dep_style_record_id: str, blind_record_id: str, parent_chain_text: str, target_claim_text: str, dc_id: str | None) -> Packet:
     # Shared block first (identical for every target of the set → one explicit cache, parallel jobs share it),
     # then the per-target part.
     mats, imgs = _materials(bundle, ("invention", "drawing"))
@@ -459,7 +459,6 @@ def picture_dependent(state: RunState, store, bundle: MaterialBundle, ids: Ident
     shared += _report(state, store, root_design_record_id, "루트 DESIGN_GATE 전문")
     shared += _report(state, store, dep_design_record_id, "DEPENDENT_DESIGN_GATE 전문 (목표 DC-NN 포함)")
     shared += _report(state, store, dep_style_record_id, "dependent style record 전문")
-    shared += _report(state, store, dep_oa_record_id, "종속항 OA 보고서 전문")
     txt = shared
     txt += _hdr(state, ids, record_id, {"mode": "REFERENCE_COMPARE", "claim_scope": "DEPENDENT_SINGLE", "dependent_blind_snapshot_id": blind_record_id, "목표 DC": dc_id or "미지정(DEPENDENT_DESIGN_GATE에서 대응 확인)"})
     txt += _section("부모항 체인 전문 (blind 입력과 동일)", parent_chain_text)
@@ -495,6 +494,27 @@ def review_only(state: RunState, bundle: MaterialBundle, ids: Identifiers, recor
     txt += _section("평문(줄바꿈·번호 제거)", flatten(claim_text))
     txt += _section("REVIEW_ONLY 규칙", "요청된 의견/검토 결과를 report_markdown에 답한다. 어떤 방법을 택할지 묻는 요청에는 먼저 기능을 가능하게 하는 관계, 선택지별 근거·불확실성, 현재 자료상 권장 방향과 이유를 설명한다. 선택에 필요한 분석을 하지 않은 채 사용자에게 선택을 되묻지 않는다. 첨부의 다른 미결정 메모나 명칭 문제는 현재 요청과 직접 관련이 있을 때만 다루며 검토를 중지시키지 않는다. 수정 문언을 새로 작성하지 않는다. 제공되지 않은 청구항·설계·원자료·비교 기준·법률 근거가 필요한 시험은 개별 UNVERIFIED로 두고, 이 결과는 DRAFT·FINAL LOCK의 PASS 근거가 아니다.")
     txt += _output_contract()
+    return Packet(txt, imgs)
+
+
+def review_picture(state: RunState, store, bundle: MaterialBundle, ids: Identifiers, record_id: str, claim_scope: str, blind_record_id: str,
+                   claim_text: str, parent_chain_text: str, request_text: str) -> Packet:
+    """REVIEW_ONLY picture, the second half of the 역피처 검수 tool: no DESIGN_GATE or DC-NN exists, so the reference is
+    what the user's materials show. Its verdict is a review finding, never a gate PASS or a return."""
+    mats, imgs = _materials(bundle, ("invention", "drawing", "spec"))
+    txt = _user_lock(bundle) + mats
+    snap = "dependent_blind_snapshot_id" if claim_scope == "DEPENDENT_SINGLE" else "blind_snapshot_id"
+    txt += _hdr(state, ids, record_id, {"mode": "REFERENCE_COMPARE", "claim_scope": claim_scope, snap: blind_record_id, "reference_basis": "SOURCE_MATERIALS"})
+    txt += _section("검토 요청", request_text)
+    if parent_chain_text:
+        txt += _section("부모항 체인 전문 (blind 입력과 동일)", parent_chain_text)
+    txt += _section("목표 청구항 전문 (blind 입력과 동일)" if parent_chain_text else "청구항 전문 (blind 입력과 동일)", claim_text)
+    txt += _report(state, store, blind_record_id, "봉인된 blind snapshot 전문")
+    txt += _section("REVIEW_ONLY 기준 비교 규칙",
+                    "DESIGN_GATE·DEPENDENT_DESIGN_GATE·style record가 없다. 기준 관계는 위 원자료가 보여 주는 구성·결합·배치·작동 관계로 잡고, 기준 관계마다 원자료 위치를 적는다. "
+                    "원자료가 정하지 않는 측면은 판정하지 않고 `기준 미확인`으로 적는다. snapshot을 새로 해석하거나 고치지 않는다. "
+                    "되돌림(RETURN_TO_…) 대신 문제 구절과 최소 수정 목표만 적는다. 이 결과는 미검수 문언에 대한 검토 의견이며 DRAFT·FINAL LOCK의 PASS 근거가 아니다.")
+    txt += _output_contract("`status`는 최종 판정(PASS/PASS-RANGE/REVIEW/BLOCK/UNVERIFIED)이고 `next_step`에 RETURN_TO_…를 쓰지 않는다.")
     return Packet(txt, imgs)
 
 

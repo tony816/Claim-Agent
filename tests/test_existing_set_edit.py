@@ -886,7 +886,8 @@ def test_a_deduction_fault_only_syntax_finds_sends_the_edit_back_to_the_drafter(
     provider = ScriptedProvider(edit_script(**{
         "claim-drafter": [R.drafter("DEPENDENT_SET")] * 2, "claim-style-adjuster": [R.style("DEPENDENT_SET")] * 2,
         "claim-success-reviewer": [R.success()] * 2, "syntax-scope-reviewer": [_syntax_back_to_drafter("맞닿음만 있고 통전 없음"), R.syntax()],
-        "oa-strategy-reviewer": [R.oa("DEPENDENT_SET")] * 2}))
+        "oa-strategy-reviewer": [R.oa("DEPENDENT_SET")] * 2,
+        "blind-claim-reconstruction-reviewer": [R.blind()] * 2, "picture-claim-reconstruction-reviewer": [R.picture()] * 2}))
     result = run_pipeline(rt, provider, request, _route(blocks), blocks, paths, folder)
     state = rt.store.load_state(result["run_id"])
     assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
@@ -901,10 +902,13 @@ def test_two_reviewers_failing_together_make_one_return_carrying_both_findings(r
         "claim-drafter": [R.drafter("DEPENDENT_SET")] * 2, "claim-style-adjuster": [R.style("DEPENDENT_SET")] * 2,
         "claim-success-reviewer": [R.success(return_to="RETURN_TO_DRAFTER"), R.success()],
         "syntax-scope-reviewer": [_syntax_back_to_drafter("17항 반례: 신호 핀이 전원 단자에 닿음"), R.syntax()],
-        "oa-strategy-reviewer": [R.oa("DEPENDENT_SET")] * 2}))
+        "oa-strategy-reviewer": [R.oa("DEPENDENT_SET")] * 2,
+        "blind-claim-reconstruction-reviewer": [R.blind()] * 2,
+        "picture-claim-reconstruction-reviewer": [R.picture(return_to="RETURN_TO_DRAFTER"), R.picture()]}))
     result = run_pipeline(rt, provider, request, _route(blocks), blocks, paths, folder)
     state = rt.store.load_state(result["run_id"])
     assert state.outcome == "BASELINE_SET+DRAFT_DEPENDENT_SET_LOCK", state.halt
     assert state.dependent.loop_counts["DRAFTER"] == 1                       # one revision, not one per reviewer
     second_draft = [c for c in provider.calls if c.role == "claim-drafter"][1]
     assert "조건 9 분배 불명확" in second_draft.packet_text and "17항 반례" in second_draft.packet_text
+    assert "관찰 단면과 실제 면 혼동" in second_draft.packet_text            # picture ran alongside the reviews; its finding rides along

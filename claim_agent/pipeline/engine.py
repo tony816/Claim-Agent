@@ -1173,35 +1173,33 @@ class PipelineEngine(PriorArtSteps):
             rid = record_id("oa", ids)
             pk = packets.oa_independent(state, self.store, bundle, ids, rid, c.design_record_id or "", cur.records.get("style", ""), cur.records.get("success", ""), cur.records.get("syntax", ""), exact)
             pk.text = self.graph_hooks.oa_packet(state, pk.text, exact)
-            env, ref = self._call(state, "oa-strategy-reviewer", Scope.INDEPENDENT, st, "oa", pk, ids, rid, expected_exact=exact)
-            tr = self._decide(state, env, "oa-strategy-reviewer", Scope.INDEPENDENT, st, rid, c.loop_counts)
-            if tr.kind == "RETURN":
-                self._apply_return(state, tr, env, rid, dependent=False)
-                return
-            cur.records["oa"] = rid
-            state.stage = Stage.BLIND   # hard rule: OA_FINAL UNVERIFIED never blocks reconstruction
+            # blind → picture never waits for OA (it does not read the OA report); OA is adopted first, picture after it,
+            # and a failing OA carries picture's findings into the same return.
+            jobs = (lambda: self._call(state, "oa-strategy-reviewer", Scope.INDEPENDENT, st, "oa", pk, ids, rid, expected_exact=exact)[0],
+                    lambda: self._independent_recon(state, bundle, ids, exact))
+            env, recon = self._run_pair(*jobs)
+            tr = decide(env, contract_for("oa-strategy-reviewer", Scope.INDEPENDENT), state.request_mode, c.loop_counts, self.cfg.pipeline.max_return_loops)
+            if tr.kind != "PROCEED":
+                _, _, penv, prid, ptr = recon
+                if penv is not None and ptr is not None and ptr.kind != "PROCEED":
+                    env = env.model_copy(update={"open_issues": env.open_issues + penv.open_issues,
+                                                 "report_markdown": f"### oa-strategy-reviewer 보고서 ({rid})\n\n{env.report_markdown}\n\n"
+                                                                    f"### picture-claim-reconstruction-reviewer 보고서 ({prid})\n\n{penv.report_markdown}"})
+                if tr.kind == "RETURN":
+                    self._apply_return(state, tr, env, rid, dependent=False)
+                    return
+                self._halt(state, st, "oa-strategy-reviewer", tr, env, rid)
+            cur.records["oa"] = rid   # hard rule: OA_FINAL UNVERIFIED never blocks reconstruction
+            self._adopt_independent_recon(state, cur, recon)
             return
 
-        if st == Stage.BLIND:
-            rid = record_id("blind", ids)
-            bp = BlindPacket(claim_scope="INDEPENDENT", candidate_id=ids.candidate_id, revision=ids.revision, design_revision=ids.design_revision, record_id=rid, claim_text=exact)
-            env, ref = self._call(state, "blind-claim-reconstruction-reviewer", Scope.INDEPENDENT, st, "blind", packets.Packet(bp.render()), ids, rid, expected_exact=None, blind=True)
-            if env.execution_status != ExecStatus.BLIND_COMPLETE:
-                raise PipelineHalt(Halt(stage=st.value, role="blind-claim-reconstruction-reviewer", kind="UNVERIFIED", reason_code=env.reason_code, message="blind snapshot not complete", record_id=rid))
-            cur.records["blind"] = rid
-            state.stage = Stage.PICTURE
+        if st == Stage.BLIND:   # a run saved before blind moved alongside OA
+            self._adopt_independent_recon(state, cur, self._independent_recon(state, bundle, ids, exact))
             return
 
         if st == Stage.PICTURE:
-            rid = record_id("reference_compare", ids)
-            pk = packets.picture_independent(state, self.store, bundle, ids, rid, c.design_record_id or "", cur.records.get("style", ""), cur.records.get("oa", ""), cur.records.get("blind", ""), exact)
-            env, ref = self._call(state, "picture-claim-reconstruction-reviewer", Scope.INDEPENDENT, st, "reference_compare", pk, ids, rid, expected_exact=exact)
-            tr = self._decide(state, env, "picture-claim-reconstruction-reviewer", Scope.INDEPENDENT, st, rid, c.loop_counts)
-            if tr.kind == "RETURN":
-                self._apply_return(state, tr, env, rid, dependent=False)
-                return
-            cur.records["reference_compare"] = rid
-            state.stage = Stage.LOCK
+            penv, prid, ptr = self._independent_picture(state, bundle, ids, cur.records.get("blind", ""), exact)
+            self._adopt_independent_recon(state, cur, (cur.records.get("blind", ""), None, penv, prid, ptr))
             return
 
         if st == Stage.LOCK:
@@ -1229,6 +1227,44 @@ class PipelineEngine(PriorArtSteps):
                 state.stage = Stage.DONE
                 state.outcome = "FINAL_CLAIM_LOCK" if final else "DRAFT_CLAIM_LOCK"
             return
+
+    def _run_pair(self, first, second):
+        """Two independent calls at once when concurrency allows; exceptions surface from `.result()`."""
+        if self.cfg.pipeline.max_concurrency > 1:
+            with ThreadPoolExecutor(max_workers=2) as ex:
+                a, b = ex.submit(first), ex.submit(second)
+                return a.result(), b.result()
+        return first(), second()
+
+    def _independent_picture(self, state: RunState, bundle: MaterialBundle, ids: Identifiers, blind_rid: str, exact: str) -> tuple[RoleEnvelope, str, Transition]:
+        c = state.candidate
+        rid = record_id("reference_compare", ids)
+        pk = packets.picture_independent(state, self.store, bundle, ids, rid, c.design_record_id or "", c.current.records.get("style", ""), blind_rid, exact)
+        env, _ = self._call(state, "picture-claim-reconstruction-reviewer", Scope.INDEPENDENT, Stage.PICTURE, "reference_compare", pk, ids, rid, expected_exact=exact)
+        return env, rid, decide(env, contract_for("picture-claim-reconstruction-reviewer", Scope.INDEPENDENT), state.request_mode, c.loop_counts, self.cfg.pipeline.max_return_loops)
+
+    def _independent_recon(self, state: RunState, bundle: MaterialBundle, ids: Identifiers, exact: str):
+        """blind, then picture on its snapshot: (blind_rid, blind_env, picture_env, picture_rid, transition); picture is None when blind did not complete."""
+        brid = record_id("blind", ids)
+        bp = BlindPacket(claim_scope="INDEPENDENT", candidate_id=ids.candidate_id, revision=ids.revision, design_revision=ids.design_revision, record_id=brid, claim_text=exact)
+        benv, _ = self._call(state, "blind-claim-reconstruction-reviewer", Scope.INDEPENDENT, Stage.BLIND, "blind", packets.Packet(bp.render()), ids, brid, expected_exact=None, blind=True)
+        if benv.execution_status != ExecStatus.BLIND_COMPLETE:
+            return brid, benv, None, "", None
+        return (brid, benv, *self._independent_picture(state, bundle, ids, brid, exact))
+
+    def _adopt_independent_recon(self, state: RunState, cur: RevisionState, recon) -> None:
+        brid, benv, penv, prid, tr = recon
+        if penv is None:
+            raise PipelineHalt(Halt(stage=Stage.BLIND.value, role="blind-claim-reconstruction-reviewer", kind="UNVERIFIED", reason_code=benv.reason_code if benv else None,
+                                    message="blind snapshot not complete", record_id=brid))
+        cur.records["blind"] = brid
+        if tr.kind == "RETURN":
+            self._apply_return(state, tr, penv, prid, dependent=False)
+            return
+        if tr.kind == "HALT":
+            self._halt(state, Stage.PICTURE, "picture-claim-reconstruction-reviewer", tr, penv, prid)
+        cur.records["reference_compare"] = prid
+        state.stage = Stage.LOCK
 
     def _prior_text(self, state: RunState) -> str | None:
         for rs in reversed(state.candidate.history):
@@ -1518,25 +1554,31 @@ class PipelineEngine(PriorArtSteps):
             env, _ = self._call(state, role, Scope.DEPENDENT_SET, state.stage, kind, pk, self._ids(state), rids[kind], expected_exact=set_text)
             return env
 
-        if self.cfg.pipeline.max_concurrency > 1:
-            with ThreadPoolExecutor(max_workers=min(3, self.cfg.pipeline.max_concurrency)) as ex:
-                envs = list(ex.map(one, jobs))
-        else:
-            envs = [one(j) for j in jobs]
+        def reviews() -> list[RoleEnvelope]:
+            if self.cfg.pipeline.max_concurrency > 1:
+                with ThreadPoolExecutor(max_workers=min(3, self.cfg.pipeline.max_concurrency)) as ex:
+                    return list(ex.map(one, jobs))
+            return [one(j) for j in jobs]
+
+        # Each target's blind → picture runs alongside the reviews: picture does not read the OA report, and it is
+        # adopted only after success → syntax → OA all pass.
+        recon_jobs = self._dep_recon_jobs(state, cur, root_text, set_text)
+        envs, recon = self._run_pair(reviews, lambda: self._dep_recon_run(state, bundle, d, cur, recon_jobs))
         verdicts = [(role, kind, env, decide(env, contract_for(role, Scope.DEPENDENT_SET), state.request_mode, d.loop_counts, self.cfg.pipeline.max_return_loops))
                     for (role, kind, _), env in zip(jobs, envs)]
         failed = [v for v in verdicts if v[3].kind != "PROCEED"]
         if not failed:
             for _, kind, _, _ in verdicts:
                 cur.records[kind] = rids[kind]
-            state.stage = Stage.DEP_RECON
+            self._dep_recon_adopt(state, cur, recon_jobs, recon)
             return
         role, kind, env, tr = failed[0]
         stage = {"dependent_success": Stage.DEP_SUCCESS, "dependent_syntax": Stage.DEP_SYNTAX, "dependent_oa": Stage.DEP_OA}[kind]
-        if len(failed) > 1:
+        recon_issues, recon_reports = self._dep_recon_findings(recon)
+        if len(failed) > 1 or recon_issues:
             # One revision fixes every reviewer's findings on this text; a passed report is never reused for the next one.
-            issues = [o for _, _, e, _ in failed for o in e.open_issues]
-            report = "\n\n".join(f"### {r} 보고서 ({rids[k]})\n\n{e.report_markdown}" for r, k, e, _ in failed)
+            issues = [o for _, _, e, _ in failed for o in e.open_issues] + recon_issues
+            report = "\n\n".join([f"### {r} 보고서 ({rids[k]})\n\n{e.report_markdown}" for r, k, e, _ in failed] + recon_reports)
             env = env.model_copy(update={"open_issues": issues, "report_markdown": report})
         if tr.kind == "RETURN":
             self._apply_return(state, tr, env, rids[kind], dependent=True)
@@ -1544,6 +1586,11 @@ class PipelineEngine(PriorArtSteps):
         self._halt(state, stage, role, tr, env, rids[kind])
 
     def _dependent_reconstruction(self, state: RunState, bundle: MaterialBundle, d: DependentSetState, cur: DependentRevisionState, root_text: str, set_text: str) -> None:
+        """DEP_RECON on its own: only a run saved before reconstruction moved alongside the reviews lands here."""
+        jobs = self._dep_recon_jobs(state, cur, root_text, set_text)
+        self._dep_recon_adopt(state, cur, jobs, self._dep_recon_run(state, bundle, d, cur, jobs))
+
+    def _dep_recon_jobs(self, state: RunState, cur: DependentRevisionState, root_text: str, set_text: str) -> list[tuple[str, str, str, str | None]]:
         st = Stage.DEP_RECON
         all_claims = ordered_claims(root_text, set_text)
         set_nos = {cl.claim_no for cl in parse_claim_set(set_text)}
@@ -1563,6 +1610,10 @@ class PipelineEngine(PriorArtSteps):
             for k, chain in enumerate(chains):
                 tid = str(cl.claim_no) if len(chains) == 1 else f"{cl.claim_no}-alt{k + 1}"
                 jobs.append((tid, parent_chain_text(chain), cl.text, dc))
+        return jobs
+
+    def _dep_recon_run(self, state: RunState, bundle: MaterialBundle, d: DependentSetState, cur: DependentRevisionState, jobs: list[tuple[str, str, str, str | None]]) -> list:
+        st = Stage.DEP_RECON
 
         def one(job: tuple[str, str, str, str | None]) -> tuple[str, RoleEnvelope | None, RoleEnvelope | None, str, str, Transition | None]:
             tid, chain_text, target_text, dc = job
@@ -1578,18 +1629,30 @@ class PipelineEngine(PriorArtSteps):
             if benv.execution_status != ExecStatus.BLIND_COMPLETE:
                 return tid, benv, None, brid, "", None
             prid = record_id("dependent_reference_compare", ids)
-            pk = packets.picture_dependent(state, self.store, bundle, ids, prid, d.root_lock_id, state.candidate.design_record_id or "", d.design_record_id or "", cur.records.get("dependent_style", ""), cur.records.get("dependent_oa", ""), brid, chain_text, target_text, dc)
+            pk = packets.picture_dependent(state, self.store, bundle, ids, prid, d.root_lock_id, state.candidate.design_record_id or "", d.design_record_id or "", cur.records.get("dependent_style", ""), brid, chain_text, target_text, dc)
             penv, _ = self._call(state, "picture-claim-reconstruction-reviewer", Scope.DEPENDENT_SINGLE, st, "dependent_reference_compare", pk, ids, prid, expected_exact=None, expected_reuse=len(jobs))
             tr = decide(penv, contract_for("picture-claim-reconstruction-reviewer", Scope.DEPENDENT_SINGLE), state.request_mode, d.loop_counts, self.cfg.pipeline.max_return_loops)
             return tid, benv, penv, brid, prid, tr
 
-        results = []
         if self.cfg.pipeline.max_concurrency > 1 and len(jobs) > 1:
             with ThreadPoolExecutor(max_workers=self.cfg.pipeline.max_concurrency) as ex:
-                results = list(ex.map(one, jobs))
-        else:
-            results = [one(j) for j in jobs]
+                return list(ex.map(one, jobs))
+        return [one(j) for j in jobs]
 
+    @staticmethod
+    def _dep_recon_findings(results: list) -> tuple[list[OpenIssue], list[str]]:
+        """Failed pictures' issues and reports, so a review return fixes them in the same revision."""
+        issues: list[OpenIssue] = []
+        reports: list[str] = []
+        for tid, _, penv, _, prid, tr in results:
+            if penv is None or tr is None or tr.kind == "PROCEED":
+                continue
+            issues += [o.model_copy(update={"text": f"제{tid}항: {o.text}"}) for o in penv.open_issues]
+            reports.append(f"### 제{tid}항 비교 보고서 ({prid})\n\n{penv.report_markdown}")
+        return issues, reports
+
+    def _dep_recon_adopt(self, state: RunState, cur: DependentRevisionState, jobs: list[tuple[str, str, str, str | None]], results: list) -> None:
+        st = Stage.DEP_RECON
         gate = "PASS"
         first_return: tuple[Transition, RoleEnvelope, str] | None = None
         halts: list[str] = []
@@ -1667,7 +1730,7 @@ class PipelineEngine(PriorArtSteps):
                                                             exact_sha256=exact_sha256(styled), records=dict(state.candidate.current.records))
                 continue
             if kind == "blind":
-                state.review_reports[role] = self._review_blind(state, req, claim_text, ids)
+                state.review_reports[role] = self._review_blind(state, req, claim_text, ids, bundle)
                 continue
             rid = record_id(kind, ids)
             pk = packets.review_only(state, bundle, ids, rid, role, scope, claim_text, req.request_text)
@@ -1678,36 +1741,39 @@ class PipelineEngine(PriorArtSteps):
         state.outcome = "REVIEW_ONLY_DONE"
         state.notes.append("REVIEW_ONLY 결과는 DRAFT·FINAL LOCK의 PASS 근거가 아니다")
 
-    def _review_blind(self, state: RunState, req: RunRequest, claim_text: str, ids: Identifiers) -> str:
-        """REVIEW_ONLY blind: one snapshot per reviewed claim, each in a fresh no-project context (no materials, request
-        or other reports) — an independent claim by itself, a dependent claim after its exact parent chain.
+    def _review_blind(self, state: RunState, req: RunRequest, claim_text: str, ids: Identifiers, bundle: MaterialBundle) -> str:
+        """REVIEW_ONLY 역피처 검수: one blind snapshot per reviewed claim, each in a fresh no-project context (no materials,
+        request or other reports) — an independent claim by itself, a dependent claim after its exact parent chain — and
+        then picture on each snapshot.
 
         A cited claim is looked up in the reviewed wording, then `parent_claims` (the conversation's drafts), then
         USER_LOCK. Blank citations on a chain are read as the general agent filled them (`citation_fills`, an assumption
-        the label says); a claim whose chain still cannot be built is reported, not guessed. Without a DESIGN_GATE there
-        is nothing to compare a snapshot to, so picture does not follow.
+        the label says); a claim whose chain still cannot be built is reported, not guessed. There is no DESIGN_GATE, so
+        picture compares each snapshot with what the user's materials show; without materials it does not run.
         """
         role = "blind-claim-reconstruction-reviewer"
         fills = req.citation_fills
         targets = [fill_citation(c, fills[n]) if n in fills else c for n, c in numbered_claims(claim_text).items()]
         claims = review_claims(claim_text, req.parent_claims, req.user_lock, fills)
-        jobs: list[tuple[str, Scope, str, BlindPacket, Identifiers]] = []     # (label, scope, record kind, packet, ids)
+        jobs: list[tuple[str, Scope, str, BlindPacket, Identifiers, str]] = []     # (label, scope, record kind, packet, ids, picture record id)
         skipped: list[str] = []
         if not targets:
             if not claim_text.strip():
                 raise ProviderError("블라인드 복원에 넘길 청구항 문언이 없습니다.")
             # Wording without a claim header reads as one independent claim.
             jobs.append(("", Scope.INDEPENDENT, "blind", BlindPacket(claim_scope="INDEPENDENT", candidate_id=ids.candidate_id, revision="r1", design_revision="N/A",
-                                                                     record_id=record_id("blind", ids), claim_text=claim_text.strip()), ids))
+                                                                     record_id=record_id("blind", ids), claim_text=claim_text.strip()), ids,
+                         record_id("reference_compare", ids)))
         for claim in targets:
             label = f"제{claim.claim_no}항"
             if blank_cited([claim]):
                 skipped.append(f"#### {label}\n\n블라인드 복원을 하지 않았습니다: 이 항의 인용항 번호가 비어 있고(제항·제?항) 가정으로도 정하지 못했습니다.")
                 continue
             if claim.is_independent:
-                rid = record_id("blind", ids, sum(1 for j in jobs if j[2] == "blind") + 1)
+                n = sum(1 for j in jobs if j[2] == "blind") + 1
                 jobs.append((label, Scope.INDEPENDENT, "blind", BlindPacket(claim_scope="INDEPENDENT", candidate_id=ids.candidate_id, revision="r1",
-                                                                            design_revision="N/A", record_id=rid, claim_text=claim.text), ids))
+                                                                            design_revision="N/A", record_id=record_id("blind", ids, n), claim_text=claim.text), ids,
+                             record_id("reference_compare", ids, n)))
                 continue
             if any(p >= claim.claim_no for p in claim.parent_nos):
                 skipped.append(f"#### {label}\n\n블라인드 복원을 하지 않았습니다: 자기 자신 또는 뒤 번호의 항을 인용해 부모항 체인을 만들 수 없습니다.")
@@ -1734,18 +1800,33 @@ class PipelineEngine(PriorArtSteps):
                 jobs.append((f"{label} (부모항 체인 제{cited}항{note})", Scope.DEPENDENT_SINGLE, "dependent_blind", BlindPacket(
                     claim_scope="DEPENDENT_SINGLE", candidate_id=ids.candidate_id, revision="r1", design_revision="N/A", record_id=record_id("dependent_blind", dids),
                     dependent_set_id=dids.dependent_set_id, dependent_design_revision="N/A", dependent_revision="r1", target_claim_id=tid,
-                    parent_chain_text=parent_chain_text(chain), target_claim_text=claim.text), dids))
+                    parent_chain_text=parent_chain_text(chain), target_claim_text=claim.text), dids, record_id("dependent_reference_compare", dids)))
 
-        def one(job: tuple[str, Scope, str, BlindPacket, Identifiers]) -> str:
-            label, scope, kind, bp, jids = job
+        compare = bool(bundle.by_category("invention", "drawing", "spec"))
+
+        def one(job: tuple[str, Scope, str, BlindPacket, Identifiers, str]) -> str:
+            label, scope, kind, bp, jids, prid = job
             env, _ = self._call(state, role, scope, Stage.REVIEW_ONLY, kind, packets.Packet(bp.render()), jids, bp.record_id, blind=True)
-            return (f"#### {label}\n\n" if label and len(targets) > 1 else "") + env.report_markdown
+            head = f"#### {label}\n\n" if label and len(targets) > 1 else ""
+            if not compare:
+                return head + env.report_markdown
+            if env.execution_status != ExecStatus.BLIND_COMPLETE:
+                return head + "##### 블라인드 복원\n\n" + env.report_markdown + "\n\n##### 기준 비교\n\n기준 비교를 하지 않았습니다: blind snapshot이 완료되지 않았습니다."
+            dep = scope == Scope.DEPENDENT_SINGLE
+            pkind = "dependent_reference_compare" if dep else "reference_compare"
+            pk = packets.review_picture(state, self.store, bundle, jids, prid, scope.value, bp.record_id,
+                                        (bp.target_claim_text if dep else bp.claim_text) or "", (bp.parent_chain_text if dep else "") or "", req.request_text)
+            penv, _ = self._call(state, "picture-claim-reconstruction-reviewer", scope, Stage.REVIEW_ONLY, pkind, pk, jids, prid)
+            return head + "##### 블라인드 복원\n\n" + env.report_markdown + "\n\n##### 기준 비교 (원자료 기준)\n\n" + penv.report_markdown
 
-        for label, _, kind, bp, _ in jobs:
+        for label, _, kind, bp, _, prid in jobs:
             state.candidate.current.records[f"{kind} {label}".strip()] = bp.record_id
+            if compare:
+                state.candidate.current.records[f"{'dependent_reference_compare' if kind == 'dependent_blind' else 'reference_compare'} {label}".strip()] = prid
         if self.cfg.pipeline.max_concurrency > 1 and len(jobs) > 1:
             with ThreadPoolExecutor(max_workers=self.cfg.pipeline.max_concurrency) as ex:
                 reports = list(ex.map(one, jobs))
         else:
             reports = [one(j) for j in jobs]
-        return "\n\n".join(reports + skipped)
+        lead = [] if compare else ["원자료(발명 자료·도면·명세서)가 없어 기준 비교는 하지 않았습니다. 블라인드 복원 결과만 보입니다."]
+        return "\n\n".join(lead + reports + skipped)

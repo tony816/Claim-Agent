@@ -102,7 +102,7 @@ def test_packet_sharing_preserves_gate_reports_and_excludes_blind(rt, request_de
         assert spec.cache_packet_text
         assert spec.packet_text.count(spec.cache_packet_text) == 1
         assert "DEPENDENT_DESIGN_GATE" in spec.cache_packet_text
-        assert "종속항 OA 보고서 전문" in spec.cache_packet_text
+        assert "OA 보고서" not in spec.packet_text   # picture runs alongside OA and never reads its report
         assert "봉인된 dependent blind snapshot 전문" not in spec.cache_packet_text
     for spec in provider.calls:
         if spec.role == "blind-claim-reconstruction-reviewer":
