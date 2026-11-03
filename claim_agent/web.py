@@ -34,6 +34,7 @@ MIN_GZIP = 1400             # responses above this are gzipped when the browser 
 MAX_PROJECT_TEXT = 100000
 PROJECT_TEXT_FIELDS = ("name", "description", "instructions", "user_lock")
 CASELAW = "CASELAW"         # 작업 도구의 판례 도구 turns: shown in the conversation, never handed to a model
+ADVICE_TIMEOUT = 300        # seconds a tool recommendation may take before the code's own recommendation stands in
 PAGES = {"/": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"), "/style.css": ("style.css", "text/css"),
          "/md.js": ("md.js", "text/javascript"),
          "/prior-art": ("prior_art.html", "text/html"), "/prior_art.js": ("prior_art.js", "text/javascript")}
@@ -84,6 +85,7 @@ class Workspace:
         self.jobs: dict[str, dict] = {}
         self.auth_jobs: dict[str, dict] = {}
         self.improve_jobs: dict[str, dict] = {}   # lesson_id -> running regression gate
+        self.advice_jobs: dict[str, dict] = {}    # message id -> running tool recommendation (자유 작업)
         from .web_survey import Surveys
 
         self.surveys = Surveys(self)              # 선행기술조사 페이지 (대화와 따로)
@@ -98,6 +100,8 @@ class Workspace:
                     if message.get("status") == "running":
                         message["status"] = "stopped"
                         message["text"] += "\n\n[프로그램이 종료되어 응답이 중단되었습니다.]"
+                    if (message.get("advice") or {}).get("status") == "running":
+                        message["advice"] = dict(status="stopped", error="프로그램이 종료되어 도구 추천이 중단되었습니다.")
                 if data.get("project_id") not in self.projects:
                     data["project_id"] = None   # The project folder was removed; the conversation stays.
                 self.sessions[data["id"]] = data
@@ -516,7 +520,7 @@ class Workspace:
                 raise ValueError("메시지를 입력하세요. 최대 20만 글자까지 보낼 수 있습니다.")
             selected = data.get("files", [])
             if session.get("work_mode") == FREE:
-                return self.start_free(sid, text, selected)
+                return self.start_free(sid, text, selected, data)
             status = self.run_status(session.get("run_id"))
             halt = status and status["halt"]
             kind = chat_resume_kind(text, halt, bool(selected))
@@ -558,7 +562,7 @@ class Workspace:
                                                claim_target=dict(mode=target_mode, dependent=dependent, target=target)),
                             "CHAT", files=list(dict.fromkeys(selected)))
 
-    def start_free(self, sid: str, text: str, selected) -> None:
+    def start_free(self, sid: str, text: str, selected, data: dict | None = None) -> None:
         """자유 작업: the general agent answers without the router or gates; its claim wording stays unreviewed.
 
         Only this turn's attachments travel with the message (earlier ones are already in the history); the project's
@@ -571,6 +575,7 @@ class Workspace:
         if not isinstance(selected, list) or any(not isinstance(x, str) or x not in known for x in selected):
             raise ValueError("이 대화에 첨부된 파일만 사용할 수 있습니다.")
         selected = list(dict.fromkeys(selected))
+        self.record_use(session, data or {}, [])
         preset = self.project_inputs(session)
         request = dict(text=text, files=[str(validate_attachment(folder / "uploads" / fid / known[fid]["name"]).path) for fid in selected],
                        project_attachments=preset["attachments"], history=(read_state(folder / "history.json") or {}).get("history", []),
@@ -600,6 +605,7 @@ class Workspace:
                 raise ValueError("메시지는 최대 20만 글자까지 보낼 수 있습니다.")
             source, target = self.claim_source(session, data.get("message"))
             self.require_connection(session)
+            self.record_use(session, data, roles, source["id"])
             # The conversation's own uploads are in the history already; the project's files travel as material.
             preset = self.project_inputs(session)
             request = dict(text=review_request_text(roles, note), files=preset["files"], attachments=preset["attachments"],
@@ -648,6 +654,7 @@ class Workspace:
             if tool == "enforce":
                 source, claims = self.claim_source(session, data.get("message"))
                 target = ("내 메시지" if source["role"] == "user" else "에이전트 답변") + f" #{session['messages'].index(source) + 1}"
+            self.record_use(session, data, [tool], source["id"] if source else None)
         # Outside the lock: the record files, the DB quote check and Jev take a second or two.
         answer = caselaw_tool.run(tool, root=self.cfg.project_root, paths=cl.Paths.from_config(self.cfg), text=text, claims=claims, target=target)
         asked = f"[판례 도구 · {caselaw_tool.TOOLS[tool]}] " + (f"{target}의 청구항" if tool == "enforce" else text.strip())
@@ -677,6 +684,176 @@ class Workspace:
 
         with self.lock:
             return phrases.reset(self.folder)
+
+    # ---- 자유 작업의 도구 추천과 평가 폼 (측정용 — 모델 입력·게이트·근거가 아니다) ------------------------------------------
+    @staticmethod
+    def advised_message(session: dict, *ids) -> dict | None:
+        """The answer a tool use belongs to: the first of `ids` that carries a recommendation, else the newest that does."""
+        advised = [m for m in session["messages"] if m.get("role") == "assistant" and m.get("advice")]
+        for mid in ids:
+            found = next((m for m in advised if m["id"] == mid), None)
+            if found:
+                return found
+        return advised[-1] if advised else None
+
+    def record_use(self, session: dict, data: dict, tools: list[str], target: str | None = None) -> None:
+        """The tools the user ran after an answer, for its evaluation form's '사용한 도구' (caller holds the lock).
+
+        `advice` names the answer whose recommendation the user clicked, `via` the tools picked from it, and `phrases` the
+        feedback phrases still in the sent text. Without `advice` the use goes to the target's answer or the newest one.
+        """
+        from .tool_advice import PHRASE
+
+        via = {v for v in data.get("via") or [] if isinstance(v, str)}
+        rows = [dict(tool=tool, via="advice" if tool in via else "panel") for tool in tools]
+        for item in (data.get("phrases") or [])[:10]:
+            if isinstance(item, dict) and str(item.get("text") or "").strip():
+                rows.append(dict(tool=PHRASE, via="advice" if item.get("via") == "advice" else "panel",
+                                 phrase_id=str(item.get("id") or "")[:40], text=str(item["text"]).strip()[:300]))
+        message = self.advised_message(session, data.get("advice"), target) if rows else None
+        if message:
+            message.setdefault("used_tools", []).extend({**row, "at": time.time()} for row in rows)
+
+    def advice_request(self, session: dict, message: dict) -> dict:
+        """What the recommender reads: the answer, the request it answered, the claims a review would run on, the tools
+        already run in this conversation, whether material exists, and the saved feedback phrases."""
+        from .graph.caselaw_tool import TOOLS as CASELAW_TOOLS
+
+        messages = session["messages"]
+        index = messages.index(message)
+        asked = next((m["text"] for m in reversed(messages[:index]) if m["role"] == "user"), "")
+        review = message.get("review") or {}
+        target, claims = message["id"], ""
+        if message["mode"] == "REVIEW" and not review.get("revise"):
+            # A review report only quotes what it read: the tools would run on its source again.
+            try:
+                source, claims = self.claim_source(session, review.get("source"))
+                target = source["id"]
+            except ValueError:
+                target = None
+        else:
+            claims = (review.get("revise") and review.get("claim_text")) or review_target(message["text"]) or ""
+            target = target if claims else None
+        number = {m["id"]: i + 1 for i, m in enumerate(messages)}
+        ran = []
+        for m in messages[:index]:
+            if m["role"] != "user" or m.get("mode") not in ("REVIEW", CASELAW):
+                continue
+            detail = m.get("review") or m.get("caselaw") or {}
+            names = [REVIEW_ROLES[r] for r in detail.get("roles") or [] if r in REVIEW_ROLES] or [CASELAW_TOOLS.get(detail.get("tool"), "")]
+            where = number.get(detail.get("source"))
+            ran.append(", ".join(n for n in names if n) + (f" → 메시지 #{where}" if where else ""))
+        uploads = [f["name"] for f in session.get("files", [])]
+        pid = session.get("project_id")
+        project_files = self.projects[pid]["files"] if pid in self.projects else []
+        drawings = (sum(1 for n in uploads if Path(n).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"})
+                    + sum(1 for f in project_files if f.get("category") == "drawing"))
+        return dict(answer=message["text"], asked=asked, kind="REVISED" if review.get("revise") else message["mode"], claims=claims,
+                    target=target, ran=ran, materials=dict(files=len(uploads) + len(project_files), drawings=drawings),
+                    phrases=self.phrases()["phrases"])
+
+    def advise(self, sid: str, mid: str) -> None:
+        """Start the tool recommendation of one free-mode answer in the background (the composer stays free)."""
+        with self.lock:
+            session = self.sessions.get(sid)
+            message = next((m for m in session["messages"] if m["id"] == mid), None) if session else None
+            if not message or message.get("status") != "complete":
+                return
+            request = self.advice_request(session, message)
+            job_dir = self.root / ".tui" / "requests" / ("advice-" + uuid.uuid4().hex)
+            job_dir.mkdir(parents=True)
+            save_json(job_dir / "advice-request.json", request)
+            settings = self.pin_settings(job_dir, session)
+            message["advice"] = dict(status="running", target=request["target"], started=time.time())
+            self.persist(session)
+            job = dict(process=None, done=False, stopped=False, request=request)
+            self.advice_jobs = {k: v for k, v in self.advice_jobs.items() if not v["done"]}
+            self.advice_jobs[mid] = job
+            thread = threading.Thread(target=self.run_advice, args=(sid, mid, job, job_dir, settings), daemon=True)
+            job["thread"] = thread
+        thread.start()
+
+    def run_advice(self, sid: str, mid: str, job: dict, job_dir: Path, settings: Path) -> None:
+        from .tool_advice import rules, signals
+
+        command = [sys.executable, "-u", "-m", "claim_agent.tool_advice", "--project-root", str(self.root), "--request", str(job_dir / "advice-request.json")]
+        if self.config:
+            command += ["--config", str(self.config)]
+        result, error = None, ""
+        try:
+            options = child_options(self.root)
+            if os.name != "nt":
+                options["start_new_session"] = True
+            options["env"]["CLAIM_AGENT_EVENT_LOG"] = str(job_dir / "events.jsonl")
+            options["env"][SETTINGS_ENV] = str(settings)
+            with (job_dir / "console.log").open("w", encoding="utf-8") as console:
+                with self.lock:
+                    if job["stopped"]:
+                        return
+                    job["process"] = subprocess.Popen(command, stdout=console, stderr=subprocess.STDOUT, **options)
+                try:
+                    job["process"].wait(timeout=ADVICE_TIMEOUT)
+                except subprocess.TimeoutExpired:
+                    error = f"도구 추천이 {ADVICE_TIMEOUT}초 안에 끝나지 않았습니다."
+            result = None if error else read_state(job_dir / "advice.json")
+            if not result and not error:
+                error = "도구 추천 에이전트가 결과를 내지 못했습니다. " + (job_dir / "console.log").read_text(encoding="utf-8", errors="replace")[-300:]
+        except Exception as exc:  # noqa: BLE001 - the form still gets the code's recommendation
+            error = str(exc)
+        finally:
+            process = job.get("process")
+            if process and process.poll() is None:
+                from .processes import terminate_tree
+
+                terminate_tree(process)
+                process.wait()
+        if not result:
+            # The child never answered: the code's own recommendation, so the evaluation form has one to measure.
+            request = job["request"]
+            counted = signals(request["claims"], request["answer"])
+            result = dict(status="complete", source="rules", error=error, signals=counted, finished=time.time(), **rules(request, counted))
+        with self.lock:
+            job["done"] = True
+            session = self.sessions.get(sid)
+            message = next((m for m in session["messages"] if m["id"] == mid), None) if session else None
+            if message is None or job["stopped"]:
+                return
+            message["advice"] = {**result, "target": job["request"]["target"], "error": self.redact(result.get("error") or "")}
+            self.persist(session)
+
+    def evaluate(self, sid: str, data: dict) -> dict:
+        """Save the evaluation form of one free-mode answer: on the message, and as one line of the measurement log."""
+        from . import evaluations
+
+        form = evaluations.validate(data)
+        with self.lock:
+            self.directory(sid)
+            session = self.sessions[sid]
+            message = next((m for m in session["messages"] if m["id"] == data.get("message") and m.get("role") == "assistant"), None)
+            if not message or message.get("mode") not in ("FREE", "REVIEW") or message.get("status") == "running":
+                raise ValueError("평가할 답변을 찾을 수 없습니다.")
+            revision = (message.get("evaluation") or {}).get("revision", 0) + 1
+            message["evaluation"] = {**form, "saved": time.time(), "revision": revision}
+            advice = message.get("advice") or {}
+            cfg = self.session_cfg(session)
+            evaluations.append(self.folder, dict(
+                ts=time.time(), session=sid, project=session.get("project_id"), message=message["id"], mode=message["mode"],
+                kind="REVISED" if (message.get("review") or {}).get("revise") else message["mode"], revision=revision,
+                provider=cfg.provider.kind, model=cfg.default_model,
+                advice=dict(source=advice.get("source"), model=advice.get("model"), tools=[t["tool"] for t in advice.get("tools") or []],
+                            phrases=[p.get("phrase_id") or p.get("text", "")[:80] for p in advice.get("phrases") or []],
+                            signals=advice.get("signals")),
+                used=[{k: u.get(k) for k in ("tool", "via", "phrase_id")} for u in message.get("used_tools") or []],
+                evaluation=form))
+            self.persist(session)
+            return message["evaluation"]
+
+    def evaluation_summary(self) -> dict:
+        from . import evaluations
+
+        with self.lock:
+            advised = sum(1 for s in self.sessions.values() for m in s["messages"] if (m.get("advice") or {}).get("status") == "complete")
+        return evaluations.summary(self.folder, advised)
 
     def spawn_chat(self, sid: str, request: dict, user: dict, mode: str, files: list[str] | None = None, answer: dict | None = None) -> None:
         """Write one chat.json, add the user turn and a running answer, and run claim_agent.chat on it (caller holds the lock)."""
@@ -977,6 +1154,9 @@ class Workspace:
                             message["review"]["claim_text"] = self.redact(result["claim_text"])
                     if result.get("run_id") and result.get("effective_mode") in {"AUTHORING_DRAFT", "FINALIZATION"}:
                         session["run_id"] = result["run_id"]
+                    # 자유 작업: the tool recommendation starts as soon as the answer is in, without holding the composer.
+                    job["advise"] = (message["mode"] in ("FREE", "REVIEW") and message["status"] == "complete"
+                                     and self.cfg.conversation.tool_advice == "on")
                 else:
                     folder = self.cfg.path("runs_dir") / job["run_id"]
                     report = folder / "report.md"
@@ -1012,6 +1192,13 @@ class Workspace:
                 job["done"] = True
                 session["updated"] = time.time()
                 self.persist(session)
+        if job.get("advise") and not job["stopped"]:
+            try:
+                self.advise(sid, job["mid"])
+            except Exception as exc:  # noqa: BLE001 - the answer is delivered; only its recommendation is missing
+                with self.lock:
+                    message["advice"] = dict(status="error", error=self.redact(str(exc)))
+                    self.persist(session)
         handoff = job.get("handoff")
         if handoff:
             try:
@@ -1035,8 +1222,16 @@ class Workspace:
     def close(self) -> None:
         for sid in list(self.jobs):
             self.stop(sid)
-        for job in list(self.jobs.values()):
-            job["thread"].join(timeout=5)
+        with self.lock:
+            for job in self.advice_jobs.values():
+                job["stopped"] = True
+                if job.get("process") and job["process"].poll() is None:
+                    from .processes import terminate_tree
+
+                    terminate_tree(job["process"])
+        for job in [*self.jobs.values(), *self.advice_jobs.values()]:
+            if job.get("thread"):
+                job["thread"].join(timeout=5)
         self.surveys.close()
 
 
@@ -1130,6 +1325,19 @@ class Handler(BaseHTTPRequestHandler):
                 self.json(workspace.model_settings(query.get("id", [""])[0] or None))
             elif url.path == "/api/phrases":
                 self.json(workspace.phrases())
+            elif url.path == "/api/evaluations":
+                self.json(workspace.evaluation_summary())
+            elif url.path == "/api/evaluations/export":
+                from . import evaluations
+
+                payload = evaluations.export(workspace.folder)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + quote("claim-agent-evaluations.jsonl"))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(payload)
             elif url.path == "/api/auth/status":
                 self.json(workspace.auth_status())
             elif url.path == "/api/sessions":
@@ -1251,6 +1459,8 @@ class Handler(BaseHTTPRequestHandler):
             elif url.path == "/api/caselaw":
                 workspace.caselaw(str(data.get("id", "")), data)
                 self.json({"ok": True})
+            elif url.path == "/api/evaluation":
+                self.json(workspace.evaluate(str(data.get("id", "")), data))
             elif url.path == "/api/survey/start":
                 self.json(workspace.surveys.start(data))
             elif url.path == "/api/survey/stop":

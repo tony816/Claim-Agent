@@ -10,15 +10,18 @@ from dotenv import load_dotenv
 
 from .config import AppConfig, apply_overrides
 from .model_catalog import gemini_models, openrouter_catalog, openrouter_models
-from .provider.subscription import KINDS, auth_home, connection_status
 from .moderator import MODERATOR
+from .provider.subscription import KINDS, auth_home, connection_status
 from .roles.registry import ROLE_NAMES
+from .tool_advice import ROLE as TOOL_ADVICE
+from .tool_advice import ROLE_LABEL as TOOL_ADVICE_LABEL
 
-# The pipeline roles plus the conversation moderator, which reads every message's intent and answers over the results:
-# it has no role file, but the user picks its model here like any other (claim-agent.yaml roles.conversation-moderator).
-SETTINGS_ROLES = [*ROLE_NAMES, MODERATOR]
+# The pipeline roles plus the conversation moderator, which reads every message's intent and answers over the results,
+# and the free mode's tool recommender: neither has a role file, but the user picks their models here like any other
+# (claim-agent.yaml roles.conversation-moderator, roles.tool-recommender).
+SETTINGS_ROLES = [*ROLE_NAMES, MODERATOR, TOOL_ADVICE]
 ROLE_LABELS = ["독립항 설계", "의미 초안 작성", "용어·스타일 조정", "성공조건 검수", "통사·범위 검수", "OA 전략 검수", "블라인드 복원", "도면·기준 비교", "종속항 전략 설계", "선행기술 검색 문장", "사전 심사",
-               "최상류 과제 탐색", "대화 모더레이터 (요청 분류·답변)"]
+               "최상류 과제 탐색", "대화 모더레이터 (요청 분류·답변)", TOOL_ADVICE_LABEL]
 PROVIDERS = {
     "gemini": {"label": "Gemini · API 키", "models": []},     # models.list로 채운다(model_catalog)
     # CLI가 받는 별칭 프리셋(`claude --model`, 별칭은 늘 최신판)과 최신 정확 ID. Claude CLI에는 모델 목록 명령이 없다.

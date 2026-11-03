@@ -147,7 +147,8 @@ const CASELAW_TOOLS=[["enforce","권리행사 점검","대상 청구항에서 �
 const CASELAW_LABEL=Object.fromEntries(CASELAW_TOOLS.map(([id,label])=>[id,label]));
 const CASELAW_PLACEHOLDER={enforce:"Enter → 대상 청구항을 권리행사 판례로 점검합니다 · 입력창의 말은 쓰지 않습니다",find:"지적이나 청구항 문언을 적고 Enter · 예: '대략 수평으로'는 기준면과 허용 각도가 없음",features:"특징을 한 줄에 하나씩 적고 Enter · 유형을 알면 '가열 온도 300~400℃::F-NUMERIC'처럼"};
 const CLAIM_HEAD=/^[ \t]*(?:\*\*)?(?:【\s*청구항\s*\d+\s*】|\[\s*청구항\s*\d+\s*\])/m;
-const tools={open:false,roles:new Set(),caselaw:null,target:"",options:null,phrases:[],editing:false};   // target "" = 가장 최근 청구항을 따라감
+const tools={open:false,roles:new Set(),caselaw:null,target:"",options:null,phrases:[],editing:false,adviceFrom:null,via:new Set(),phrasesUsed:[]};   // target "" = 가장 최근 청구항을 따라감
+// adviceFrom·via·phrasesUsed: 도구 추천에서 고른 답·도구와 입력창에 넣은 멘트. 보낼 때 서버가 그 답의 평가 폼 '사용한 도구'에 기록한다.
 function freeMode(){return state.data?.work_mode==="free";}
 async function setWorkMode(mode){
   if(!state.id||state.busy||state.data?.running||state.data?.work_mode===mode)return;
@@ -217,7 +218,8 @@ function render(data){
         copy.onclick=async()=>{try{await navigator.clipboard.writeText(view.text);copy.textContent="복사됨";setTimeout(()=>copy.textContent="복사",1300);}catch(e){error("텍스트를 선택한 뒤 Ctrl+C로 복사하세요.");}};
         revise.onclick=()=>{$("prompt").focus();controls();};actions.append(copy,revise);article.append(actions);
       }
-      $("messages").append(article);view={article,body,logs,pre,summary,routeLabel,full,fullBody,text:null,status:null};state.nodes.set(m.id,view);
+      const adviceBox=m.role==="assistant"?el("section","advice"):null;if(adviceBox){adviceBox.hidden=true;article.append(adviceBox);}
+      $("messages").append(article);view={article,body,logs,pre,summary,routeLabel,full,fullBody,adviceBox,adviceKey:null,text:null,status:null};state.nodes.set(m.id,view);
     }
     if(view.full)view.full.hidden=!(m.pipeline_run_id&&m.status&&m.status!=="running");
     if(view.logs)view.logs.hidden=!m.log_id;      // 작업 로그가 없는 답(판례 도구 등)에는 펼칠 로그가 없다
@@ -227,6 +229,7 @@ function render(data){
       if(m.status==="running"){view.pre.textContent=state.log.text||"연결 중…";view.summary.textContent="작업 중 · 실시간 로그";if(view.status!=="running")view.logs.open=true;}
       else {view.summary.textContent=(m.status==="error"?"오류 확인 · ":m.status==="review"?"검토 필요 · ":"")+"작업 로그 펼치기";if(view.status==="running"){view.logs.open=false;view.pre.textContent="";}}
     }
+    if(view.adviceBox)renderAdvice(view,m);
     view.status=m.status;
   }
   renderRun(data);renderTools();controls();if(follow)box.scrollTop=box.scrollHeight;
@@ -263,7 +266,7 @@ async function open(id){
   if(state.busy||state.uploading)return;
   if(state.id)drafts.set(state.id,{text:$("prompt").value,files:state.pending});
   const version=++state.generation;state.log={cursor:null, text:""};const data=await fetchSession(id,false);if(version!==state.generation)return;
-  if(state.id!==id){resetTarget();tools.roles.clear();tools.target="";tools.options=null;}
+  if(state.id!==id){resetTarget();tools.roles.clear();tools.target="";tools.options=null;tools.adviceFrom=null;tools.via.clear();tools.phrasesUsed=[];}
   state.id=id;state.nodes.clear();$("messages").replaceChildren();state.pending=drafts.get(id)?.files||[];
   $("prompt").value=drafts.get(id)?.text||localStorage.getItem("draft-"+id)||"";
   state.project=data.project?data.project.id:null;if(state.project)localStorage.setItem("claim-project",state.project);else localStorage.removeItem("claim-project");
@@ -298,9 +301,11 @@ async function send(event){
   const free=freeMode(),t=claimTarget();if(!free&&!lookup&&!t.ok){error(t.error);return;}
   state.busy=true;controls();error("");const id=state.id,text=$("prompt").value;
   // 자유 작업에는 작성 대상·선행기술 검색 옵션이 없다(일반 에이전트가 요청 문장대로 답한다).
-  const [path,body]=lookup?["/api/caselaw",{id,tool:lookup.tool,message:lookup.target?.m.id,text:lookup.tool==="enforce"?"":text}]:pick?["/api/review",{id,message:pick.m.id,roles:[...tools.roles],text}]:["/api/send",free?{id,text,files:state.pending.map(f=>f.id)}:{id,text,files:state.pending.map(f=>f.id),target_mode:t.target_mode,target_claim:t.target_claim,target_segments:t.target_segments,dependent:t.dependent,target:t.target,prior_search:$("prior-search").checked}];
+  // 평가 폼의 '사용한 도구' 자동 기록: 추천에서 고른 답·도구, 보내는 글에 아직 남아 있는 멘트.
+  const used={advice:tools.adviceFrom,via:[...tools.via],phrases:lookup?.tool==="enforce"?[]:tools.phrasesUsed.filter(p=>text.includes(p.text))};
+  const [path,body]=lookup?["/api/caselaw",{id,tool:lookup.tool,message:lookup.target?.m.id,text:lookup.tool==="enforce"?"":text,...used}]:pick?["/api/review",{id,message:pick.m.id,roles:[...tools.roles],text,...used}]:["/api/send",free?{id,text,files:state.pending.map(f=>f.id),...used}:{id,text,files:state.pending.map(f=>f.id),target_mode:t.target_mode,target_claim:t.target_claim,target_segments:t.target_segments,dependent:t.dependent,target:t.target,prior_search:$("prior-search").checked}];
   const keep=lookup?.tool==="enforce";        // 권리행사 점검은 입력창의 말을 보내지 않으므로 지우지 않는다
-  try{await api(path,body);if(pick)tools.roles.clear();if(lookup)tools.caselaw=null;if(!keep){$("prompt").value="";localStorage.removeItem("draft-"+id);drafts.delete(id);}state.pending=[];pending();resize();await refresh();restartPoll();await list();$("conversation").scrollTop=$("conversation").scrollHeight;}
+  try{await api(path,body);if(pick)tools.roles.clear();if(lookup)tools.caselaw=null;tools.adviceFrom=null;tools.via.clear();if(!keep){tools.phrasesUsed=[];$("prompt").value="";localStorage.removeItem("draft-"+id);drafts.delete(id);}state.pending=[];pending();resize();await refresh();restartPoll();await list();$("conversation").scrollTop=$("conversation").scrollHeight;}
   catch(e){error(e.message);}finally{state.busy=false;controls();$("prompt").focus();}
 }
 $("composer").onsubmit=send;
@@ -559,9 +564,10 @@ async function openImprove(){
   $("conversation").hidden=true;document.querySelector("main footer").hidden=true;$("project-panel").hidden=true;$("improve-panel").hidden=false;
   document.body.classList.remove("sidebar-open");error("");
   try{await loadImprove();}catch(e){error(e.message);}
+  await loadEvals();
 }
 $("improve-open").onclick=()=>openImprove();
-$("improve-refresh").onclick=()=>loadImprove().catch(e=>error(e.message));
+$("improve-refresh").onclick=()=>{loadImprove().catch(e=>error(e.message));loadEvals();};
 $("improve-mine").onclick=async()=>{
   const button=$("improve-mine");button.disabled=true;button.textContent="분석 중…";
   try{const out=await api("/api/improve/mine",{});
@@ -572,7 +578,8 @@ $("improve-mine").onclick=async()=>{
 };
 for(const tab of document.querySelectorAll(".improve-tab"))tab.onclick=()=>{
   for(const other of document.querySelectorAll(".improve-tab"))other.classList.toggle("is-on",other===tab);
-  for(const name of ["lessons","cases","audit"])$("improve-"+name).hidden=name!==tab.dataset.tab;
+  for(const name of ["lessons","cases","audit","evals"])$("improve-"+name).hidden=name!==tab.dataset.tab;
+  if(tab.dataset.tab==="evals")loadEvals();
 };
 // ---- 작업 도구 패널 (오른쪽): 대상 청구항 + 검수 도구 + 판례 도구 + 피드백 멘트. 누르면 고르기만 하고, 실행은 입력창의 Enter다.
 function reviewLabels(review){return ((review?.roles)||[review?.role]).map(r=>REVIEW_LABEL[r]).filter(Boolean).join(" · ");}
@@ -612,7 +619,7 @@ function renderTools(){
   for(const [id,view] of state.nodes)view.article.classList.toggle("review-target",visible&&!!marked&&id===marked.m.id);
   const chip=$("tool-chip");chip.replaceChildren();chip.hidden=!(lookup||(target&&tools.roles.size));
   if(!chip.hidden){
-    const cancel=el("button","","×");cancel.type="button";cancel.title=lookup?"고른 판례 도구 취소":"고른 검수 취소";cancel.setAttribute("aria-label",cancel.title);cancel.onclick=()=>{tools.roles.clear();tools.caselaw=null;renderTools();controls();$("prompt").focus();};
+    const cancel=el("button","","×");cancel.type="button";cancel.title=lookup?"고른 판례 도구 취소":"고른 검수 취소";cancel.setAttribute("aria-label",cancel.title);cancel.onclick=()=>{tools.roles.clear();tools.caselaw=null;tools.adviceFrom=null;tools.via.clear();renderTools();controls();$("prompt").focus();};
     const what=lookup?"판례 도구 · "+CASELAW_LABEL[lookup.tool]+(lookup.target?" → "+candidateLabel(lookup.target):""):reviewLabels({roles:REVIEW_ROLES.map(([r])=>r).filter(r=>tools.roles.has(r))})+" → "+candidateLabel(target);
     chip.append(el("span","tool-chip-label",""),el("span","",what),cancel,el("span","tool-chip-hint",""));
   }
@@ -644,7 +651,9 @@ for(const [tool,label,title] of CASELAW_TOOLS){
 $("review-target").onchange=()=>{tools.target=$("review-target").value;renderTools();controls();const t=reviewTarget();if(t)state.nodes.get(t.m.id)?.article.scrollIntoView({block:"center",behavior:"smooth"});};
 $("tool-toggle").onclick=()=>setTools(!tools.open);$("tool-close").onclick=()=>setTools(false);
 // 피드백 멘트: 누르면 입력창 커서 자리에 넣는다(보내지 않음). 목록은 이 컴퓨터에 저장되고, 저장된 목록이 없으면 기본 목록이다.
-function insertPhrase(text){
+// track: 멘트로 기록할 때 {id, via, advice}(도구 추천에서 넣었으면 via "advice"와 그 답 id). 기록하지 않는 글(덧붙일 말)은 생략한다.
+function insertPhrase(text,track){
+  if(track){tools.phrasesUsed.push({id:track.id||"",text,via:track.via||"panel"});if(track.advice)tools.adviceFrom=track.advice;}
   const p=$("prompt"),start=p.selectionStart??p.value.length,end=p.selectionEnd??p.value.length,before=p.value.slice(0,start),after=p.value.slice(end);
   const lead=before&&!/\s$/.test(before)?"\n":"",tail=after&&!/^\s/.test(after)?"\n":"";
   p.value=before+lead+text+tail+after;const caret=(before+lead+text).length;p.focus();p.setSelectionRange(caret,caret);
@@ -655,7 +664,7 @@ function renderPhrases(){
   for(const p of tools.phrases){if(!groups.has(p.group))groups.set(p.group,[]);groups.get(p.group).push(p);}
   for(const [group,items] of groups){
     box.append(el("p","phrase-group",group));
-    for(const p of items){const row=el("div","phrase-row"),button=el("button","phrase",p.text);button.type="button";button.title="입력창에 넣기 (보내지 않음)";button.onclick=()=>insertPhrase(p.text);row.append(button);
+    for(const p of items){const row=el("div","phrase-row"),button=el("button","phrase",p.text);button.type="button";button.title="입력창에 넣기 (보내지 않음)";button.onclick=()=>insertPhrase(p.text,{id:p.id});row.append(button);
       if(tools.editing){const del=el("button","phrase-delete","×");del.type="button";del.setAttribute("aria-label","멘트 삭제: "+p.text);del.onclick=()=>savePhrases(tools.phrases.filter(x=>x.id!==p.id));row.append(del);}
       box.append(row);}
   }
@@ -670,3 +679,158 @@ $("phrase-form").onsubmit=async event=>{event.preventDefault();const text=$("phr
 $("phrase-reset").onclick=async()=>{if(!confirm("피드백 멘트를 기본 목록으로 되돌릴까요? 추가하거나 지운 내용은 사라집니다."))return;try{tools.phrases=(await api("/api/phrases/reset",{})).phrases;renderPhrases();}catch(e){error(e.message);}};
 try{const saved=localStorage.getItem("claim-tools");tools.open=saved===null?window.innerWidth>=1200:saved==="1";}catch(e){tools.open=window.innerWidth>=1200;}
 renderTools();loadPhrases();
+
+// ---- 자유 작업의 도구 추천과 평가 폼: 답이 나오면 추천 에이전트가 다음 도구·멘트를 고르고(참고 — 게이트·근거 아님),
+// 그 아래 폼에 청구항 평가·추천 적합·사용한 도구별 평가·피드백을 남긴다. 기록은 앱 개선용 측정이며 모델에 전달되지 않는다.
+const ADVICE_TOOLS={...REVIEW_LABEL,...CASELAW_LABEL,phrase:"피드백 멘트"};
+const EVAL_USABLE=[["as_is","그대로 사용"],["edit","고쳐서 사용"],["unusable","사용 어려움"]];
+const EVAL_FIT=[["hit","맞음"],["partial","일부만"],["miss","아님"]];
+const EVAL_RATING=[["good","도움 됨"],["ok","보통"],["bad","도움 안 됨"]];
+const EVAL_TAGS=[["scope_narrow","범위가 좁음"],["scope_broad","범위가 넓거나 모호함"],["missing","구성·관계 누락"],["unsupported","원자료에 없는 내용"],["unclear","지칭·귀속 불명확"],["functional","기능적 표현"],["format","형식·용어 오류"],["verbose","장황함"]];
+const evalDrafts=new Map();     // 답 id → 작성 중인 폼(폴링으로 다시 그려도 입력이 남는다)
+function adviceEligible(m){return m.role==="assistant"&&(m.mode==="FREE"||m.mode==="REVIEW")&&m.status==="complete";}
+function latestEligibleId(){const list=(state.data?.messages||[]).filter(adviceEligible);return list.length?list.at(-1).id:null;}
+function clock(t){return t?new Date(t*1000).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"}):"";}
+function renderAdvice(view,m){
+  const box=view.adviceBox;
+  if(!adviceEligible(m)){box.hidden=true;view.adviceKey=null;return;}
+  const key=JSON.stringify([m.advice||null,(m.used_tools||[]).length,m.evaluation?.saved||null,m.id===latestEligibleId(),freeMode()]);
+  if(key===view.adviceKey)return;
+  if(view.adviceKey&&box.contains(document.activeElement))return;    // 폼에 입력 중이면 다음 폴링에서 그린다
+  view.adviceKey=key;box.hidden=false;box.replaceChildren(adviceSection(m),evalForm(m));
+}
+// 추천 도구를 누르면 작업 도구 패널에서 그 도구와 대상 청구항을 고르기만 한다(실행은 Enter). 판례 찾기·특허성 신호는 조회 문장도 넣는다.
+function pickAdvice(m,pick){
+  if(state.data?.running||state.busy)return;
+  const target=m.advice?.target,known=!!target&&reviewCandidates().some(c=>c.m.id===target);
+  if(REVIEW_LABEL[pick.tool]){
+    if(!freeMode()){error("검수 도구는 자유 작업 모드에서 씁니다. 위쪽에서 자유 작업으로 바꾸세요.");return;}
+    if(!known){error("추천한 검수를 실행할 청구항 메시지를 찾을 수 없습니다.");return;}
+    tools.target=target;tools.caselaw=null;tools.roles.add(pick.tool);
+  }else{
+    if(pick.tool==="enforce"){if(!known){error("권리행사 점검을 할 청구항 메시지를 찾을 수 없습니다.");return;}tools.target=target;}
+    tools.roles.clear();tools.caselaw=pick.tool;
+    if(pick.focus&&!$("prompt").value.trim())insertPhrase(pick.focus);
+  }
+  error("");tools.adviceFrom=m.id;tools.via.add(pick.tool);
+  if(!tools.open)setTools(true);else renderTools();
+  controls();$("prompt").focus();
+}
+function adviceSection(m){
+  const a=m.advice,wrap=el("div","advice-body"),head=el("div","advice-head");head.append(el("strong","","도구 추천"));wrap.append(head);
+  if(!a){head.append(el("span","advice-src","이 답에는 추천이 없습니다 (기능 도입 전의 답이거나 설정에서 꺼져 있음)"));return wrap;}
+  if(a.status==="running"){head.append(el("span","advice-src pending","답을 읽고 다음에 쓸 도구를 고르는 중…"));return wrap;}
+  if(a.status!=="complete"){head.append(el("span","advice-src",a.error||"도구 추천을 받지 못했습니다."));return wrap;}
+  const src=el("span","advice-src",(a.source==="agent"?"추천 에이전트":"규칙 추천 · 에이전트 호출 실패")+" · 참고 — 게이트·근거 아님");if(a.error)src.title=a.error;head.append(src);
+  if(a.summary)wrap.append(el("p","advice-summary",a.summary));
+  const picks=el("div","advice-picks");
+  (a.tools||[]).forEach((t,i)=>{
+    const row=el("div","advice-row"),b=el("button","advice-pick");b.type="button";b.title="작업 도구에서 고르기 — 실행은 입력창의 Enter";
+    b.append(el("strong","",(i+1)+". "+(ADVICE_TOOLS[t.tool]||t.tool)),el("span","",t.reason||""));b.onclick=()=>pickAdvice(m,t);row.append(b);
+    if(t.focus&&REVIEW_LABEL[t.tool]){const f=el("button","advice-focus","덧붙일 말 넣기 · “"+t.focus+"”");f.type="button";f.title="입력창에 넣으면 검수 뒤 일반 에이전트가 이 요청대로 처리합니다";f.onclick=()=>insertPhrase(t.focus);row.append(f);}
+    picks.append(row);
+  });
+  if(!(a.tools||[]).length)picks.append(el("p","advice-none","추천한 검수·판례 도구가 없습니다."));
+  wrap.append(picks);
+  for(const p of a.phrases||[]){
+    const row=el("div","advice-row"),b=el("button","advice-phrase");b.type="button";b.title="입력창에 넣기 (보내지 않음)"+(p.reason?" · "+p.reason:"");
+    b.append(el("strong","",p.phrase_id?"멘트":"새 멘트"),el("span","",p.text));
+    b.onclick=()=>insertPhrase(p.text,{id:p.phrase_id,via:"advice",advice:m.id});row.append(b);
+    if(!p.phrase_id&&!tools.phrases.some(x=>x.text===p.text)){const save=el("button","advice-focus","＋ 멘트 목록에 저장");save.type="button";save.onclick=async()=>{if(await savePhrases([...tools.phrases,{group:"추천",text:p.text}])){save.textContent="저장됨";save.disabled=true;}};row.append(save);}
+    wrap.append(row);
+  }
+  return wrap;
+}
+function evalDraft(m){
+  let d=evalDrafts.get(m.id);
+  if(!d){const e=m.evaluation||{};d={score:e.score??null,usable:e.usable??null,fit:e.fit??null,tags:new Set(e.tags||[]),tools:new Map((e.tools||[]).map(t=>[t.tool,{rating:t.rating??null,note:t.note||""}])),removed:new Set(),feedback:e.feedback||"",dirty:false,open:null};evalDrafts.set(m.id,d);}
+  for(const u of m.used_tools||[])if(!d.tools.has(u.tool)&&!d.removed.has(u.tool)){d.tools.set(u.tool,{rating:null,note:""});if(m.evaluation)d.dirty=true;}
+  return d;
+}
+// 누를 때마다 같은 자리에서 칠한다(다시 그리지 않아 키보드 초점이 남는다). 고른 것을 다시 누르면 비운다.
+function evalSegment(label,options,get,set,changed){
+  const g=el("div","eval-seg");g.setAttribute("role","group");g.setAttribute("aria-label",label);
+  const paint=()=>{for(const b of g.children){const on=b.dataset.v===String(get());b.classList.toggle("is-on",on);b.setAttribute("aria-pressed",String(on));}};
+  for(const [v,text] of options){const b=el("button","",text);b.type="button";b.dataset.v=String(v);b.onclick=()=>{set(String(get())===String(v)?null:v);paint();changed();};g.append(b);}
+  paint();return g;
+}
+function evalForm(m){
+  const d=evalDraft(m),a=m.advice?.status==="complete"?m.advice:null,recommended=new Set((a?.tools||[]).map(t=>t.tool));
+  const details=el("details","eval"),summary=el("summary"),status=el("span","eval-status");
+  details.open=d.open??(m.id===latestEligibleId()&&!m.evaluation);details.ontoggle=()=>{d.open=details.open;};
+  const head=()=>{summary.textContent="평가 남기기"+(m.evaluation?" · 저장됨 "+clock(m.evaluation.saved)+(d.dirty?" · 바뀐 내용 있음":""):d.dirty?" · 저장하지 않음":"");};
+  const changed=()=>{d.dirty=true;head();status.textContent="저장하지 않은 변경";};head();
+  const form=el("form","eval-form");
+  const row=(label,...nodes)=>{const r=el("div","eval-row");r.append(el("span","eval-label",label),...nodes);return r;};
+  form.append(row("청구항 평가",evalSegment("청구항 평가 (1~5점)",[1,2,3,4,5].map(n=>[n,n+"점"]),()=>d.score,v=>d.score=v,changed)));
+  form.append(row("쓸 수 있나요",evalSegment("사용 가능성",EVAL_USABLE,()=>d.usable,v=>d.usable=v,changed)));
+  form.append(row("추천이 맞았나요",evalSegment("추천 적합도",EVAL_FIT,()=>d.fit,v=>d.fit=v,changed)));
+  const chips=el("div","eval-chips");for(const t of recommended)chips.append(el("span","eval-chip",ADVICE_TOOLS[t]||t));if(!recommended.size)chips.append(el("span","eval-empty",a?"없음":"추천 없음"));
+  form.append(row("추천된 도구",chips));
+  // 사용한 도구: 이 답 뒤에 실행한 도구가 자동으로 들어오고, 직접 더하거나 뺄 수 있다. 도구마다 도움 정도를 고른다.
+  const list=el("div","eval-tools"),usedBy=new Map((m.used_tools||[]).map(u=>[u.tool,u]));
+  const paintTools=()=>{
+    list.replaceChildren();
+    for(const [tool,v] of d.tools){
+      const r=el("div","eval-tool"),name=el("span","eval-tool-name",ADVICE_TOOLS[tool]||tool);
+      if(recommended.has(tool))name.append(el("span","tag","추천"));
+      const u=usedBy.get(tool);if(u)name.append(el("span","tag",u.via==="advice"?"추천에서 고름":"자동 기록"));
+      if(tool==="phrase"){const texts=(m.used_tools||[]).filter(x=>x.tool==="phrase").map(x=>"· "+x.text);if(texts.length)name.title=texts.join("\n");}
+      const remove=el("button","eval-remove","×");remove.type="button";remove.setAttribute("aria-label",(ADVICE_TOOLS[tool]||tool)+" 빼기");remove.onclick=()=>{d.tools.delete(tool);d.removed.add(tool);paintTools();changed();};
+      r.append(name,evalSegment((ADVICE_TOOLS[tool]||tool)+" 평가",EVAL_RATING,()=>v.rating,x=>v.rating=x,changed),remove);list.append(r);
+    }
+    const rest=Object.keys(ADVICE_TOOLS).filter(t=>!d.tools.has(t));
+    if(rest.length){const add=el("select","eval-add");add.setAttribute("aria-label","사용한 도구 더하기");const first=el("option","",d.tools.size?"＋ 도구 더하기":"＋ 사용한 도구 고르기");first.value="";add.append(first);
+      for(const t of rest){const o=el("option","",ADVICE_TOOLS[t]+(recommended.has(t)?" (추천)":""));o.value=t;add.append(o);}
+      add.onchange=()=>{if(!add.value)return;d.tools.set(add.value,{rating:null,note:""});d.removed.delete(add.value);paintTools();changed();list.querySelector(".eval-add")?.focus();};list.append(add);}
+  };
+  paintTools();form.append(row("사용한 도구 · 평가",list));
+  const tags=el("div","eval-tags");tags.setAttribute("role","group");tags.setAttribute("aria-label","문제 유형 (여러 개)");
+  for(const [v,text] of EVAL_TAGS){const b=el("button","eval-tag",text);b.type="button";const paint=()=>{b.classList.toggle("is-on",d.tags.has(v));b.setAttribute("aria-pressed",String(d.tags.has(v)));};b.onclick=()=>{if(d.tags.has(v))d.tags.delete(v);else d.tags.add(v);paint();changed();};paint();tags.append(b);}
+  form.append(row("문제 유형",tags));
+  const feedback=el("textarea","eval-feedback");feedback.rows=2;feedback.maxLength=4000;feedback.placeholder="피드백 — 좋았던 점, 부족한 점, 앱에서 바뀌었으면 하는 점";feedback.setAttribute("aria-label","피드백");feedback.value=d.feedback;feedback.oninput=()=>{d.feedback=feedback.value;changed();};
+  form.append(feedback);
+  const actions=el("div","eval-actions"),save=el("button","primary",m.evaluation?"평가 다시 저장":"평가 저장");save.type="submit";
+  status.textContent=d.dirty?"저장하지 않은 변경":m.evaluation?"저장됨 · "+clock(m.evaluation.saved):"한 항목만 골라도 저장됩니다";
+  form.onsubmit=async e=>{
+    e.preventDefault();save.disabled=true;
+    const body={id:state.id,message:m.id,score:d.score,usable:d.usable,fit:d.fit,tags:[...d.tags],tools:[...d.tools].map(([tool,v])=>({tool,rating:v.rating,note:v.note})),feedback:d.feedback.trim()};
+    try{const saved=await api("/api/evaluation",body);d.dirty=false;m.evaluation=saved;status.textContent="저장됨 · "+clock(saved.saved);save.textContent="평가 다시 저장";head();}
+    catch(err){status.textContent=err.message;}finally{save.disabled=false;}
+  };
+  actions.append(save,status);form.append(actions);
+  details.append(summary,form);return details;
+}
+
+// ---- 개선 패널의 평가 측정 탭: 평가 폼 기록의 집계와 JSONL 내려받기.
+async function loadEvals(){try{renderEvals(await api("/api/evaluations"));}catch(e){error(e.message);}}
+function renderEvals(s){
+  $("improve-count-evals").textContent=String(s.count);
+  const box=$("improve-evals");box.replaceChildren();
+  const lead=el("p","improve-note","자유 작업 답변마다 남긴 평가 폼의 집계입니다. 같은 답을 다시 저장하면 마지막 평가만 셉니다. 추천은 참고이고, 이 지표는 게이트·근거가 아니라 앱 개선용 측정입니다. ");
+  const link=el("a","run-link","원본 JSONL 내려받기");link.href="/api/evaluations/export";link.download="claim-agent-evaluations.jsonl";lead.append(link);box.append(lead);
+  const cards=el("div","improve-metrics"),card=(label,value,note,top)=>{const c=el("div","metric-card"+(top?" metric-top":""));c.append(el("span","metric-label",label),el("strong","metric-value",value),el("span","metric-note",note));cards.append(c);};
+  const use=s.usable_share;
+  card("평가한 답",String(s.count),"추천을 받은 답 "+s.advised+"개 중 "+pct(s.coverage),true);
+  card("청구항 평균",s.score_avg==null?"—":s.score_avg.toFixed(2)+"점","분포 "+[1,2,3,4,5].map(n=>n+"점 "+(s.scores[n]||0)).join(" · "));
+  card("쓸 수 있는 답",pct(use.as_is==null?null:use.as_is+use.edit),"그대로 "+pct(use.as_is)+" · 고쳐서 "+pct(use.edit)+" · 어려움 "+pct(use.unusable));
+  card("추천 적합",pct(s.fit_share.hit),"일부 "+pct(s.fit_share.partial)+" · 아님 "+pct(s.fit_share.miss));
+  card("추천 사용률",pct(s.precision),"추천한 도구 중 실제로 쓴 비율");
+  card("추천 포착률",pct(s.recall),"쓴 도구 중 추천에 있던 비율");
+  box.append(cards);
+  const table=(heads,rows)=>{const t=el("table","eval-table"),h=el("tr");for(const x of heads)h.append(el("th","",x));t.append(h);for(const r of rows){const tr=el("tr");for(const x of r)tr.append(el("td","",String(x)));t.append(tr);}return t;};
+  const toolRows=Object.entries(s.tools).filter(([,v])=>v.recommended||v.used);
+  box.append(el("h3","improve-subhead","도구별"));
+  box.append(toolRows.length?table(["도구","추천","사용","도움 됨 비율","도움 됨 / 보통 / 안 됨"],toolRows.map(([k,v])=>[ADVICE_TOOLS[k]||k,v.recommended,v.used,pct(v.help),v.good+" / "+v.ok+" / "+v.bad])):el("p","improve-empty","아직 도구 기록이 없습니다."));
+  const tagLabel=Object.fromEntries(EVAL_TAGS),tagRows=Object.entries(s.tags).filter(([,n])=>n);
+  box.append(el("h3","improve-subhead","문제 유형"));
+  box.append(tagRows.length?table(["유형","답 수"],tagRows.map(([k,n])=>[tagLabel[k]||k,n])):el("p","improve-empty","표시한 문제 유형이 없습니다."));
+  const models=Object.entries(s.by_model);
+  if(models.length){box.append(el("h3","improve-subhead","대화 모델별 청구항 평균"));box.append(table(["모델","평가 수","평균"],models.map(([k,v])=>[k,v.count,v.score_avg.toFixed(2)])));}
+  const sources=Object.entries(s.by_source);
+  if(sources.length){box.append(el("h3","improve-subhead","추천 출처별 적합"));box.append(table(["출처","평가 수","맞음","일부","아님"],sources.map(([k,v])=>[{agent:"추천 에이전트",rules:"규칙 추천",none:"추천 없음"}[k]||k,v.count,v.hit,v.partial,v.miss])));}
+  box.append(el("h3","improve-subhead","최근 피드백"));
+  if(!s.recent.length)box.append(el("p","improve-empty","남긴 피드백이 없습니다."));
+  const usableLabel=Object.fromEntries(EVAL_USABLE);
+  for(const r of s.recent){const c=el("div","improve-card"),meta=el("div","improve-meta");meta.append(el("span","",new Date(r.ts*1000).toLocaleString("ko-KR")),el("span","",r.score?r.score+"점":"점수 없음"),el("span","",usableLabel[r.usable]||""),el("span","",r.tools.map(t=>ADVICE_TOOLS[t]||t).join(", ")),el("span","",r.model||""));c.append(meta,el("p","eval-feedback-text",r.feedback));box.append(c);}
+}

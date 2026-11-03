@@ -172,6 +172,9 @@ class ConversationConfig(BaseModel):
     back to REVIEW_ONLY/authoring as before, and results go out as the plain chat report.
     """
     moderator: str = "on"             # on | off
+    # 자유 작업의 도구 추천: each free-mode answer gets one non-gating `roles.tool-recommender` call (rules if it fails) and the
+    # evaluation form beside it. off: no recommendation call; the form stays.
+    tool_advice: str = "on"           # on | off
 
 
 class AppConfig(BaseModel):

@@ -111,3 +111,28 @@ nav#survey-list button{display:flex;align-items:center;gap:4px}.survey-dot{font-
 @media(max-width:900px){.survey-grid{grid-template-columns:1fr}}
 @media(max-width:760px){.survey-body{padding:4px 16px 32px}.survey-actions{margin-left:0}}
 #survey-body button.primary{background:#284b42;color:#fff;border-radius:10px;padding:9px 18px;font-size:13px}#survey-body button.primary:hover:not(:disabled){background:#426c60}#survey-body button.danger{color:#9c4f37;border:1px solid #e9cfc5;border-radius:10px;padding:6px 12px;font-size:12px}#survey-body button.danger:hover{background:#fff3ef}
+/* 자유 작업의 도구 추천 카드와 평가 폼 (답 아래) · 개선 패널의 평가 측정 탭 */
+.advice{margin-top:12px;border:1px solid #e3e9e6;border-radius:14px;background:#fafcfb;padding:12px 14px;font-size:12px}
+.advice-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px}.advice-head strong{font-size:12.5px;color:#294b43}.advice-src{font-size:10.5px;color:#8a958f}
+.advice-summary{margin:6px 0 8px;line-height:1.65;color:#3f4b45}
+.advice-picks{display:flex;flex-direction:column;gap:5px}.advice-row{display:flex;flex-wrap:wrap;align-items:stretch;gap:5px;margin-top:5px}
+.advice-pick,.advice-phrase{flex:1;min-width:220px;text-align:left;border:1px solid #dfe6e2;border-radius:9px;background:#fff;padding:7px 10px;display:flex;flex-direction:column;gap:2px;white-space:normal}
+.advice-pick strong,.advice-phrase strong{font-size:11.5px;color:#294b43}.advice-pick span,.advice-phrase span{font-size:11px;color:#68746e;line-height:1.55;overflow-wrap:anywhere}
+.advice-pick:hover:not(:disabled),.advice-phrase:hover:not(:disabled){background:#f0f5f2;border-color:#b6c3bd}
+.advice-phrase strong{color:#8a6d2b}
+.advice-focus{font-size:10.5px;color:#51645d;border:1px dashed #c9d4cf;border-radius:8px;padding:5px 8px;text-align:left;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.advice-none{color:#9a9a9a;margin:4px 0}
+.eval{margin-top:10px;border-top:1px solid #e6ece9;padding-top:8px}.eval>summary{font-size:11.5px;color:#51645d;font-weight:600}
+.eval-form{display:flex;flex-direction:column;gap:7px;margin-top:8px}
+.eval-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}.eval-label{flex:0 0 108px;font-size:11px;color:#6f7d77}
+.eval-seg{display:inline-flex;flex-wrap:wrap;gap:3px}.eval-seg button,.eval-tag{font-size:11px;border:1px solid #dfe3e1;border-radius:7px;padding:4px 9px;background:#fff;color:#4d5b55}
+.eval-seg button.is-on,.eval-tag.is-on{background:#294b43;border-color:#294b43;color:#fff}
+.eval-chips,.eval-tags{display:flex;flex-wrap:wrap;gap:4px}.eval-chip{font-size:11px;color:#294b43;background:#e3eee9;border-radius:7px;padding:3px 8px}.eval-empty{font-size:11px;color:#9a9a9a}
+.eval-tools{display:flex;flex-direction:column;gap:4px;flex:1;min-width:240px}.eval-tool{display:flex;flex-wrap:wrap;align-items:center;gap:6px;background:#fff;border:1px solid #edf0ee;border-radius:8px;padding:4px 6px}
+.eval-tool-name{min-width:96px;display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px;font-size:11.5px;color:#294b43;font-weight:600}.eval-tool .tag{font-weight:400;margin:0}.eval-remove{margin-left:auto;color:#a06050;font-size:13px;padding:0 6px;border-radius:5px}
+.eval-add{align-self:flex-start;font-size:11px;background:#fff;border:1px solid #dfe3e1;border-radius:7px;padding:4px 8px;max-width:220px}
+.eval-feedback{font-size:12px;line-height:1.6;border:1px solid #e2e2e2;border-radius:8px;padding:7px 9px;background:#fff;min-height:44px;resize:vertical;max-height:200px}
+.eval-actions{display:flex;align-items:center;gap:10px}.eval-actions button.primary{padding:6px 14px;font-size:12px;border-radius:8px}.eval-status{font-size:11px;color:#8a958f}
+.eval-table{border-collapse:collapse;font-size:12px;margin:8px 0 4px;width:100%}.eval-table th,.eval-table td{border-bottom:1px solid #eee;padding:6px 8px;text-align:left}.eval-table th{color:#6f7d77;font-weight:600}
+.eval-feedback-text{margin:4px 0 0;font-size:13px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:760px){.eval-label{flex-basis:100%}.advice-pick,.advice-phrase{min-width:0}}

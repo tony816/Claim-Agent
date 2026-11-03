@@ -410,6 +410,12 @@ def test_free_draft_then_review_through_the_chat_worker(rt, tmp_path, monkeypatc
                        "chat.live_provider=lambda *a, **k: ScriptedProvider({'자유 작업': [DRAFT]}); "
                        "runtime.make_provider=lambda *a, **k: ScriptedProvider({'syntax-scope-reviewer': [R.syntax()]}); raise SystemExit(chat.main())")
             command = [sys.executable, "-u", "-c", program, *command[command.index("claim_agent.chat") + 1:]]
+        elif "claim_agent.tool_advice" in command:
+            # The recommendation that starts by itself after each answer, on a scripted provider (never a live call).
+            program = ("from claim_agent import runtime, tool_advice; from claim_agent.provider.scripted import ScriptedProvider; "
+                       "runtime.live_provider=lambda *a, **k: ScriptedProvider({tool_advice.ROLE: [dict(summary='통사 확인', "
+                       "tools=[dict(tool='syntax-scope-reviewer', reason='상기 돌출부')])]*3}); raise SystemExit(tool_advice.main())")
+            command = [sys.executable, "-u", "-c", program, *command[command.index("claim_agent.tool_advice") + 1:]]
         return original(command, **kwargs)
 
     monkeypatch.setattr(web.subprocess, "Popen", scripted)
@@ -423,6 +429,10 @@ def test_free_draft_then_review_through_the_chat_worker(rt, tmp_path, monkeypatc
         draft = workspace.snapshot(sid)["messages"][-1]
         assert draft["status"] == "complete" and draft["execution_mode"] == "FREE", draft["text"]
         assert draft["text"].startswith(free_work.UNREVIEWED_LABEL)
+        # The tool recommendation starts as soon as the answer is in, beside it (the composer is already free).
+        wait_for(lambda: (workspace.sessions[sid]["messages"][-1].get("advice") or {}).get("status") == "complete", timeout=30)
+        advice = workspace.sessions[sid]["messages"][-1]["advice"]
+        assert advice["source"] == "agent" and [t["tool"] for t in advice["tools"]] == ["syntax-scope-reviewer"] and advice["target"] == draft["id"]
         # Enter on an empty input: the review itself.
         workspace.review(sid, {"message": draft["id"], "role": "syntax-scope-reviewer"})
         wait_for(lambda: not workspace.snapshot(sid)["running"], timeout=30)
