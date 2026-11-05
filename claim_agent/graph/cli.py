@@ -70,6 +70,16 @@ def register(sub) -> None:
     ex.add_argument("--extract-model", dest="extract_model", help="default: that provider's default model")
     ex.add_argument("--rebuild", action="store_true", help="call the model again even for cached cases")
     ex.add_argument("--records-only", action="store_true", help="no model calls: rebuild the record files from the cache")
+    o = gs.add_parser("oa", help="OA 300-case graph (Neo4j kr-oa-300): import the dump, rebuild the sources/10 summary, run an OA tool")
+    os_ = o.add_subparsers(dest="oa_cmd", required=True)
+    oi = os_.add_parser("import", help="parse graph/oa300/kg_dump.json into docs/oa300-records.json")
+    oi.add_argument("--dump", help="kg_search dump (default graph/oa300/kg_dump.json)")
+    og = os_.add_parser("guide", help="rebuild the generated section of sources/10 from the OA 300 records")
+    og.add_argument("--write", action="store_true", help="write the file (default: print it)")
+    ot = os_.add_parser("tool", help="print one OA tool answer (oa_dependents, oa_gap, oa_numeric)")
+    ot.add_argument("tool", choices=["oa_dependents", "oa_gap", "oa_numeric"])
+    ot.add_argument("--text", default="", help="field / technology words / IPC")
+    ot.add_argument("--claim-file", help="claims text with 【청구항 N】 markers")
     sg = gs.add_parser("survey-guide", help="rebuild the graph summary section of sources/14 (선행기술조사 특허성 판단 지침) from the case-law and OA graphs")
     sg.add_argument("--write", action="store_true", help="write the file (default: print it)")
     g.set_defaults(func=cmd_graph)
@@ -107,6 +117,8 @@ def cmd_graph(args) -> int:
         return 0
     if args.graph_cmd == "caselaw":
         return _caselaw(rt, args)
+    if args.graph_cmd == "oa":
+        return _oa(rt, args)
     if args.graph_cmd == "survey-guide":
         from ..prior_art import guide
 
@@ -118,6 +130,27 @@ def cmd_graph(args) -> int:
             print(text)
         return 0
     return _precedent(rt, args)
+
+
+def _oa(rt, args) -> int:
+    from . import oa300, oa_guide, oa_tool
+
+    root = rt.cfg.project_root
+    if args.oa_cmd == "import":
+        data = oa300.import_dump(root, Path(args.dump) if args.dump else None)
+        print(f"→ {oa300.RECORDS_FILE}: 사례 {len(data['cases'])}건 (본문 잘림 {data['truncated']}건)")
+        return 0
+    if args.oa_cmd == "guide":
+        text = oa_guide.build(root)
+        if args.write:
+            (root / oa_guide.GUIDE_PATH).write_text(text, encoding="utf-8")
+            print(f"→ {oa_guide.GUIDE_PATH} ({len(text)}자)")
+        else:
+            print(text)
+        return 0
+    claims = Path(args.claim_file).read_text(encoding="utf-8") if args.claim_file else ""
+    print(oa_tool.run(args.tool, root=root, text=args.text, claims=claims))
+    return 0
 
 
 def _caselaw(rt, args) -> int:

@@ -27,7 +27,9 @@ def _request(**over) -> dict:
 
 
 def test_the_catalog_is_the_panels_tools():
-    assert set(tool_advice.TOOLS) == set(free_work.REVIEW_ROLES) | set(caselaw_tool.TOOLS)
+    from claim_agent.graph import oa_tool
+
+    assert set(tool_advice.TOOLS) == set(free_work.REVIEW_ROLES) | set(caselaw_tool.TOOLS) | set(oa_tool.TOOLS)
     assert set(evaluations.FORM_TOOLS) == set(tool_advice.TOOLS) | {tool_advice.PHRASE}
 
 

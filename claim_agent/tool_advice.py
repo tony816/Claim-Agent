@@ -1,5 +1,5 @@
 """도구 추천 (자유 작업 모드): right after each free-mode answer, one small call reads it and recommends the work tools
-(검수 역할·판례 도구) and feedback phrases (피드백 멘트) the user may want next.
+(검수 역할·판례 도구·OA 도구) and feedback phrases (피드백 멘트) the user may want next.
 
 The advice is the user's reference, not a gate, a source or a model input: the web keeps it on the answer's message, never
 in the history the agents read, and a click on it only picks the tool in the panel (Enter still runs it). When the call
@@ -25,7 +25,8 @@ ROLE_LABEL = "도구 추천 (자유 작업)"
 PHRASE = "phrase"                      # 피드백 멘트, as one tool of the evaluation form
 MAX_TOOLS, MAX_PHRASES = 3, 2
 MAX_ANSWER = 24000
-# id: (이름, 종류, 무엇을 보는지·언제 쓰는지). Review ids are free_work.REVIEW_ROLES, case-law ids graph.caselaw_tool.TOOLS.
+# id: (이름, 종류, 무엇을 보는지·언제 쓰는지). Review ids are free_work.REVIEW_ROLES, case-law ids graph.caselaw_tool.TOOLS,
+# OA ids graph.oa_tool.TOOLS.
 TOOLS = {
     "claim-style-adjuster": ("문체 조정", "review", "범위를 바꾸지 않고 조사·띄어쓰기·용어 일관·종결 형식(`; 및`, 종결 명칭, `상기`)을 정리해 고친 문언을 낸다. "
                              "같은 구성이 다른 이름으로 불리거나 형식이 어긋날 때."),
@@ -43,9 +44,16 @@ TOOLS = {
              "(찾을 지적 문장이 필요하다)."),
     "features": ("특허성 신호", "caselaw", "입력창에 적은 특징마다 신규성·진보성 판례 분포를 본다. 어떤 특징을 독립항에 둘지 고민될 때 "
                  "(특징 목록이 필요하다)."),
+    "oa_dependents": ("종속항 역산", "oa", "모델 없이 등록 사례 300건의 심사 이력으로, 이 분야에서 독립항에 합쳐져 방어선이 된 한정 유형과 내 종속항이 "
+                      "그 유형을 덮는지 본다. 종속항 세트를 짜거나 늘릴 때(대상 청구항이나 분야·기술 낱말이 필요하다)."),
+    "oa_gap": ("독립항 갭", "oa", "등록 사례의 최초 독립항과 등록 독립항을 나란히 놓아 처음에 얼마나 넓게 썼다가 좁혔는지, 신규성 거절된 넓은 독립항의 "
+               "전형을 본다. 독립항이 너무 넓은지 걱정될 때(대상 청구항이나 분야·기술 낱말이 필요하다)."),
+    "oa_numeric": ("수치한정 뒷받침", "oa", "등록 사례에서 수치·조건 한정이 다투어진 방식(겹침·최적화·불명확·뒷받침)과 명세서 체크리스트를 본다. "
+                   "청구항에 수치 범위·이상/이하가 있을 때."),
 }
 NEEDS_CLAIMS = {tool for tool, (_, kind, _) in TOOLS.items() if kind == "review"} | {"enforce"}
 NEEDS_FOCUS = {"find", "features"}
+OA = {tool for tool, (_, kind, _) in TOOLS.items() if kind == "oa"}      # 대상 청구항이나 focus(분야·기술 낱말) 중 하나가 있어야 한다
 
 SYSTEM = """너는 Claim-Agent 자유 작업 모드의 도구 추천 에이전트다. 사용자는 한국 특허 청구항을 일반 에이전트와 1차 작업하는 변리사·발명자다.
 방금 나온 답(게이트를 거치지 않은 미검수 초안 또는 사용자가 고른 검수 결과)을 읽고, 사용자가 다음에 실행하면 좋을 작업 도구와 피드백 멘트를 추천한다.
@@ -59,7 +67,8 @@ SYSTEM = """너는 Claim-Agent 자유 작업 모드의 도구 추천 에이전�
 - 원자료가 없으면 성공조건의 근거 대조와 역피처의 기준 비교가 제한된다. 그래도 고른다면 이유에 그렇게 적는다.
 - 답이 검수 결과이면, 지적을 반영하라는 멘트나 아직 보지 않은 위험에 맞는 다른 검수를 고른다.
 - focus: 검수 도구는 검수자에게 덧붙일 한 문장(관점·구절, 없으면 빈 문자열). 판례 찾기는 찾을 지적 한 문장, 특허성 신호는 특징 목록(한 줄에 하나) — 둘은 필수다.
-  권리행사 점검은 빈 문자열.
+  권리행사 점검은 빈 문자열. OA 도구(종속항 역산·독립항 갭·수치한정 뒷받침)는 대상 청구항과 함께 볼 분야·기술 낱말(IPC 서브클래스가 있으면 함께)이며,
+  대상 청구항이 없으면 필수다.
 - 피드백 멘트는 0~2개. '저장된 피드백 멘트'에 맞는 것이 있으면 그 id를 phrase_id에 적고 text에 그 문장을 그대로 적는다. 맞는 것이 없을 때만
   phrase_id를 비우고 일반 에이전트에게 보낼 새 멘트 한두 문장을 쓴다(청구항 문언을 쓰지 않는다).
 - summary: 이 답에서 사용자가 다음에 확인할 가장 큰 위험이나 할 일을 한두 문장으로. 평가·칭찬 문구를 쓰지 않는다.
@@ -141,7 +150,8 @@ def clean(advice: Advice, request: dict) -> dict:
     for pick in advice.tools:
         tool = pick.tool.strip()
         focus = pick.focus.strip()[:600]
-        if tool not in TOOLS or tool in seen or (tool in NEEDS_CLAIMS and not has_claims) or (tool in NEEDS_FOCUS and not focus):
+        if (tool not in TOOLS or tool in seen or (tool in NEEDS_CLAIMS and not has_claims) or (tool in NEEDS_FOCUS and not focus)
+                or (tool in OA and not has_claims and not focus)):
             continue
         seen.add(tool)
         tools.append(dict(tool=tool, reason=pick.reason.strip()[:400], focus="" if tool == "enforce" else focus))

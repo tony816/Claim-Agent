@@ -33,7 +33,7 @@ LIVE_LOG_HEAD = MAX_LIVE_LOG // 5   # the start of the log stays in the window; 
 MIN_GZIP = 1400             # responses above this are gzipped when the browser accepts it
 MAX_PROJECT_TEXT = 100000
 PROJECT_TEXT_FIELDS = ("name", "description", "instructions", "user_lock")
-CASELAW = "CASELAW"         # 작업 도구의 판례 도구 turns: shown in the conversation, never handed to a model
+CASELAW = "CASELAW"         # 작업 도구의 판례·OA 도구 turns: shown in the conversation, never handed to a model
 ADVICE_TIMEOUT = 300        # seconds a tool recommendation may take before the code's own recommendation stands in
 PAGES = {"/": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"), "/style.css": ("style.css", "text/css"),
          "/md.js": ("md.js", "text/javascript"),
@@ -43,9 +43,9 @@ PAGES = {"/": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascrip
 def conversational(messages: list[dict]) -> list[dict]:
     """The messages a later turn may hand a model (material, prior requests, reference, review targets).
 
-    판례 도구 turns are left out here, in one place: case summaries are the user's reference, never the drafter's or the
-    free agent's input (CLAUDE.md 판례 DB — 판례 원문은 작성 역할에 넘기지 않는다). They never reach history.json either,
-    since they run no job.
+    판례 도구·OA 도구 turns are left out here, in one place: case and prosecution summaries are the user's reference, never
+    the drafter's or the free agent's input (CLAUDE.md 판례 DB — 판례 원문은 작성 역할에 넘기지 않는다; sources/10 — 심사
+    이력은 원자료가 아니다). They never reach history.json either, since they run no job.
     """
     return [m for m in messages if m.get("mode") != CASELAW]
 
@@ -631,33 +631,41 @@ class Workspace:
         return source, target
 
     def caselaw(self, sid: str, data: dict) -> None:
-        """작업 도구의 판례 도구, in both work modes: it runs no role and writes no wording, only case records (plus one
-        Jev relevance call when Jev is set up). The answer is the user's reference and stays out of every model's context
-        (`conversational`), so the composer text is a finding or a feature, not a message to the agent."""
+        """작업 도구의 판례 도구와 OA 도구, in both work modes: they run no role and write no wording, only records (the
+        판례 도구 plus one Jev relevance call when Jev is set up). The answer is the user's reference and stays out of every
+        model's context (`conversational`), so the composer text is a finding, a feature or a field, not a message to the agent."""
         from .graph import caselaw as cl
-        from .graph import caselaw_tool
+        from .graph import caselaw_tool, oa_tool
 
         tool = data.get("tool")
-        if tool not in caselaw_tool.TOOLS:
-            raise ValueError("지원하지 않는 판례 도구입니다.")
+        if tool not in caselaw_tool.TOOLS and tool not in oa_tool.TOOLS:
+            raise ValueError("지원하지 않는 판례·OA 도구입니다.")
+        is_oa = tool in oa_tool.TOOLS
+        label = (oa_tool.TOOLS if is_oa else caselaw_tool.TOOLS)[tool]
+        kind = "OA 도구" if is_oa else "판례 도구"
         text = str(data.get("text") or "")
 
         def idle() -> None:
             if self.jobs.get(sid) and not self.jobs[sid]["done"]:
-                raise ValueError("현재 응답을 완료하거나 중지한 뒤 판례 도구를 쓰세요.")
+                raise ValueError(f"현재 응답을 완료하거나 중지한 뒤 {kind}를 쓰세요.")
 
         with self.lock:
             self.directory(sid)
             session = self.sessions[sid]
             idle()
             claims, target, source = "", "", None
-            if tool == "enforce":
+            # 권리행사 점검은 대상 청구항이 꼭 있어야 하고, OA 도구는 고른 대상이 있으면 그 청구항도 함께 본다.
+            if tool == "enforce" or (is_oa and data.get("message")):
                 source, claims = self.claim_source(session, data.get("message"))
                 target = ("내 메시지" if source["role"] == "user" else "에이전트 답변") + f" #{session['messages'].index(source) + 1}"
             self.record_use(session, data, [tool], source["id"] if source else None)
         # Outside the lock: the record files, the DB quote check and Jev take a second or two.
-        answer = caselaw_tool.run(tool, root=self.cfg.project_root, paths=cl.Paths.from_config(self.cfg), text=text, claims=claims, target=target)
-        asked = f"[판례 도구 · {caselaw_tool.TOOLS[tool]}] " + (f"{target}의 청구항" if tool == "enforce" else text.strip())
+        if is_oa:
+            answer = oa_tool.run(tool, root=self.cfg.project_root, text=text, claims=claims, target=target)
+        else:
+            answer = caselaw_tool.run(tool, root=self.cfg.project_root, paths=cl.Paths.from_config(self.cfg), text=text, claims=claims, target=target)
+        what = " · ".join(x for x in (f"{target}의 청구항" if target else "", text.strip() if tool != "enforce" else "") if x)
+        asked = f"[{kind} · {label}] " + what
         detail = dict(tool=tool, source=source["id"] if source else None)
         with self.lock:
             idle()
@@ -718,6 +726,7 @@ class Workspace:
         """What the recommender reads: the answer, the request it answered, the claims a review would run on, the tools
         already run in this conversation, whether material exists, and the saved feedback phrases."""
         from .graph.caselaw_tool import TOOLS as CASELAW_TOOLS
+        from .graph.oa_tool import TOOLS as OA_TOOLS
 
         messages = session["messages"]
         index = messages.index(message)
@@ -740,7 +749,7 @@ class Workspace:
             if m["role"] != "user" or m.get("mode") not in ("REVIEW", CASELAW):
                 continue
             detail = m.get("review") or m.get("caselaw") or {}
-            names = [REVIEW_ROLES[r] for r in detail.get("roles") or [] if r in REVIEW_ROLES] or [CASELAW_TOOLS.get(detail.get("tool"), "")]
+            names = [REVIEW_ROLES[r] for r in detail.get("roles") or [] if r in REVIEW_ROLES] or [CASELAW_TOOLS.get(detail.get("tool")) or OA_TOOLS.get(detail.get("tool"), "")]
             where = number.get(detail.get("source"))
             ran.append(", ".join(n for n in names if n) + (f" → 메시지 #{where}" if where else ""))
         uploads = [f["name"] for f in session.get("files", [])]
