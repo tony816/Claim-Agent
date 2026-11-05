@@ -494,3 +494,30 @@ def test_a_blanket_fix_request_after_review_asks_for_the_smallest_edit():
     assert "짚어 고치라고 하거나 전제·구조를 더하라고 할 때만" in fix and "`못 고친 곳`에 더할 전제 후보를 적는다" in fix
     assert "(이유 또는 더할 전제 후보)" in fix
     assert text.endswith("사용자 요청: 도구에 따라 수정\n\n대상 청구항:\n" + CLAIM_8)
+
+
+CLAIM_11 = ("【청구항 11】\n제10항에 있어서,\n상기 가이드 부재는,\n"
+            "양단부 중 상기 제1 전력 전달부와 인접한 제1단부가 상기 구획 영역을 향하여 오목한 곡면으로 형성되어 상기 히트리드 모듈의 단부를 수용하고,\n"
+            "상기 제1단부의 반대측에 위치하는 제2단부가 상기 제1단부를 향하는 상기 히트리드 모듈의 인입을 상기 구획 영역 쪽으로 유도하는 테이퍼 형상으로 형성되는,\n"
+            "핵산 증폭 장치.")
+
+
+def test_a_request_about_another_claim_is_answered_not_rewritten():
+    """Regression for web-4eafc88d: the panel sent claim 11 while the request was '21항 전력 전달부 중복 문제 해결하자'; the
+    fix rewrote claims 21 and 26, which no reviewer had read, and split the user's single name into 제1/제2 as a reviewer
+    suggested. Claims outside the target are not written, and a renaming direction needs the user's say-so."""
+    text = free_work.FOLLOW_UP_REQUEST.format(labels="문체 조정, 통사·범위 검수, OA 검수", note="21항 전력 전달부 중복 문제 해결하자", target=CLAIM_11)
+    fix = text[text.index("고칠 때:"):text.index("답할 때:")]
+    assert "아래 대상 청구항에 없는 항은 쓰지 않는다" in fix and "그 항이 있는 메시지를 대상으로 골라 다시" in fix
+    assert "사용자가 쓴 이름을 두고 한쪽만 바꾼다" in fix and "(제1/제2 분리·통일, 다른 항의 명칭에 맞추기)" in fix
+    assert text.endswith("대상 청구항:\n" + CLAIM_11)
+
+
+def test_a_plain_edit_request_in_free_chat_is_a_minimal_edit_too():
+    """Regression for web-4eafc88d's next turn ('기반해서 21항 수정 시도'): without a review the agent moved the counterpart into
+    the preamble. The free agent's own rules now keep the sentence and the user's names unless a rewrite is asked for."""
+    rules = free_work.FREE_SYSTEM
+    assert "기존 청구항을 고쳐 달라는 요청은 최소 수정이 기본이다" in rules
+    assert "이름이 겹치면 사용자가 쓴 이름을 두고 한쪽만 바꾼다" in rules and "청구항 앞 설명에\n  대안으로 한 줄 제안한다" in rules
+    assert "`다시 써 줘`·`새로 작성해 줘`처럼 전면 수정을 요청하면 이 원칙 대신 요청을 따른다" in rules
+    assert "기능을 지우기보다 자료가 주는 전제를 더해 닫는다" not in rules   # the premise is added only when the user points at it

@@ -150,7 +150,7 @@ function caselawPlaceholder(list){const typed=list.filter(t=>t!=="enforce");retu
 // 고른 도구가 입력창의 말을 조회 문장으로 써야 하는가(판례 찾기·특허성 신호).
 function needsQuery(lookup){return !!lookup&&lookup.tools.some(t=>t!=="enforce");}
 const CLAIM_HEAD=/^[ \t]*(?:\*\*)?(?:【\s*청구항\s*\d+\s*】|\[\s*청구항\s*\d+\s*\])/m;
-const tools={open:false,roles:new Set(),caselaw:new Set(),target:"",options:null,phrases:[],editing:false,adviceFrom:null,via:new Set(),phrasesUsed:[]};   // target "" = 가장 최근 청구항을 따라감
+const tools={open:false,roles:new Set(),caselaw:new Set(),target:"",options:null,phrases:[],editing:false,adviceFrom:null,via:new Set(),phrasesUsed:[],warned:null};   // target "" = 가장 최근 청구항을 따라감
 // adviceFrom·via·phrasesUsed: 도구 추천에서 고른 답·도구와 입력창에 넣은 멘트. 보낼 때 서버가 그 답의 평가 폼 '사용한 도구'에 기록한다.
 function freeMode(){return state.data?.work_mode==="free";}
 async function setWorkMode(mode){
@@ -303,6 +303,14 @@ async function send(event){
   if(pick&&state.pending.length){error("검수 실행에는 첨부 파일을 함께 보낼 수 없습니다. 첨부를 빼거나 고른 검수를 취소하세요.");return;}
   if(lookup&&state.pending.length){error("판례 도구에는 첨부 파일을 함께 보낼 수 없습니다. 첨부를 빼거나 고른 판례 도구를 취소하세요.");return;}
   const free=freeMode(),t=claimTarget();if(!free&&!lookup&&!t.ok){error(t.error);return;}
+  // 요청에 적은 항이 고른 대상에 없으면(예: 대상은 11항, 요청은 '21항 …') 검수자는 그 항을 읽지 못한다. 그 항이 있는 메시지로 대상을
+  // 바꾸거나 경고하고, 같은 요청·대상으로 다시 Enter하면 그대로 실행한다.
+  const scoped=pick||lookup?.target;
+  if(scoped){const asked=$("prompt").value,miss=targetMismatch(asked,scoped),key=scoped.m.id+"|"+asked;
+    if(miss&&tools.warned!==key){tools.warned=key;const named=miss.asked.map(n=>"제"+n+"항").join("·");
+      if(miss.found){tools.target=miss.found.m.id;renderTools();controls();error(`요청에 적은 ${named}이 고른 대상(${candidateLabel(scoped)})에 없어, 대상을 ${candidateLabel(miss.found)}(으)로 바꿨습니다. 맞으면 다시 Enter를 누르세요.`);}
+      else error(`요청에 적은 ${named}이 고른 대상(${candidateLabel(scoped)})에도, 대화의 다른 청구항 메시지에도 없습니다. 검수자는 고른 대상만 읽습니다. 그 항을 붙여 넣거나, 그대로 실행하려면 다시 Enter를 누르세요.`);
+      $("prompt").focus();return;}}
   state.busy=true;controls();error("");const id=state.id,text=$("prompt").value;
   // 자유 작업에는 작성 대상·선행기술 검색 옵션이 없다(일반 에이전트가 요청 문장대로 답한다).
   // 평가 폼의 '사용한 도구' 자동 기록: 추천에서 고른 답·도구, 보내는 글에 아직 남아 있는 멘트(입력창의 말을 쓰는 첫 요청에 한 번만).
@@ -605,6 +613,12 @@ function reviewCandidates(){
 }
 function reviewTarget(){const c=reviewCandidates();return tools.target?c.find(x=>x.m.id===tools.target)||null:c[0]||null;}
 function reviewPick(){return tools.roles.size&&freeMode()?reviewTarget():null;}
+// 입력창 요청에 적힌 항 번호('21항', '제12·21항', '청구항 21')와 메시지 청구항 블록의 항 번호.
+function askedClaims(text){const out=new Set();for(const m of (text||"").matchAll(/(?:제\s*)?(\d{1,3}(?:\s*[·,~\-]\s*\d{1,3})*)\s*항(?!목)|청구항\s*(\d{1,3})/g))for(const n of (m[1]||m[2]).split(/[·,~\-]/))out.add(+n.trim());return [...out];}
+function claimNumbers(m){return new Set([...claimOf(m).matchAll(/【\s*청구항\s*(\d+)\s*】|\[\s*청구항\s*(\d+)\s*\]/g)].map(x=>+(x[1]||x[2])));}
+// 요청에 적은 항이 고른 대상에 하나도 없으면 그 항이 있는 가장 최근 메시지(없으면 null)를 함께 돌려준다.
+function targetMismatch(text,target){const asked=askedClaims(text);if(!asked.length||!target)return null;const have=claimNumbers(target.m);if(asked.some(n=>have.has(n)))return null;
+  return {asked,found:reviewCandidates().find(c=>c.m.id!==target.m.id&&asked.some(n=>claimNumbers(c.m).has(n)))||null};}
 // 고른 판례 도구(여러 개, 패널 순서). 권리행사 점검은 대상 청구항이 있어야 고를 수 있다.
 function caselawPick(){const target=tools.caselaw.has("enforce")?reviewTarget():null;const list=CASELAW_TOOLS.map(([t])=>t).filter(t=>tools.caselaw.has(t)&&(t!=="enforce"||target));return list.length?{tools:list,target}:null;}
 // 서버의 review_target와 같은 규칙: 첫 머리줄부터 마지막 청구항 끝(제목·※·구분선·코드 울타리 앞)까지.
