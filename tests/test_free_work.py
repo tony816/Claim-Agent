@@ -473,3 +473,24 @@ def test_feedback_phrases_default_save_validate_and_reset(workspace):
     (workspace.folder / phrases.FILE).write_text("{broken", encoding="utf-8")
     assert workspace.phrases()["custom"] is False                       # an unreadable file falls back to the defaults
     assert workspace.reset_phrases() == dict(phrases=phrases.defaults(), custom=False)
+
+
+CLAIM_8 = ("【청구항 8】\n제1항에 있어서,\n상기 리드 지지부는,\n"
+           "바디와, 상기 바디의 일측에 복수의 구획 영역을 형성하도록 상기 바디로부터 돌출되는 복수의 돌출부를 포함하고,\n"
+           "상기 복수의 구획 영역에 각각 상기 히트리드 모듈이 결합됨으로써 복수의 상기 히트리드 모듈에 하나씩 배치된 복수의 상기 제2 전력 전달부를 "
+           "상기 복수의 구획 영역에 걸쳐 배치된 하나의 상기 제1 전력 전달부에 접속시키는,\n핵산 증폭 장치.")
+
+
+def test_a_blanket_fix_request_after_review_asks_for_the_smallest_edit():
+    """Regression for web-85da61b7: '도구에 따라 수정' on claim 8 made the agent build in an extension direction and
+    per-region connection from the drawings, when the user only wanted '복수의 상기 X' turned into a count. A blanket
+    fix request keeps the sentence and the user's words; premise-adding findings become candidates, not wording."""
+    text = free_work.FOLLOW_UP_REQUEST.format(labels="문체 조정, 통사·범위 검수", note="도구에 따라 수정", target=CLAIM_8)
+    fix = text[text.index("고칠 때:"):text.index("답할 때:")]
+    assert fix.index("최소 수정이 기본이다") < fix.index("요청이 무엇을 고치라는 것인지")    # the default comes before any finding is applied
+    assert "`상기 X가 복수 개`" in fix and "새 구성·위치·방향·연결 구조를 더하지 않는다" in fix
+    assert "`도구에 따라 수정`" in fix                               # the request that went wrong is named as a blanket one
+    # Adding a premise needs the user to point at that finding or ask for it; otherwise it is reported as a candidate.
+    assert "짚어 고치라고 하거나 전제·구조를 더하라고 할 때만" in fix and "`못 고친 곳`에 더할 전제 후보를 적는다" in fix
+    assert "(이유 또는 더할 전제 후보)" in fix
+    assert text.endswith("사용자 요청: 도구에 따라 수정\n\n대상 청구항:\n" + CLAIM_8)
