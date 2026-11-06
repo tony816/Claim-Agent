@@ -221,18 +221,39 @@ class Workspace:
     def persist(self, session: dict) -> None:
         save_json(self.directory(session["id"]) / "session.json", session)
 
+    def session_traces(self, session: dict) -> tuple[list[Path], list[Path]]:
+        """Everything on disk a conversation left outside its folder: pipeline runs and request (job) folders."""
+        runs_dir = self.cfg.path("runs_dir")
+        requests = self.root / ".tui" / "requests"
+        run_ids = {session.get("run_id")} | {m.get("pipeline_run_id") for m in session["messages"]}
+        log_ids = {m.get("log_id") for m in session["messages"]} | {m.get("advice_log") for m in session["messages"]}
+        safe = re.compile(r"[A-Za-z0-9_-]+")
+        runs = [runs_dir / r for r in run_ids if isinstance(r, str) and safe.fullmatch(r)]
+        logs = [requests / r for r in log_ids if isinstance(r, str) and safe.fullmatch(r)]
+        return runs, logs
+
     def delete(self, sid: str) -> None:
-        """Remove a conversation and its uploads; pipeline runs under runs/ are kept for the audit trail."""
+        """Remove a conversation from disk: its folder and uploads, its pipeline runs under runs/, its request folders
+        under .tui/requests/ and its evaluation lines. A run another conversation also points at is kept."""
         import shutil
+
+        from . import evaluations
 
         with self.lock:
             folder = self.directory(sid)
             job = self.jobs.get(sid)
             if job and not job["done"]:
                 raise ValueError("응답 중인 대화입니다. 먼저 중지한 뒤 삭제하세요.")
+            if any(self.advice_jobs.get(m["id"], {}).get("done") is False for m in self.sessions[sid]["messages"]):
+                raise ValueError("도구 추천이 끝난 뒤 삭제하세요.")
+            session = self.sessions[sid]
+            runs, logs = self.session_traces(session)
+            shared = {p for other in self.sessions.values() if other["id"] != sid for p in self.session_traces(other)[0]}
             self.jobs.pop(sid, None)
             del self.sessions[sid]
-            shutil.rmtree(folder, ignore_errors=True)
+            for path in [folder, *logs, *(r for r in runs if r not in shared)]:
+                shutil.rmtree(path, ignore_errors=True)
+            evaluations.forget(self.folder, sid)
 
     def set_work_mode(self, sid: str, mode) -> dict:
         """게이트 자동 (every message classified, claim wording through the full gates) or 자유 작업 (CLAUDE.md 자유 작업 모드)."""
@@ -774,6 +795,7 @@ class Workspace:
             save_json(job_dir / "advice-request.json", request)
             settings = self.pin_settings(job_dir, session)
             message["advice"] = dict(status="running", target=request["target"], started=time.time())
+            message["advice_log"] = job_dir.name     # so deleting the conversation also removes this folder
             self.persist(session)
             job = dict(process=None, done=False, stopped=False, request=request)
             self.advice_jobs = {k: v for k, v in self.advice_jobs.items() if not v["done"]}

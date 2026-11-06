@@ -477,6 +477,27 @@ def test_delete_session_keeps_others_and_refuses_while_running(workspace, fake_c
     assert gone not in web.Workspace(workspace.root).sessions
 
 
+def test_delete_session_removes_its_runs_requests_and_evaluations(workspace):
+    from claim_agent import evaluations
+
+    gone, keep = workspace.create()["id"], workspace.create()["id"]
+    runs = workspace.cfg.path("runs_dir")
+    requests = workspace.root / ".tui" / "requests"
+    for path in (runs / "web-own", runs / "web-shared", runs / "web-other", requests / "web-log", requests / "advice-x", requests / "web-keep"):
+        path.mkdir(parents=True)
+        (path / "state.json").write_text("{}", encoding="utf-8")
+    workspace.sessions[gone].update(run_id="web-own", messages=[
+        dict(id="a", role="assistant", text="", pipeline_run_id="web-shared", log_id="web-log", advice_log="advice-x"),
+        dict(id="b", role="assistant", text="", pipeline_run_id="../escape")])
+    workspace.sessions[keep].update(run_id="web-other", messages=[dict(id="c", role="assistant", text="", pipeline_run_id="web-shared", log_id="web-keep")])
+    evaluations.append(workspace.folder, dict(session=gone, message="a"))
+    evaluations.append(workspace.folder, dict(session=keep, message="c"))
+    workspace.delete(gone)
+    assert not (runs / "web-own").exists() and not (requests / "web-log").exists() and not (requests / "advice-x").exists()
+    assert (runs / "web-shared").exists() and (runs / "web-other").exists() and (requests / "web-keep").exists()
+    assert [r["session"] for r in evaluations.latest(workspace.folder)] == [keep]
+
+
 def test_launcher_restarts_a_server_built_from_other_code(workspace, tmp_path):
     import importlib.util
 

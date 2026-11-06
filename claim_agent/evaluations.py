@@ -66,6 +66,27 @@ def append(folder: Path, record: dict) -> None:
         stream.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+def forget(folder: Path, session: str) -> None:
+    """Drop every line of one deleted conversation (the web's 대화 삭제 removes its data from disk)."""
+    path = folder / FILE
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    kept = []
+    for line in lines:
+        try:
+            if json.loads(line).get("session") == session:
+                continue
+        except (ValueError, AttributeError):
+            pass
+        kept.append(line)
+    if len(kept) != len(lines):
+        temp = path.with_suffix(".tmp")
+        temp.write_text("".join(k + "\n" for k in kept), encoding="utf-8")
+        temp.replace(path)
+
+
 def latest(folder: Path) -> list[dict]:
     """The newest record of each evaluated answer, oldest first; unreadable lines are skipped."""
     found: dict[tuple, dict] = {}

@@ -285,7 +285,7 @@ async function open(id){
 }
 async function deleteSession(id,title){
   if(state.busy||state.uploading)return;
-  if(!confirm(`"${title}" 대화와 첨부 파일을 삭제할까요? 청구항 작업 기록(runs/)은 남습니다.`))return;
+  if(!confirm(`"${title}" 대화와 첨부 파일, 이 대화의 작업 기록(runs/·요청 폴더·평가 기록)을 로컬에서 영구 삭제할까요? 되돌릴 수 없습니다.`))return;
   await api("/api/delete",{id});drafts.delete(id);localStorage.removeItem("draft-"+id);
   if(state.view==="project"&&state.projectData){await openProject(state.projectData.id);return;}
   if(id!==state.id){await list();return;}
