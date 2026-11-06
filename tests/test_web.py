@@ -682,3 +682,16 @@ def test_skill_system_prompt_carries_the_skill_and_forbids_claim_wording():
 
     system = skill_tool.SKILL_SYSTEM.format(label="형태학적 분석", name="morphological-analysis", body=skill_tool.instructions("morphological-analysis"))
     assert "교차 일관성" in system and "【청구항 N】" in system and "계산 미실행" in system
+
+
+def test_morphological_analysis_runs_to_the_end_and_sync_keeps_the_edited_copy(tmp_path):
+    from claim_agent import skill_tool
+
+    body = skill_tool.instructions("morphological-analysis")
+    assert "첫 응답 하나에서" in body and "평가까지" in body and "자동 선택:" in body
+    assert "사용자가 `/평가` 또는 \"평가 시작\"을 명시했을 때만" not in body and "확정한 뒤에 진행한다" not in body
+    before = (skill_tool.SKILL_DIR / "morphological-analysis" / "SKILL.md").read_bytes()
+    (tmp_path / "morphological-analysis").mkdir()
+    (tmp_path / "morphological-analysis" / "SKILL.md").write_text("---\nname: x\n---\n계정 사본", encoding="utf-8")
+    assert "morphological-analysis" not in skill_tool.sync(tmp_path)
+    assert (skill_tool.SKILL_DIR / "morphological-analysis" / "SKILL.md").read_bytes() == before

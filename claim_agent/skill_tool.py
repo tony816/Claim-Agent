@@ -4,7 +4,7 @@ The skill's SKILL.md is copied into `claim_agent/skills/<name>/` from the user's
 cache of account skills; `sync` refreshes the copies from it). A turn sends the composer text with the skill's
 instructions as the system prompt, in either work mode, without the router or a claim role. The answer is a thinking aid:
 it writes no claim wording (claims go through the gates or 자유 작업), it is not raw material and it creates no LOCK.
-Skill turns stay in the conversation history so a skill with stages (발산 → 상자 → 평가) can continue on the next message.
+Skill turns stay in the conversation history so a skill can continue on the next message (형태학적 분석's 축 추가·기준 commands).
 """
 from __future__ import annotations
 
@@ -21,8 +21,11 @@ SKILL_DIR = Path(__file__).with_name("skills")
 # name → (panel label, one-line description)
 SKILLS = {
     "problem-definition": ("문제 정의", "막막한 문제를 모호한 단어 짚기→구체화→필요 요소→필요 가치→목적 지향 재진술 순서로 한 줄 문제 정의로 바꿉니다"),
-    "morphological-analysis": ("형태학적 분석", "기존 해에서 차이 축·전제 축을 뽑아 발산하고(/발산), 상자·교차 일관성으로 조합 공간을 만든 뒤(/상자) 요청 시에만 평가합니다(/평가)"),
+    "morphological-analysis": ("형태학적 분석", "기존 해에서 차이 축·전제 축을 뽑아 발산하고, 상자·교차 일관성으로 조합 공간을 만든 뒤 평가까지 한 번의 답에서 확인 없이 끝냅니다"),
 }
+# Skills whose copy here was edited for this app; `sync` keeps it unless forced.
+# morphological-analysis: the first answer runs 발산 → 상자+CCA → 평가 to the end without asking (사용자 결정 2026-11-06).
+LOCAL_EDITS = {"morphological-analysis"}
 SKILL_ROLE = "Skills"
 SKILL_SYSTEM = """너는 사용자가 작업 도구의 Skills에서 고른 '{label}' 스킬로 답하는 일반 에이전트다. 아래 스킬 지침을 그대로 따른다.
 
@@ -77,14 +80,18 @@ def claude_cache() -> Path | None:
     return max(found, key=lambda p: p.stat().st_mtime) if found else None
 
 
-def sync(source: Path | None = None) -> list[str]:
-    """Copy the SKILL.md of every skill in SKILLS from the user's Claude skills folder; returns the names copied."""
+def sync(source: Path | None = None, force: bool = False) -> list[str]:
+    """Copy the SKILL.md of every skill in SKILLS from the user's Claude skills folder; returns the names copied.
+
+    Skills in LOCAL_EDITS keep the copy edited here unless `force` is set."""
     source = source or claude_cache()
     if source is None:
         raise FileNotFoundError("Claude 데스크톱 앱의 스킬 폴더를 찾지 못했습니다. --source로 skills 폴더를 지정하세요.")
     copied = []
     for name in SKILLS:
         path = source / name / "SKILL.md"
+        if name in LOCAL_EDITS and not force:
+            continue
         if path.exists():
             (SKILL_DIR / name).mkdir(parents=True, exist_ok=True)
             shutil.copyfile(path, SKILL_DIR / name / "SKILL.md")
@@ -97,4 +104,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Claude 계정 스킬(문제 정의·형태학적 분석)을 작업 도구 Skills로 다시 복사합니다.")
     parser.add_argument("--source", type=Path, help="SKILL.md 폴더들이 있는 skills 폴더 (기본: Claude 데스크톱 앱 캐시)")
-    print("복사함:", ", ".join(sync(parser.parse_args().source)) or "없음")
+    parser.add_argument("--force", action="store_true", help="앱에서 고친 사본(" + ", ".join(sorted(LOCAL_EDITS)) + ")도 덮어씁니다")
+    args = parser.parse_args()
+    print("복사함:", ", ".join(sync(args.source, args.force)) or "없음")
+    if not args.force:
+        print("유지함(앱에서 고친 사본):", ", ".join(sorted(LOCAL_EDITS)))

@@ -149,7 +149,7 @@ const CASELAW_TOOLS=[["enforce","권리행사 점검","대상 청구항에서 �
 const OA_TOOLS=[["oa_dependents","종속항 역산","등록 독립항에 합쳐져 방어선이 된 한정 유형을 분야별로 세고, 내 종속항이 그 유형을 덮는지 봅니다"],["oa_gap","독립항 갭","등록 사례의 최초 독립항과 등록 독립항을 나란히 놓아 처음에 얼마나 넓게 썼다가 좁혔는지, 신규성 거절된 넓은 독립항의 전형을 봅니다"],["oa_numeric","수치한정 뒷받침","수치·조건 한정이 다투어진 방식(겹침·최적화·불명확·뒷받침)을 세고 명세서에 범위·실시예·비교예를 적어 둘 체크리스트를 봅니다"]];
 const OA_LABEL=Object.fromEntries(OA_TOOLS.map(([id,label])=>[id,label]));
 // Skills(두 작업 방식 모두): 사용자 Claude 계정의 스킬 지침으로 일반 에이전트가 한 턴 답한다. 한 번에 하나만 고르고, 고른 채로 두면 다음 메시지도 그 스킬로 간다.
-const SKILLS=[["problem-definition","문제 정의","막막한 문제를 모호한 단어 짚기→구체화→필요 요소→필요 가치→목적 지향 재진술 순서로 한 줄 문제 정의로 바꿉니다"],["morphological-analysis","형태학적 분석","기존 해에서 차이 축·전제 축을 뽑아 발산하고(/발산), 상자·교차 일관성으로 조합 공간을 만든 뒤(/상자) 요청 시에만 평가합니다(/평가)"]];
+const SKILLS=[["problem-definition","문제 정의","막막한 문제를 모호한 단어 짚기→구체화→필요 요소→필요 가치→목적 지향 재진술 순서로 한 줄 문제 정의로 바꿉니다"],["morphological-analysis","형태학적 분석","기존 해에서 차이 축·전제 축을 뽑아 발산하고, 상자·교차 일관성으로 조합 공간을 만든 뒤 평가까지 한 번의 답에서 확인 없이 끝냅니다"]];
 const SKILL_LABEL=Object.fromEntries(SKILLS.map(([id,label])=>[id,label]));
 const LOOKUP_TOOLS=[...CASELAW_TOOLS,...OA_TOOLS];
 const CASELAW_LABEL=Object.fromEntries(LOOKUP_TOOLS.map(([id,label])=>[id,label]));   // 판례·OA 도구 이름(같은 조회 경로)
