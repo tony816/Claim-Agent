@@ -696,6 +696,35 @@ class Workspace:
             session["updated"] = time.time()
             self.persist(session)
 
+    def skill(self, sid: str, data: dict) -> None:
+        """작업 도구의 Skills, in both work modes: one general-agent turn under the user's own skill (문제 정의·형태학적 분석).
+        No router and no claim role; the answer stays in the history so a staged skill continues on the next message."""
+        from . import skill_tool
+
+        name = data.get("skill")
+        if name not in skill_tool.SKILLS:
+            raise ValueError("지원하지 않는 스킬입니다.")
+        with self.lock:
+            folder = self.directory(sid)
+            session = self.sessions[sid]
+            if self.jobs.get(sid) and not self.jobs[sid]["done"]:
+                raise ValueError("현재 응답을 완료하거나 중지한 뒤 Skills를 쓰세요.")
+            text = str(data.get("text") or "").strip()
+            if not text or len(text) > 200000:
+                raise ValueError("Skills에 보낼 문제·주제를 입력창에 적으세요. 최대 20만 글자까지 보낼 수 있습니다.")
+            selected = data.get("files", [])
+            known = {item["id"]: item for item in session["files"]}
+            if not isinstance(selected, list) or any(not isinstance(x, str) or x not in known for x in selected):
+                raise ValueError("이 대화에 첨부된 파일만 사용할 수 있습니다.")
+            selected = list(dict.fromkeys(selected))
+            self.require_connection(session)
+            preset = self.project_inputs(session)
+            request = dict(text=text, skill=name, files=[str(validate_attachment(folder / "uploads" / fid / known[fid]["name"]).path) for fid in selected],
+                           project_attachments=preset["attachments"], history=(read_state(folder / "history.json") or {}).get("history", []),
+                           model=self.session_cfg(session).default_model, instructions=preset["instructions"])
+            self.spawn_chat(sid, request, dict(text=f"[Skills · {skill_tool.label(name)}] {text}", files=[known[f] for f in selected], skill=name),
+                            "SKILL", files=selected, answer=dict(skill=name))
+
     def phrases(self) -> dict:
         from . import phrases
 
@@ -1489,6 +1518,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.json({"ok": True})
             elif url.path == "/api/caselaw":
                 workspace.caselaw(str(data.get("id", "")), data)
+                self.json({"ok": True})
+            elif url.path == "/api/skill":
+                workspace.skill(str(data.get("id", "")), data)
                 self.json({"ok": True})
             elif url.path == "/api/evaluation":
                 self.json(workspace.evaluate(str(data.get("id", "")), data))

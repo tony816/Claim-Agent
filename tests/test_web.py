@@ -650,3 +650,35 @@ def test_polling_payload_stays_flat_while_the_log_grows(workspace, fake_chat):
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+def test_skill_turn_runs_the_chosen_skill_in_either_mode(workspace, fake_chat):
+    from claim_agent import skill_tool
+
+    for name in skill_tool.SKILLS:
+        body = skill_tool.instructions(name)
+        assert body and not body.startswith("---")
+    sid = workspace.create()["id"]          # 게이트 자동 대화에서도 쓴다
+    with pytest.raises(ValueError, match="지원하지 않는"):
+        workspace.skill(sid, {"skill": "pdf", "text": "x"})
+    with pytest.raises(ValueError, match="입력창"):
+        workspace.skill(sid, {"skill": "problem-definition", "text": "  "})
+    workspace.skill(sid, {"skill": "problem-definition", "text": "청구항을 크게 고쳐야 하는데 막막함"})
+    wait_for(lambda: not workspace.snapshot(sid)["running"])
+    user, answer = workspace.sessions[sid]["messages"]
+    assert user["mode"] == answer["mode"] == "SKILL" and answer["skill"] == "problem-definition" and answer["status"] == "complete"
+    assert user["text"].startswith("[Skills · 문제 정의]")
+    request = json.loads((workspace.root / ".tui" / "requests" / answer["log_id"] / "chat.json").read_text(encoding="utf-8"))
+    assert request["skill"] == "problem-definition" and request["text"] == "청구항을 크게 고쳐야 하는데 막막함"
+    # 단계가 있는 스킬은 다음 메시지에서 앞 턴을 읽는다
+    workspace.skill(sid, {"skill": "morphological-analysis", "text": "/상자"})
+    wait_for(lambda: not workspace.snapshot(sid)["running"])
+    second = json.loads((workspace.root / ".tui" / "requests" / workspace.sessions[sid]["messages"][-1]["log_id"] / "chat.json").read_text(encoding="utf-8"))
+    assert len(second["history"]) == 2
+
+
+def test_skill_system_prompt_carries_the_skill_and_forbids_claim_wording():
+    from claim_agent import skill_tool
+
+    system = skill_tool.SKILL_SYSTEM.format(label="형태학적 분석", name="morphological-analysis", body=skill_tool.instructions("morphological-analysis"))
+    assert "교차 일관성" in system and "【청구항 N】" in system and "계산 미실행" in system

@@ -521,3 +521,15 @@ def test_a_plain_edit_request_in_free_chat_is_a_minimal_edit_too():
     assert "이름이 겹치면 사용자가 쓴 이름을 두고 한쪽만 바꾼다" in rules and "청구항 앞 설명에\n  대안으로 한 줄 제안한다" in rules
     assert "`다시 써 줘`·`새로 작성해 줘`처럼 전면 수정을 요청하면 이 원칙 대신 요청을 따른다" in rules
     assert "기능을 지우기보다 자료가 주는 전제를 더해 닫는다" not in rules   # the premise is added only when the user points at it
+
+
+def test_skill_turn_sends_the_skill_as_system_prompt(rt):
+    from claim_agent import skill_tool
+
+    provider = ScriptedProvider({skill_tool.SKILL_ROLE: ["P_ 막막함\n └ 짚은 단어: 한번에"]})
+    request = dict(text="막막함", skill="problem-definition", files=[], history=[], model="m", instructions="")
+    result = skill_tool.skill_turn(provider, rt.cfg, request)
+    (call,) = provider.calls
+    assert call.role == skill_tool.SKILL_ROLE and "모호한 단어 짚기" in call.system_instruction and "【청구항 N】" in call.system_instruction
+    assert result["effective_mode"] == "SKILL" and result["answer"].startswith("※ Skills · 문제 정의")
+    assert result["history"][-1]["parts"][0]["text"].startswith("P_ 막막함")

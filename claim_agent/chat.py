@@ -187,6 +187,10 @@ def main(argv=None) -> int:
         # chosen gate roles on one message's wording before the agent fixes it. Every other turn is classified first.
         if request.get("review"):
             result = free_work.review_turn(provider, cfg, args.config, request, folder)
+        elif request.get("skill"):
+            from . import skill_tool
+
+            result = skill_tool.skill_turn(provider, cfg, request)
         elif request.get("work_mode") == free_work.FREE:
             result = free_work.free_turn(provider, cfg, request)
         else:
