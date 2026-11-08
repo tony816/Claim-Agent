@@ -656,14 +656,14 @@ class Workspace:
         판례 도구 plus one Jev relevance call when Jev is set up). The answer is the user's reference and stays out of every
         model's context (`conversational`), so the composer text is a finding, a feature or a field, not a message to the agent."""
         from .graph import caselaw as cl
-        from .graph import caselaw_tool, oa_tool
+        from .graph import caselaw_tool, graph_tool, oa_tool
 
         tool = data.get("tool")
-        if tool not in caselaw_tool.TOOLS and tool not in oa_tool.TOOLS:
-            raise ValueError("지원하지 않는 판례·OA 도구입니다.")
-        is_oa = tool in oa_tool.TOOLS
-        label = (oa_tool.TOOLS if is_oa else caselaw_tool.TOOLS)[tool]
-        kind = "OA 도구" if is_oa else "판례 도구"
+        if tool not in caselaw_tool.TOOLS and tool not in oa_tool.TOOLS and tool not in graph_tool.TOOLS:
+            raise ValueError("지원하지 않는 판례·OA·그래프 도구입니다.")
+        is_oa, is_graph = tool in oa_tool.TOOLS, tool in graph_tool.TOOLS
+        label = (oa_tool.TOOLS if is_oa else graph_tool.TOOLS if is_graph else caselaw_tool.TOOLS)[tool]
+        kind = "OA 도구" if is_oa else "그래프 조회" if is_graph else "판례 도구"
         text = str(data.get("text") or "")
 
         def idle() -> None:
@@ -680,8 +680,10 @@ class Workspace:
                 source, claims = self.claim_source(session, data.get("message"))
                 target = ("내 메시지" if source["role"] == "user" else "에이전트 답변") + f" #{session['messages'].index(source) + 1}"
             self.record_use(session, data, [tool], source["id"] if source else None)
-        # Outside the lock: the record files, the DB quote check and Jev take a second or two.
-        if is_oa:
+        # Outside the lock: the record files, the DB quote check, Jev and the graph server take a second or two.
+        if is_graph:
+            answer = graph_tool.run(tool, text=text)
+        elif is_oa:
             answer = oa_tool.run(tool, root=self.cfg.project_root, text=text, claims=claims, target=target)
         else:
             answer = caselaw_tool.run(tool, root=self.cfg.project_root, paths=cl.Paths.from_config(self.cfg), text=text, claims=claims, target=target)
@@ -721,7 +723,7 @@ class Workspace:
             preset = self.project_inputs(session)
             request = dict(text=text, skill=name, files=[str(validate_attachment(folder / "uploads" / fid / known[fid]["name"]).path) for fid in selected],
                            project_attachments=preset["attachments"], history=(read_state(folder / "history.json") or {}).get("history", []),
-                           model=self.session_cfg(session).default_model, instructions=preset["instructions"])
+                           model=self.session_cfg(session).default_model, instructions=preset["instructions"], user_lock=preset["user_lock"])
             self.spawn_chat(sid, request, dict(text=f"[Skills · {skill_tool.label(name)}] {text}", files=[known[f] for f in selected], skill=name),
                             "SKILL", files=selected, answer=dict(skill=name))
 
@@ -776,6 +778,7 @@ class Workspace:
         """What the recommender reads: the answer, the request it answered, the claims a review would run on, the tools
         already run in this conversation, whether material exists, and the saved feedback phrases."""
         from .graph.caselaw_tool import TOOLS as CASELAW_TOOLS
+        from .graph.graph_tool import TOOLS as GRAPH_TOOLS
         from .graph.oa_tool import TOOLS as OA_TOOLS
 
         messages = session["messages"]
@@ -799,7 +802,7 @@ class Workspace:
             if m["role"] != "user" or m.get("mode") not in ("REVIEW", CASELAW):
                 continue
             detail = m.get("review") or m.get("caselaw") or {}
-            names = [REVIEW_ROLES[r] for r in detail.get("roles") or [] if r in REVIEW_ROLES] or [CASELAW_TOOLS.get(detail.get("tool")) or OA_TOOLS.get(detail.get("tool"), "")]
+            names = [REVIEW_ROLES[r] for r in detail.get("roles") or [] if r in REVIEW_ROLES] or [CASELAW_TOOLS.get(detail.get("tool")) or OA_TOOLS.get(detail.get("tool")) or GRAPH_TOOLS.get(detail.get("tool"), "")]
             where = number.get(detail.get("source"))
             ran.append(", ".join(n for n in names if n) + (f" → 메시지 #{where}" if where else ""))
         uploads = [f["name"] for f in session.get("files", [])]

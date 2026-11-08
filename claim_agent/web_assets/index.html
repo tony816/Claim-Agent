@@ -74,7 +74,6 @@
   </div>
   <footer>
     <div id="error" role="alert" hidden></div>
-    <p id="free-banner" class="free-banner" hidden><strong>자유 작업 모드</strong> · 일반 에이전트의 답변은 게이트를 거치지 않은 <strong>미검수 초안</strong>입니다. 오른쪽 <strong>작업 도구</strong>에서 검수를 고르고 Enter를 누르면 검수 결과를, 입력창에 요청을 함께 적으면 그 방향으로 검수한 뒤 요청대로 처리한 답을 받습니다(LOCK 근거 아님). 잠정 LOCK이 필요하면 위에서 <strong>게이트 자동</strong>으로 바꿔 작성을 요청하세요.</p>
     <form id="composer">
       <div id="tool-chip" class="tool-chip" role="status" hidden></div>
       <div id="attachments" aria-label="보낼 첨부 파일"></div>
@@ -107,6 +106,11 @@
     <h3 id="oa-title">OA 도구</h3>
     <p class="tool-note">두 작업 방식 모두에서 씁니다. 등록 사례 300건의 심사 경과 요약(OA 그래프, 의견서 본문 없음)으로 명세서·청구항 작성을 역산해 봅니다. 고른 대상 청구항과 입력창의 분야·기술 낱말(IPC)을 함께 보며, 모델을 부르지 않습니다. 답은 <strong>대화 기록에 넣지 않고</strong>, 한정·후보를 만들지 않는 참고입니다.</p>
     <div id="oa-buttons" class="review-buttons" role="group" aria-label="OA 도구 (여러 개 고를 수 있음)"></div>
+  </section>
+  <section class="tool-section" aria-labelledby="graph-title">
+    <h3 id="graph-title">그래프 조회</h3>
+    <p class="tool-note">두 작업 방식 모두에서 씁니다. Neo4j GraphRAG 커넥터(서버 주소·토큰은 <code>.env</code>의 <code>CLAIM_AGENT_NEO4J_MCP_URL</code>·<code>CLAIM_AGENT_NEO4J_MCP_TOKEN</code>)에 올라간 데이터셋을 찾아봅니다. 입력창 앞에 <code>@데이터셋</code>을 쓰면 그것만 봅니다. 모델을 부르지 않으며, 답은 <strong>대화 기록에 넣지 않는</strong> 참고입니다(자동 추출 그래프 — 원자료·게이트 근거 아님).</p>
+    <div id="graph-buttons" class="review-buttons" role="group" aria-label="그래프 조회 (여러 개 고를 수 있음)"></div>
   </section>
   <section class="tool-section" aria-labelledby="skills-title">
     <h3 id="skills-title">Skills</h3>

@@ -68,7 +68,7 @@ def skill_turn(provider: LLMProvider, cfg, request: dict) -> dict:
     system = SKILL_SYSTEM.format(label=label(name), name=name, body=instructions(name))
     gen = GenParams(temperature=0.5, thinking_level=FREE_THINKING, max_output_tokens=cfg.model.max_output_tokens)
     result = generate_turn(provider, request["model"], request.get("history", []), message, None, request.get("instructions"),
-                           sent=sent, system=system, role=SKILL_ROLE, gen=gen)
+                           sent=sent, system=system, role=SKILL_ROLE, gen=gen, user_lock=request.get("user_lock"))
     answer = LABEL.format(label=label(name)) + "\n\n" + result["answer"] + "\n\n" + usage_note(provider.usage, time.time() - started)
     return {**result, "answer": answer, "effective_mode": "SKILL", "status": "complete"}
 

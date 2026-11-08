@@ -527,9 +527,11 @@ def test_skill_turn_sends_the_skill_as_system_prompt(rt):
     from claim_agent import skill_tool
 
     provider = ScriptedProvider({skill_tool.SKILL_ROLE: ["P_ 막막함\n └ 짚은 단어: 한번에"]})
-    request = dict(text="막막함", skill="problem-definition", files=[], history=[], model="m", instructions="")
+    request = dict(text="막막함", skill="problem-definition", files=[], history=[], model="m", instructions="",
+                   user_lock="【청구항 20】 히트리드 모듈을 각각 독립 제어하는 핵산 증폭 장치.")
     result = skill_tool.skill_turn(provider, rt.cfg, request)
     (call,) = provider.calls
+    assert "【청구항 20】 히트리드 모듈을 각각 독립 제어하는" in call.system_instruction   # 프로젝트에 입력한 청구항을 스킬도 읽는다
     assert call.role == skill_tool.SKILL_ROLE and "모호한 단어 짚기" in call.system_instruction and "【청구항 N】" in call.system_instruction
     assert result["effective_mode"] == "SKILL" and result["answer"].startswith("※ Skills · 문제 정의")
     assert result["history"][-1]["parts"][0]["text"].startswith("P_ 막막함")

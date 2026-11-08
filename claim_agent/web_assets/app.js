@@ -151,15 +151,18 @@ const OA_LABEL=Object.fromEntries(OA_TOOLS.map(([id,label])=>[id,label]));
 // Skills(두 작업 방식 모두): 사용자 Claude 계정의 스킬 지침으로 일반 에이전트가 한 턴 답한다. 한 번에 하나만 고르고, 고른 채로 두면 다음 메시지도 그 스킬로 간다.
 const SKILLS=[["problem-definition","문제 정의","막막한 문제를 모호한 단어 짚기→구체화→필요 요소→필요 가치→목적 지향 재진술 순서로 한 줄 문제 정의로 바꿉니다"],["morphological-analysis","형태학적 분석","기존 해에서 차이 축·전제 축을 뽑아 발산하고, 상자·교차 일관성으로 조합 공간을 만든 뒤 평가까지 한 번의 답에서 확인 없이 끝냅니다"]];
 const SKILL_LABEL=Object.fromEntries(SKILLS.map(([id,label])=>[id,label]));
-const LOOKUP_TOOLS=[...CASELAW_TOOLS,...OA_TOOLS];
+// 그래프 조회(두 작업 방식 모두): Neo4j GraphRAG MCP(.env의 CLAIM_AGENT_NEO4J_MCP_URL)에 올라간 KG 데이터셋을 찾아본다. 모델 없이 답하고, 판례·OA 도구처럼 대화 기록에 넣지 않는다.
+const GRAPH_TOOLS=[["kg_search","원문 검색","입력창의 말로 그래프 원문을 뜻+낱말로 찾고, 그 원문의 개체·관계를 함께 봅니다 · 앞에 @데이터셋을 쓰면 그것만"],["kg_entity","개체 보기","이름에 입력한 말이 든 개체와 연결된 관계·출처를 봅니다 · 예: '@kr-oa-300 진보성'"],["kg_datasets","데이터셋 목록","서버에 올라간 데이터셋과 문서·청크·개체 수를 봅니다 · 입력은 필요 없습니다"]];
+const GRAPH_LABEL=Object.fromEntries(GRAPH_TOOLS.map(([id,label])=>[id,label]));
+const LOOKUP_TOOLS=[...CASELAW_TOOLS,...OA_TOOLS,...GRAPH_TOOLS];
 const CASELAW_LABEL=Object.fromEntries(LOOKUP_TOOLS.map(([id,label])=>[id,label]));   // 판례·OA 도구 이름(같은 조회 경로)
-function lookupKind(tool){return OA_LABEL[tool]?"OA 도구":"판례 도구";}
+function lookupKind(tool){return OA_LABEL[tool]?"OA 도구":GRAPH_LABEL[tool]?"그래프 조회":"판례 도구";}
 function lookupKinds(list){return [...new Set(list.map(lookupKind))].join("·");}
 const CASELAW_PLACEHOLDER={enforce:"Enter → 대상 청구항을 권리행사 판례로 점검합니다 · 입력창의 말은 쓰지 않습니다",find:"지적이나 청구항 문언을 적고 Enter · 예: '대략 수평으로'는 기준면과 허용 각도가 없음",features:"특징을 한 줄에 하나씩 적고 Enter · 유형을 알면 '가열 온도 300~400℃::F-NUMERIC'처럼"};
-function caselawPlaceholder(list){if(list.some(t=>OA_LABEL[t])&&!list.some(t=>t==="find"||t==="features"))return "분야·기술 낱말(IPC 서브클래스가 있으면 함께, 예: 'B65D 용기 뚜껑 힌지')이나 청구항 문언을 적고 Enter";const typed=list.filter(t=>t!=="enforce");return typed.length>1?"지적·문언이나 특징을 적고 Enter · 판례 찾기·특허성 신호가 같은 글로 조회합니다":CASELAW_PLACEHOLDER[typed[0]||list[0]];}
+function caselawPlaceholder(list){if(list.some(t=>t==="kg_search"||t==="kg_entity")&&!list.some(t=>!GRAPH_LABEL[t]))return "찾을 내용이나 개체 이름을 적고 Enter · 앞에 @데이터셋(예: '@kr-oa-300 진보성 거절 뒤 더한 한정')을 쓰면 그 데이터셋만";if(list.some(t=>OA_LABEL[t])&&!list.some(t=>t==="find"||t==="features"))return "분야·기술 낱말(IPC 서브클래스가 있으면 함께, 예: 'B65D 용기 뚜껑 힌지')이나 청구항 문언을 적고 Enter";const typed=list.filter(t=>t!=="enforce");return typed.length>1?"지적·문언이나 특징을 적고 Enter · 판례 찾기·특허성 신호가 같은 글로 조회합니다":CASELAW_PLACEHOLDER[typed[0]||list[0]];}
 // 고른 도구가 입력창의 말을 조회 문장으로 써야 하는가(판례 찾기·특허성 신호).
 // OA 도구는 대상 청구항이 없을 때만 입력이 꼭 있어야 한다.
-function needsQuery(lookup){return !!lookup&&lookup.tools.some(t=>t==="find"||t==="features"||(!!OA_LABEL[t]&&!lookup.target));}
+function needsQuery(lookup){return !!lookup&&lookup.tools.some(t=>t==="find"||t==="features"||t==="kg_search"||t==="kg_entity"||(!!OA_LABEL[t]&&!lookup.target));}
 const CLAIM_HEAD=/^[ \t]*(?:\*\*)?(?:【\s*청구항\s*\d+\s*】|\[\s*청구항\s*\d+\s*\])/m;
 const tools={open:false,roles:new Set(),caselaw:new Set(),skill:null,target:"",options:null,phrases:[],editing:false,adviceFrom:null,via:new Set(),phrasesUsed:[],warned:null};   // target "" = 가장 최근 청구항을 따라감
 // adviceFrom·via·phrasesUsed: 도구 추천에서 고른 답·도구와 입력창에 넣은 멘트. 보낼 때 서버가 그 답의 평가 폼 '사용한 도구'에 기록한다.
@@ -172,7 +175,7 @@ for(const button of document.querySelectorAll("#work-mode button"))button.onclic
 function renderWorkMode(){
   const free=freeMode(),locked=!!state.data?.running||state.busy;
   for(const button of document.querySelectorAll("#work-mode button")){const on=button.dataset.mode===(free?"free":"gated");button.classList.toggle("is-on",on);button.setAttribute("aria-pressed",String(on));button.disabled=locked;}
-  $("free-banner").hidden=!free;$("options").hidden=free;
+  $("options").hidden=free;
 }
 function error(message){$("error").textContent=message;$("error").hidden=!message;}
 async function api(path, body, raw=false){
@@ -181,7 +184,7 @@ async function api(path, body, raw=false){
   if(!response.ok)throw new Error(result.error||"요청을 처리하지 못했습니다.");return result;
 }
 function resize(){const p=$("prompt");p.style.height="auto";p.style.height=Math.min(p.scrollHeight,180)+"px";}
-function controls(){const running=!!state.data?.running,free=freeMode(),pick=reviewPick(),lookup=caselawPick(),typed=!!$("prompt").value.trim();providerLock();renderWorkMode();$("send").hidden=running;$("stop").hidden=!running;$("send").disabled=state.busy||state.uploading>0||(tools.skill?!typed:lookup||pick?needsQuery(lookup)&&!typed:!typed||(!free&&!claimTarget().ok));$("attach").disabled=state.uploading>0;for(const button of document.querySelectorAll("#caselaw-buttons button, #oa-buttons button, #skill-buttons button"))button.disabled=running||state.busy||(button.dataset.tool==="enforce"&&!reviewTarget());$("prompt").placeholder=tools.skill?"Skills · "+SKILL_LABEL[tools.skill]+" — "+(tools.skill==="problem-definition"?"막막한 문제나 고민을 느끼는 그대로 적고 Enter":"탐색할 주제를 적고 Enter · 이어서 /상자, /평가, 더, 전제 더 …")+(lookup?" ("+lookupKinds(lookup.tools)+"도 함께 실행)":""):needsQuery(lookup)?caselawPlaceholder(lookup.tools):pick?"검수자에게 덧붙일 말이 있으면 적고 Enter · 없으면 그냥 Enter"+(lookup?" ("+lookupKinds(lookup.tools)+"도 함께 실행)":""):lookup?(lookup.tools.some(t=>OA_LABEL[t])?"Enter → 대상 청구항을 등록 사례 300건과 견줍니다 · 분야·기술 낱말(IPC)을 적으면 함께 봅니다":CASELAW_PLACEHOLDER.enforce):free?"자유롭게 요청하세요 · 답변은 미검수 초안이며, 작업 도구에서 필요한 검수만 골라 실행합니다":state.data?.run_id?"질문하거나 수정하고 싶은 내용을 알려주세요":"무엇이든 물어보세요 · 청구항 작성은 발명을 설명하거나 자료를 첨부해 주세요";for(const button of document.querySelectorAll("#review-buttons button"))button.disabled=!free||running||state.busy||!reviewTarget();renderChip();}
+function controls(){const running=!!state.data?.running,free=freeMode(),pick=reviewPick(),lookup=caselawPick(),typed=!!$("prompt").value.trim();providerLock();renderWorkMode();$("send").hidden=running;$("stop").hidden=!running;$("send").disabled=state.busy||state.uploading>0||(tools.skill?!typed:lookup||pick?needsQuery(lookup)&&!typed:!typed||(!free&&!claimTarget().ok));$("attach").disabled=state.uploading>0;for(const button of document.querySelectorAll("#caselaw-buttons button, #oa-buttons button, #graph-buttons button, #skill-buttons button"))button.disabled=running||state.busy||(button.dataset.tool==="enforce"&&!reviewTarget());$("prompt").placeholder=tools.skill?"Skills · "+SKILL_LABEL[tools.skill]+" — "+(tools.skill==="problem-definition"?"막막한 문제나 고민을 느끼는 그대로 적고 Enter":"탐색할 주제를 적고 Enter · 이어서 /상자, /평가, 더, 전제 더 …")+(lookup?" ("+lookupKinds(lookup.tools)+"도 함께 실행)":""):needsQuery(lookup)?caselawPlaceholder(lookup.tools):pick?"검수자에게 덧붙일 말이 있으면 적고 Enter · 없으면 그냥 Enter"+(lookup?" ("+lookupKinds(lookup.tools)+"도 함께 실행)":""):lookup?(lookup.tools.every(t=>GRAPH_LABEL[t])?"Enter → 서버의 그래프 데이터셋 목록을 봅니다":lookup.tools.some(t=>OA_LABEL[t])?"Enter → 대상 청구항을 등록 사례 300건과 견줍니다 · 분야·기술 낱말(IPC)을 적으면 함께 봅니다":CASELAW_PLACEHOLDER.enforce):free?"자유롭게 요청하세요 · 답변은 미검수 초안이며, 작업 도구에서 필요한 검수만 골라 실행합니다":state.data?.run_id?"질문하거나 수정하고 싶은 내용을 알려주세요":"무엇이든 물어보세요 · 청구항 작성은 발명을 설명하거나 자료를 첨부해 주세요";for(const button of document.querySelectorAll("#review-buttons button"))button.disabled=!free||running||state.busy||!reviewTarget();renderChip();}
 // ---- 작성 대상: 미지정 / 독립항만 / 특정 항 1개 / 종속항 범위. 서버의 resolve_claim_target와 같은 정규형(2~4,6)을 미리 보여 준다.
 const target={segments:[{from:2,to:8}]};
 function formatTarget(numbers){const a=[...numbers].sort((x,y)=>x-y);if(!a.length)return "";const parts=[];let start=a[0],prev=a[0];for(const n of a.slice(1).concat([null])){if(n!==null&&n===prev+1){prev=n;continue;}parts.push(start===prev?String(start):start+"~"+prev);if(n!==null)start=prev=n;}return parts.join(",");}
@@ -655,7 +658,7 @@ function renderTools(){
   const preview=$("review-preview");preview.hidden=!target;if(target){const block=claimOf(target.m);preview.textContent=block.length>320?block.slice(0,320)+"…":block;}
   $("review-note").textContent=!free?"검수 도구는 자유 작업 모드에서 씁니다. 위쪽에서 자유 작업으로 바꾸세요.":!target?"아직 【청구항 N】 문언이 있는 메시지가 없습니다. 초안을 받거나 청구항을 붙여 넣으면 고를 수 있습니다.":"고른 메시지의 청구항 블록에 고른 검수를 실행합니다. 입력창이 비어 있으면 검수 결과만, 요청을 적으면 그 방향으로 검수한 뒤 요청대로 처리합니다. 여러 개를, 판례 도구와도 함께 고를 수 있고, 결과는 LOCK 근거가 아닙니다.";
   for(const button of $("review-buttons").children){const on=tools.roles.has(button.dataset.role);button.classList.toggle("is-on",on);button.setAttribute("aria-pressed",String(on));}
-  for(const button of [...$("caselaw-buttons").children,...$("oa-buttons").children]){const on=tools.caselaw.has(button.dataset.tool);button.classList.toggle("is-on",on);button.setAttribute("aria-pressed",String(on));}
+  for(const button of [...$("caselaw-buttons").children,...$("oa-buttons").children,...$("graph-buttons").children]){const on=tools.caselaw.has(button.dataset.tool);button.classList.toggle("is-on",on);button.setAttribute("aria-pressed",String(on));}
   for(const button of $("skill-buttons").children){const on=tools.skill===button.dataset.skill;button.classList.toggle("is-on",on);button.setAttribute("aria-pressed",String(on));}
   const lookup=caselawPick(),marked=lookup&&!tools.roles.size?lookup.target:free&&target;   // 대상 청구항을 쓰는 도구가 있을 때만 대화에서 표시한다
   for(const [id,view] of state.nodes)view.article.classList.toggle("review-target",visible&&!!marked&&id===marked.m.id);
@@ -677,12 +680,13 @@ const CASELAW_HINT={enforce:()=>"Enter → 대상 청구항의 권리행사 위�
   features:asked=>asked?"Enter → 특징마다 신규성·진보성 판단 분포와 원자료 확인 질문을 봅니다 · 판정이 아닙니다":"입력창에 특징을 한 줄에 하나씩 적어야 볼 수 있습니다"};
 const OA_HINT=(asked,target)=>!asked&&!target?"대상 청구항이 없으면 입력창에 분야·기술 낱말이나 청구항 문언을 적어야 볼 수 있습니다":"Enter → "+(target?"대상 청구항"+(asked?"과 입력한 말":""):"입력한 말")+"을 등록 사례 300건의 심사 이력과 견줍니다 · 답은 대화 기록에 넣지 않습니다";
 for(const [tool] of OA_TOOLS)CASELAW_HINT[tool]=OA_HINT;
+for(const [tool] of GRAPH_TOOLS)CASELAW_HINT[tool]=()=>"Enter → Neo4j 그래프 서버에서 "+GRAPH_LABEL[tool]+"을 봅니다 · 자동 추출 그래프라 원문으로 확인할 참고이며, 답은 대화 기록에 넣지 않습니다";
 function renderChip(){
   const chip=$("tool-chip");if(chip.hidden||!chip.firstChild)return;const asked=!!$("prompt").value.trim(),lookup=caselawPick();
   const review=!!tools.roles.size&&!!reviewPick(),hints=lookup?[...new Set(lookup.tools.map(t=>CASELAW_HINT[t](asked,!!lookup.target)))]:[];
   if(tools.skill&&!review){chip.querySelector(".tool-chip-label").textContent="Skills"+(lookup?" + "+lookupKinds(lookup.tools).replace(/ 도구/g,"")+" 참고":"");
     chip.querySelector(".tool-chip-hint").textContent=[...(lookup?["Enter → 고른 "+lookupKinds(lookup.tools)+"를 먼저 조회한 뒤 스킬로 보냅니다",...hints]:[]),asked?"Enter → 입력한 말을 '"+SKILL_LABEL[tools.skill]+"' 스킬 지침으로 일반 에이전트에게 보냅니다 · 스킬은 고른 채로 남아 다음 메시지도 이어집니다":"입력창에 문제·주제를 적어야 보낼 수 있습니다"].join("\n");return;}
-  if(!review){chip.querySelector(".tool-chip-label").textContent=lookup?.tools.some(t=>OA_LABEL[t])?(lookup.tools.some(t=>!OA_LABEL[t])?"판례·OA 참고":"OA 참고"):"판례 참고";chip.querySelector(".tool-chip-hint").textContent=hints.join("\n");return;}
+  if(!review){chip.querySelector(".tool-chip-label").textContent=lookup?[...new Set(lookup.tools.map(t=>OA_LABEL[t]?"OA":GRAPH_LABEL[t]?"그래프":"판례"))].join("·")+" 참고":"판례 참고";chip.querySelector(".tool-chip-hint").textContent=hints.join("\n");return;}
   chip.querySelector(".tool-chip-label").textContent=(asked?"검수 + 내 요청":"검수만")+(lookup?" + "+lookupKinds(lookup.tools).replace(/ 도구/g,"")+" 참고":"");
   chip.querySelector(".tool-chip-hint").textContent=(lookup?["Enter → 고른 "+lookupKinds(lookup.tools)+"를 먼저 조회한 뒤 검수를 실행합니다",...hints].join("\n")+"\n":"")+(asked?"Enter → 입력한 요청 방향으로 검수한 뒤 요청대로 처리합니다 (고쳐 달라면 고친 청구항, 아니면 검수 결과로 답)":"Enter → 검수 결과만 받습니다 · 요청을 적으면 그 방향으로 검수하고 요청대로 처리합니다 (예: \"명확성 위주로 봐 줘\", \"지적대로 고쳐 줘\")");
 }
@@ -703,6 +707,12 @@ for(const [tool,label,title] of OA_TOOLS){
   const button=el("button","review-tool");button.type="button";button.dataset.tool=tool;button.setAttribute("aria-pressed","false");button.setAttribute("aria-label",label+" — "+title);button.append(el("strong","",label),el("span","",title));
   button.onclick=()=>{if(tools.caselaw.has(tool))tools.caselaw.delete(tool);else tools.caselaw.add(tool);renderTools();controls();$("prompt").focus();};
   $("oa-buttons").append(button);
+}
+// 그래프 조회도 같은 방식으로 고른다.
+for(const [tool,label,title] of GRAPH_TOOLS){
+  const button=el("button","review-tool");button.type="button";button.dataset.tool=tool;button.setAttribute("aria-pressed","false");button.setAttribute("aria-label",label+" — "+title);button.append(el("strong","",label),el("span","",title));
+  button.onclick=()=>{if(tools.caselaw.has(tool))tools.caselaw.delete(tool);else tools.caselaw.add(tool);renderTools();controls();$("prompt").focus();};
+  $("graph-buttons").append(button);
 }
 // Skills는 한 번에 하나만 고른다(다시 누르면 취소). 고른 채로 두면 Enter마다 그 스킬로 보낸다.
 for(const [skill,label,title] of SKILLS){
