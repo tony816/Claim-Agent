@@ -108,6 +108,15 @@ def test_enforcement_flags_find_risky_wording():
     assert sum(1 for f in flags if f["claim"] == "1" and f["type_code"] == "W05") == 1
 
 
+def test_enforcement_flags_catch_subject_first_configured_to():
+    # '상기 제어부는, …차단하도록 구성되는'은 가장 흔한 기능적 표현이다. 구조 배치('가열하도록 배치되는')는 잡지 않는다.
+    text = ("【청구항 28】\n제27항에 있어서,\n상기 제어부는,\n상기 써멀 사이클의 진행 여부에 기초하여, 상기 가열 부재로의 전력 공급을 차단하도록 구성되는,\n핵산 증폭 장치.\n"
+            "【청구항 27】\n제13항에 있어서,\n상기 가열 부재가 상기 반응 용기의 상부를 가열하도록 배치되는,\n핵산 증폭 장치.")
+    codes = {(f["claim"], f["type_code"]) for f in cl.enforcement_flags(text)}
+    assert ("28", "W02") in codes
+    assert ("27", "W02") not in codes
+
+
 def test_feature_type_guess_uses_words_then_neighbours():
     data = {"records": [{"type_code": "F-SHAPE", "claim_feature": "홀더 브라켓 수직 설치", "deciding_reason": "결로 방지", "other_side": ""}],
             "type_labels": {}}
