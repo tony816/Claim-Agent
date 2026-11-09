@@ -523,6 +523,20 @@ def test_a_plain_edit_request_in_free_chat_is_a_minimal_edit_too():
     assert "기능을 지우기보다 자료가 주는 전제를 더해 닫는다" not in rules   # the premise is added only when the user points at it
 
 
+def test_a_simplify_request_shortens_the_claim_not_the_commentary():
+    """Regression for web session 6f0157af: '설명이 좀 너무 복잡한데 간결하게 가능?' cut only the agent's commentary (claim 28
+    stayed at 350 chars), and each edit turn added unrequested clauses (a '…더라도' concession, an information clause), so the
+    user had to ask three times. A simplify/broaden request now shortens the claim wording and lists what was dropped."""
+    rules = free_work.FREE_SYSTEM
+    assert "`설명이 복잡하다`·`간결하게`" in rules and "청구항 문언을 줄이라는\n  요청이다. 답의 해설만 줄이고 문언을 그대로 두지 않는다" in rules
+    assert "`- 뺀 것: <구성> → 범위 넓어짐(필요하면 종속항으로)`" in rules
+    assert "사용자가 요청하지 않은 새 절(양보 구절, 정보 획득 절, 반대 분기 등)을 스스로 덧붙이지 않는다" in rules
+    text = free_work.FOLLOW_UP_REQUEST.format(labels="문체 조정", note="아직도 설명이 좀 너무 복잡해 더 간결하게", target=CLAIM_11)
+    fix = text[text.index("고칠 때:"):text.index("답할 때:")]
+    assert fix.index("최소 수정이 기본이다") < fix.index("요청이 줄이는 요청")          # the exception names the default it replaces
+    assert "구절을 더해 닫지 않는다" in fix and "스스로 덧붙이지 않고" in fix
+
+
 def test_skill_turn_sends_the_skill_as_system_prompt(rt):
     from claim_agent import skill_tool
 
