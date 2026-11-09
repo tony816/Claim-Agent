@@ -159,6 +159,41 @@ def test_caselaw_turns_show_in_the_conversation_but_never_reach_a_model(workspac
     assert "판례" not in requests[0]["reference"] and requests[0]["reference"] == "초안\n\n" + CLAIMS
 
 
+def test_tool_results_come_back_as_a_fixed_claim_in_free_mode(workspace, monkeypatch):
+    """Regression for web session c26178a0: '두 도구를 사용해서 수정한 19항을 제시해줘' beside 권리행사 점검 + 종속항 역산 gave the
+    two reports only, and the next plain message's agent could not see them. In free mode the batch's answers now go to the
+    general agent with the user's words and the target, and its answer is fixed wording (사용자 결정 2026-11-09)."""
+    requests, users = [], []
+
+    def capture(sid, job, command):
+        requests.append(json.loads(Path(command[command.index("--request") + 1]).read_text(encoding="utf-8")))
+        job["done"] = True
+
+    monkeypatch.setattr(workspace, "execute", capture)
+    monkeypatch.setattr(workspace, "require_connection", lambda session: None)
+    sid = workspace.create(None, free_work.FREE)["id"]
+    workspace.sessions[sid]["messages"] = [dict(id="u", role="user", text="19항 다듬어 줘", mode="FREE"),
+                                           dict(id="a", role="assistant", text="초안\n\n" + CLAIMS, mode="FREE", status="complete")]
+    with pytest.raises(ValueError, match="도구 결과가 없습니다"):
+        workspace.tool_revise(sid, {"message": "a", "text": "고쳐 줘"})
+    workspace.caselaw(sid, {"tool": "enforce", "message": "a"})
+    workspace.tool_revise(sid, {"message": "a", "text": "두 도구를 사용해서 수정한 19항을 제시해줘"})
+    wait_for(lambda: requests)
+    sent = requests[0]
+    assert sent["work_mode"] == free_work.FREE and sent["label"].startswith("※ 미검수 초안 — 작업 도구(권리행사 점검)")
+    report = workspace.sessions[sid]["messages"][3]["text"]
+    assert report in sent["text"] and "두 도구를 사용해서 수정한 19항을 제시해줘" in sent["text"]
+    assert sent["text"].endswith("대상 청구항:\n" + free_work.review_target("초안\n\n" + CLAIMS))
+    asked = workspace.sessions[sid]["messages"][-2]
+    assert asked["mode"] == "FREE" and asked["text"] == "[도구 결과 반영 · 권리행사 점검] 두 도구를 사용해서 수정한 19항을 제시해줘"
+    assert asked["tool_revise"] == dict(tools=["enforce"], source="a")
+    # A gated conversation keeps the tools as reference only: a fix there goes through the gates.
+    gated = workspace.create()["id"]
+    workspace.sessions[gated]["messages"] = [dict(id="a", role="assistant", text="초안\n\n" + CLAIMS, mode="AUTHORING_DRAFT", status="complete")]
+    with pytest.raises(ValueError, match="자유 작업"):
+        workspace.tool_revise(gated, {"message": "a"})
+
+
 def test_caselaw_waits_for_a_running_answer_and_works_in_free_mode(workspace):
     sid = workspace.create(None, free_work.FREE)["id"]
     workspace.jobs[sid] = dict(done=False)

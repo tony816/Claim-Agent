@@ -188,6 +188,35 @@ FOLLOW_UP_REQUEST = """방금 실행한 검수({labels})의 결과를 바탕으�
 대상 청구항:
 {target}"""
 
+# 작업 도구(판례·OA 도구)를 대상 청구항에 실행한 뒤의 일반 에이전트 턴(사용자 결정 2026-11-09: 도구를 쓰면 그 결과로 고친 청구항을
+# 다음 답으로 받는다). The tool answers are code-built records, so they steer which risks to close and never supply a limitation.
+TOOL_REVISED_LABEL = ("※ 미검수 초안 — 작업 도구({labels})의 결과를 참고해 일반 에이전트가 대상 청구항을 고친 문언입니다. 도구 결과는 판례·심사 경과 기록의 "
+                      "미검토 참고이며 원자료·근거가 아닙니다. 고친 문언은 다시 검수하기 전에는 미검수이고 LOCK이 없습니다.")
+TOOL_FOLLOW_UP = """방금 사용자가 대상 청구항에 작업 도구({labels})를 실행했다. 그 결과를 참고해 대상 청구항을 고쳐 제시하라.
+- 도구 결과는 판례·심사 경과 기록에서 코드로 뽑은 미검토 참고이며 발명 원자료가 아니다. 거기 나온 판례·사례의 구성·한정·수치를 청구항에
+  옮기지 않는다. 청구하는 구성은 자료(대화, 첨부, 프로젝트 지침·USER_LOCK·파일)와 거기서 명확히 읽히는 사항에 있어야 한다.
+- 도구가 짚은 위험(기능적 표현, 배타·부정 한정, 전제부 구성, 수치 범위, 여러 실시 주체, 이 분야에서 방어선이 된 한정 유형 등) 가운데
+  대상 청구항에 해당하는 것을 자료가 주는 구조·관계로 닫는다. 자료가 그 구조를 주지 않으면 지어내지 않고 `못 고친 곳`에 적는다.
+- 사용자 요청이 있으면 그 요청을 먼저 따른다(줄이는 요청이면 '줄이는 요청' 규칙). 그 밖에는 최소 수정이 기본이다: 원래 문장 구조와
+  사용자가 고른 단어를 두고, 사용자가 요청하지 않은 새 절을 덧붙이지 않는다.
+- 대상 청구항의 항 번호와 인용관계는 그대로 두고, 대상에 없는 항은 쓰지 않는다. 진보성·등록 가능성을 단정하지 않는다.
+- 답 형식: 첫머리에 `- 바꾼 곳: …`(어느 도구의 어느 지적을 닫았는지) 한두 줄, 닫지 못한 지적이 있으면 `- 못 고친 곳: … (이유)` 한 줄,
+  그다음 고친 청구항 전문만. 도구 결과를 옮겨 적지 않는다.
+
+도구 결과:
+{reports}
+
+사용자 요청: {note}
+
+대상 청구항:
+{target}"""
+
+
+def tool_follow_up_text(labels: str, reports: list[str], note: str, target: str) -> str:
+    """The general agent's request after the tool panel's lookups on one target: every tool answer, the user's words, the claims."""
+    return TOOL_FOLLOW_UP.format(labels=labels, reports="\n\n---\n\n".join(reports), note=note.strip() or "(없음 — 도구 결과로 고쳐 줘)", target=target)
+
+
 # A claim block starts at a header line (bold or bracketed spellings included) and the last one ends at the first
 # markdown heading, note, rule or fence after it — the agent is told to keep its explanation above the claims.
 _HEAD = re.compile(r"^[ \t]*(?:\*\*)?(?:【\s*청구항\s*\d+\s*】|\[\s*청구항\s*\d+\s*\])", re.MULTILINE)
@@ -239,7 +268,7 @@ def free_turn(provider: LLMProvider, cfg, request: dict) -> dict:
     result = generate_turn(provider, request["model"], request.get("history", []), message, None, request.get("instructions"),
                            sent=sent, system=FREE_SYSTEM, role=FREE_ROLE, gen=gen, user_lock=request.get("user_lock"))
     # The label and footnote are for the reader; the history the agent sees next turn keeps its bare answer.
-    answer = UNREVIEWED_LABEL + "\n\n" + result["answer"] + "\n\n" + usage_note(provider.usage, time.time() - started)
+    answer = (request.get("label") or UNREVIEWED_LABEL) + "\n\n" + result["answer"] + "\n\n" + usage_note(provider.usage, time.time() - started)
     return {**result, "answer": answer, "effective_mode": "FREE", "status": "complete"}
 
 

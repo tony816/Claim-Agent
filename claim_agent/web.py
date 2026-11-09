@@ -698,6 +698,45 @@ class Workspace:
             session["updated"] = time.time()
             self.persist(session)
 
+    def tool_revise(self, sid: str, data: dict) -> None:
+        """자유 작업: after the panel's 판례·OA 도구 ran on one target, the general agent fixes that target from their answers
+        (사용자 결정 2026-11-09). The answers of this batch — the lookups after the last other turn, on the same target — go in
+        the agent's request, so this turn and later ones see them; the tool turns themselves stay out of the history."""
+        from . import free_work
+        from .graph import caselaw_tool, oa_tool
+
+        names = {**caselaw_tool.TOOLS, **oa_tool.TOOLS}
+        with self.lock:
+            folder = self.directory(sid)
+            session = self.sessions[sid]
+            if self.jobs.get(sid) and not self.jobs[sid]["done"]:
+                raise ValueError("현재 응답을 완료하거나 중지한 뒤 실행하세요.")
+            if session.get("work_mode") != FREE:
+                raise ValueError("도구 결과 반영은 자유 작업 모드에서 실행합니다.")
+            note = str(data.get("text") or "").strip()
+            if len(note) > 200000:
+                raise ValueError("메시지는 최대 20만 글자까지 보낼 수 있습니다.")
+            source, target = self.claim_source(session, data.get("message"))
+            batch = []
+            for m in reversed(session["messages"]):
+                if m.get("mode") != CASELAW:
+                    break
+                detail = m.get("caselaw") or {}
+                if m["role"] == "assistant" and detail.get("source") == source["id"] and detail.get("tool") in names:
+                    batch.append(m)
+            if not batch:
+                raise ValueError("반영할 판례·OA 도구 결과가 없습니다. 대상 청구항에 도구를 먼저 실행하세요.")
+            batch.reverse()
+            labels = ", ".join(dict.fromkeys(names[m["caselaw"]["tool"]] for m in batch))
+            self.require_connection(session)
+            preset = self.project_inputs(session)
+            request = dict(text=free_work.tool_follow_up_text(labels, [m["text"] for m in batch], note, target), files=[],
+                           project_attachments=preset["attachments"], history=(read_state(folder / "history.json") or {}).get("history", []),
+                           model=self.session_cfg(session).default_model, instructions=preset["instructions"], user_lock=preset["user_lock"],
+                           work_mode=FREE, label=free_work.TOOL_REVISED_LABEL.format(labels=labels))
+            shown = f"[도구 결과 반영 · {labels}] " + (note or "도구 결과로 대상 청구항을 고쳐 줘")
+            self.spawn_chat(sid, request, dict(text=shown, files=[], tool_revise=dict(tools=[m["caselaw"]["tool"] for m in batch], source=source["id"])), "FREE")
+
     def skill(self, sid: str, data: dict) -> None:
         """작업 도구의 Skills, in both work modes: one general-agent turn under the user's own skill (문제 정의·형태학적 분석).
         No router and no claim role; the answer stays in the history so a staged skill continues on the next message."""
@@ -1521,6 +1560,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.json({"ok": True})
             elif url.path == "/api/caselaw":
                 workspace.caselaw(str(data.get("id", "")), data)
+                self.json({"ok": True})
+            elif url.path == "/api/tool-revise":
+                workspace.tool_revise(str(data.get("id", "")), data)
                 self.json({"ok": True})
             elif url.path == "/api/skill":
                 workspace.skill(str(data.get("id", "")), data)

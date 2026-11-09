@@ -333,10 +333,13 @@ async function send(event){
   const used=usesText=>{const out={advice:tools.adviceFrom,via:[...tools.via],phrases:usesText&&!phrasesSent?phrases:[]};if(usesText)phrasesSent=true;return out;};
   const requests=[];
   for(const tool of lookup?.tools||[])requests.push({caselaw:tool,path:"/api/caselaw",body:{id,tool,message:lookup.target?.m.id,text:tool==="enforce"?"":text,...used(tool!=="enforce")}});
+  // 자유 작업에서 판례·OA 도구를 대상 청구항에 실행하면, 도구 결과로 고친 청구항을 이어서 받는다(검수·스킬을 함께 고르지 않았을 때).
+  const revise=free&&!pick&&!skill&&!!lookup?.target&&lookup.tools.some(t=>t==="enforce"||OA_LABEL[t]);
+  if(revise)requests.push({path:"/api/tool-revise",body:{id,message:lookup.target.m.id,text}});
   if(pick)requests.push({path:"/api/review",body:{id,message:pick.m.id,roles:[...tools.roles],text,...used(true)}});
   if(skill)requests.push({path:"/api/skill",body:{id,skill,text,files:state.pending.map(f=>f.id)}});   // 스킬은 고른 채로 둔다(단계를 이어 보낼 수 있게)
   if(!requests.length)requests.push({path:"/api/send",body:free?{id,text,files:state.pending.map(f=>f.id),...used(true)}:{id,text,files:state.pending.map(f=>f.id),target_mode:t.target_mode,target_claim:t.target_claim,target_segments:t.target_segments,dependent:t.dependent,target:t.target,prior_search:$("prior-search").checked}});
-  const keep=!pick&&!skill&&!!lookup&&lookup.tools.every(t=>t==="enforce");        // 권리행사 점검만 실행하면 입력창의 말을 보내지 않으므로 지우지 않는다
+  const keep=!pick&&!skill&&!revise&&!!lookup&&lookup.tools.every(t=>t==="enforce");        // 권리행사 점검만 실행하면 입력창의 말을 보내지 않으므로 지우지 않는다
   let ran=0;
   try{
     // 하나씩 실행하고, 끝난 도구는 고른 목록에서 뺀다(중간에 실패하면 남은 것만 다시 Enter로 실행).
